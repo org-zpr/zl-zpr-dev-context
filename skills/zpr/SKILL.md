@@ -199,15 +199,21 @@ too. When every task is done:
    it does not, the assignee is `mkolehmainen` and there is no human reviewer.
 3. **Request a review from Copilot, if it is available.** Copilot is the
    GitHub-hosted review agent. The installed `gh` has no Copilot option on
-   `gh pr edit`, so use the REST API:
+   `gh pr edit`, and the REST `requested_reviewers` endpoint returns success but
+   silently adds nothing for a bot. Use GraphQL:
 
    ```sh
-   gh api -X POST repos/org-zpr/<repo>/pulls/<N>/requested_reviewers \
-     -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
+   ID=$(gh pr view <N> --repo org-zpr/<repo> --json id -q .id)
+   gh api graphql -f id="$ID" -f query='mutation($id:ID!){
+     requestReviewsByLogin(input:{pullRequestId:$id,
+                                  botLogins:["copilot-pull-request-reviewer"]}){
+       pullRequest{ reviewRequests(first:10){ nodes{ requestedReviewer{
+         ... on Bot{ login } } } } } } }'
    ```
 
-   If the call fails (Copilot is not enabled for the repository), Copilot is not
-   available: add one line saying so to the PR description (`gh pr edit --body`)
+   Copilot is available only if the response lists
+   `copilot-pull-request-reviewer`. If the call errors or that login is missing,
+   Copilot is not available: add one line saying so to the PR description (`gh pr edit --body`)
    and continue. Handle
    Copilot's comments like any other review ("Responding to review comments").
    An unresolved Copilot thread still blocks done-condition 1. Copilot is not the
