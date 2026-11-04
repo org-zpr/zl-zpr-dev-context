@@ -145,16 +145,21 @@ Order across forks is ordinary task ordering: a consumer's task is
 merge" rule moved into pd. pd has no "wait until another target's PR has merged"
 dependency. So when a consumer must pin a *merged* revision of another fork (a
 `zl-zpr-common` submodule bump, a tagged Cargo Git dependency), split that
-consumer into a second plan and order the plans with `pd plan block-by`.
+consumer into a second plan and order the plans with `pd plan block-by`. The
+first plan's body says which tag the second plan needs; tags follow
+`docs/BUILD.md` ("Versions and tags").
 
 **Pickup order.** On *"work on the next issue"* (or *"what is next"*):
 
 1. `zpr-dev update` (pickup step 0 below; the same rules apply).
-2. `pd ready`. If it lists a task, find its target (`pd plan show pN`).
-3. Make the task's worktree (below), `cd` into it, then `pd claim tN` and
-   `pd resume tN`. Check that `TARGET` in the resume output matches the
-   worktree. If the claim fails, remove the worktree and go back to step 2.
-   Then do the required reading the task implies.
+2. `pd ready`. If it lists a task, read its target name with
+   `pd task show tN --json` (`.target`), and the target's repo and branches with
+   `pd plan show pN`.
+3. Make the task's worktree (below) detached at `origin/<base>`, `cd` into it,
+   then `pd claim tN` and `pd resume tN`. Check that `TARGET` in the resume output
+   matches the worktree. If the claim fails, remove the worktree and go back to
+   step 2. Only after the claim succeeds, create the branches (see "The target
+   branch") and do the required reading the task implies.
 4. If no task is ready: run `pd gates` and carry every open gate into your report.
    A gate that waits on the operator must never rot silently. Then fall back to
    `scripts/next-issue.py` and "Picking the next issue".
@@ -165,9 +170,9 @@ for that task from there. Two agents never share a directory. Put the worktree
 inside the workspace, at `~/src/zl_zpr/.worktrees/<fork>--tN`, so `pd` still
 finds the workspace `.pd/` directory. Remove it after `pd done` or `pd release`.
 
-**The target branch.** The first agent to claim a task on a target creates the
-target branch from its base and pushes it, if the fork does not have it yet
-(`git ls-remote --heads origin <target-branch>`). Target branches are named
+**The target branch.** After a successful claim, if the fork does not have the
+target branch yet (`git ls-remote --heads origin <target-branch>`), create it from
+its base and push it. Then make the task branch from the target branch. Target branches are named
 `feature/<topic>`; this is the one exception to the `<login>/<topic>` rule in
 "Git / PR conventions".
 
@@ -190,7 +195,9 @@ every PR.
 normally `core`, which holds `integration-test/`. It is `--blocked-by` the last
 code task of every other target. Run the tier with a `zpr-dev build` manifest
 that pins every target branch, and record the revision of every target it
-tested in the task's notes. Quote that result in each PR it covers.
+tested in the task's notes. Quote that result in each PR it covers. A PR that
+opened before the run is not done (done-condition 2) until its description is
+edited to quote the result.
 
 **Per-task checkpoint.** The approved pd plan is the go-ahead for its tasks. It
 replaces the issue plan comment and the `/go` gate of the GitHub flow.
@@ -198,7 +205,8 @@ replaces the issue plan comment and the `/go` gate of the GitHub flow.
 - If the task has enough detail to implement, implement it. No gate.
 - If the task is too general to implement directly, write your implementation
   plan onto the task with `pd note` before you write code. Start it with
-  `## Notes for humans` in the format of "Plan comment format" below.
+  `## Notes for humans` in the format of "Plan comment format" below, but with no
+  `OPEN QUESTIONS` block: pd has no `/go`, so a question goes in a gate.
 - Open a `questions` gate (see `pd skill`) only for a questionable decision, or
   when the work must depart from the approved plan. Never infer assent: only an
   answered gate decides.
@@ -236,9 +244,12 @@ which has no review does it too.
    review ("Responding to review comments"). An unresolved Copilot thread still
    blocks done-condition 1. Copilot is not the merger and not a human approver.
 4. `pd plan review pN --pr <target-name>=<PR URL>`.
-5. The review loop and "Definition of done" apply to each PR. Review feedback
-   that needs code is a new task on that target (`pd skill`); it merges into the
-   target branch, which updates the open PR. For a plan with no issue,
+5. The review loop and "Definition of done" apply to each PR, with one change:
+   review feedback that needs code does not go straight onto the PR branch. The
+   agent that polls the PR creates a new task on that target
+   (`pd task create --plan pN --target <name> ...`), and that task is worked
+   through the loop above. Its merge into the target branch updates the open PR.
+   Replies on the review threads and re-review requests still go on the PR. For a plan with no issue,
    done-condition 4 is met when the PR has its assignee and its review is
    recorded in `pd`; there is no board Status or issue comment.
 6. Keep polling every PR of the plan as the review loop says. When all of them
@@ -255,7 +266,7 @@ into a pd plan. Then:
 - When the first PR opens, set the issue's board Status to `In review` as in the
   GitHub flow.
 - Each PR description says `Implements <issue URL>`, and one comment on the issue
-  lists every PR of the plan (see "Git / PR conventions"; a closing keyword
+  lists every PR of the plan, edited as each PR opens (see "Git / PR conventions"; a closing keyword
   cannot work across repositories). The operator closes the issue.
 
 **Where the plan text lives.** In the pd plan body, including the interface
@@ -988,7 +999,7 @@ and always re-check before declaring done).
   the reviewer that the feedback is addressed.
 - If a review comment changes the agreed design, note the deviation on the issue.
 - If `mergeStateStatus` is `BEHIND`, update the branch (`gh pr update-branch <N>` or a
-  rebase onto `main`), re-run the build gate, and re-check.
+  rebase onto the PR's base, `zipline` in a fork), re-run the build gate, and re-check.
 
 Only when the four done-conditions hold do you stop. Leave the merge to a human; do
 not run `gh pr merge`.
