@@ -122,60 +122,75 @@ everything already pushed to it, including an open PR's commits.
 once, split into tasks (`tN`) in waves, and each task is claimed under a lease.
 When `pd` is available it is the **first** work source. GitHub issue pickup
 ("Picking the next issue" below) is the fallback. **Run `pd skill` and follow it**
-for the commands, the work loop, gates, and handoff notes. This section adds only
-the ZPR mapping; it does not repeat `pd skill`.
+for the commands, the work loop, targets, gates, and handoff notes. This section
+adds only the ZPR mapping; it does not repeat `pd skill`.
 
 **Detection.** `pd` is available when `pd whoami` exits 0. The URL and token come
 from the workspace `.pd/` directory (`~/src/zl_zpr/.pd/`), so run it from inside
 the workspace. If it fails, use "Picking the next issue" and do not stop.
 
+**How pd maps onto ZPR.** One pd plan is one feature, however many forks it
+touches. Each fork it touches is one **target** of the plan.
+
+| pd | ZPR |
+|---|---|
+| plan | One feature. The body holds the scope, the interface contracts between targets, the acceptance criteria, and the GitHub issue it comes from, if any. |
+| target | One fork. `name` is the fork name without `zl-zpr-` (`compiler`, `visaservice`, `dev-context`); `repo` is `https://github.com/org-zpr/<fork>.git`; `branch` is `feature/<topic>`, the same in every target; `base` is `zipline` (`main` for `zl-zpr-coredns`). |
+| task | Belongs to one target. Its branch is `<target-branch>--tN`, made from the target branch. `pd resume tN` prints it under `TARGET`. |
+| pointer | `pd pointer tN "<fork>:<task-branch> @ <sha>"`, after you push. |
+| review | One PR per target: target branch into its base (see "Finishing a target"). |
+
+Order across forks is ordinary task ordering: a consumer's task is
+`--blocked-by` the definer's task, which is the old "wait for the definer to
+merge" rule moved into pd. pd has no "wait until another target's PR has merged"
+dependency. So when a consumer must pin a *merged* revision of another fork (a
+`zl-zpr-common` submodule bump, a tagged Cargo Git dependency), split that
+consumer into a second plan and order the plans with `pd plan block-by`.
+
 **Pickup order.** On *"work on the next issue"* (or *"what is next"*):
 
 1. `zpr-dev update` (pickup step 0 below; the same rules apply).
-2. `pd ready`. If it lists a task, read its plan (`pd plan show pN`) for the fork,
-   the base branch and the plan branch.
+2. `pd ready`. If it lists a task, find its target (`pd plan show pN`).
 3. Make the task's worktree (below), `cd` into it, then `pd claim tN` and
-   `pd resume tN`. If the claim fails, remove the worktree and go back to step 2.
+   `pd resume tN`. Check that `TARGET` in the resume output matches the
+   worktree. If the claim fails, remove the worktree and go back to step 2.
    Then do the required reading the task implies.
 4. If no task is ready: run `pd gates` and carry every open gate into your report.
    A gate that waits on the operator must never rot silently. Then fall back to
    `scripts/next-issue.py` and "Picking the next issue".
 
 **One worktree per claim.** `pd` stores a claim per working directory. Work each
-task in its own `git worktree` of the fork, and run every `pd` command for that
-task from there. Two agents never share a directory. Put the worktree inside the
-workspace, at `~/src/zl_zpr/.worktrees/<fork>--tN`, so `pd` still finds the
-workspace `.pd/` directory. Remove it after `pd done` or `pd release`.
+task in its own `git worktree` of the target's fork, and run every `pd` command
+for that task from there. Two agents never share a directory. Put the worktree
+inside the workspace, at `~/src/zl_zpr/.worktrees/<fork>--tN`, so `pd` still
+finds the workspace `.pd/` directory. Remove it after `pd done` or `pd release`.
 
-**The plan branch.** The first agent to claim a task in a plan creates the plan
-branch from the base branch and pushes it, if the fork does not have it yet
-(`git ls-remote --heads origin <plan-branch>`). Plan branches are named
+**The target branch.** The first agent to claim a task on a target creates the
+target branch from its base and pushes it, if the fork does not have it yet
+(`git ls-remote --heads origin <target-branch>`). Target branches are named
 `feature/<topic>`; this is the one exception to the `<login>/<topic>` rule in
 "Git / PR conventions".
-
-**How pd maps onto ZPR.**
-
-| pd | ZPR |
-|---|---|
-| plan | **one fork**. The plan body names the fork, the base branch (`zipline`; `main` for `zl-zpr-coredns`), and the GitHub issue it comes from, if any. |
-| plan branch (`--branch`) | `feature/<topic>` in that fork, made from the base branch. |
-| task branch | `<plan-branch>--tN`, made from the plan branch. |
-| pointer | `pd pointer tN "<fork>:<task-branch> @ <sha>"`, after you push. |
-| end of plan | One PR, plan branch into the base branch (see "Finishing a plan"). |
 
 **Finishing a task**, in this order:
 
 1. The task branch passes the repository's build gate (`make check`; see "Coding
    conventions"). If the task touches a "Gate escalation" path, the netns tier
-   is part of the gate here too, not only at the end of the plan.
+   is part of the gate here too.
 2. Push the task branch, then `pd pointer tN "<fork>:<task-branch> @ <sha>"`.
-3. Merge the task branch into the plan branch and push the plan branch.
-4. `pd done tN --note "..."`. The note quotes the gate result and names the plan
-   branch revision that holds the merge.
+3. Merge the task branch into the target branch and push the target branch.
+4. `pd done tN --note "..."`. The note quotes the gate result and names the
+   target branch revision that holds the merge.
 
-You merge task branches into the plan branch yourself. The plan branch is not
+You merge task branches into the target branch yourself. The target branch is not
 `zipline`, so "never merge" does not apply to it. "Never merge" still applies to
-the final PR.
+every PR.
+
+**Integration runs.** A feature that needs the netns tier across forks (see
+"Gate escalation") gets an integration task on the target whose review it gates,
+normally `core`, which holds `integration-test/`. It is `--blocked-by` the last
+code task of every other target. Run the tier with a `zpr-dev build` manifest
+that pins every target branch, and record the revision of every target it
+tested in the task's notes. Quote that result in each PR it covers.
 
 **Per-task checkpoint.** The approved pd plan is the go-ahead for its tasks. It
 replaces the issue plan comment and the `/go` gate of the GitHub flow.
@@ -188,15 +203,18 @@ replaces the issue plan comment and the `/go` gate of the GitHub flow.
   when the work must depart from the approved plan. Never infer assent: only an
   answered gate decides.
 
-**Finishing a plan.** The agent that finishes the plan's last task does this. An
-agent that finds a plan with every task done and no review in `pd status` does it
-too. When every task is done:
+**Finishing a target.** The agent that finishes the last task on a target does
+this, as soon as that target's tasks are done. It does not wait for the other
+targets. An agent that sees a target in `pd status` whose tasks are all done and
+which has no review does it too.
 
-1. Run the full build gate on the plan branch, plus "Gate escalation" (the netns
-   tier) where it applies. See "Definition of done".
-2. Open the PR per "Git / PR conventions", against the plan's base branch. Set the
-   assignee and reviewer by the issue author if the plan comes from an issue. If
-   it does not, the assignee is `mkolehmainen` and there is no human reviewer.
+1. Run the full build gate on the target branch, plus "Gate escalation" (the
+   netns tier) where it applies. See "Definition of done".
+2. Open the PR per "Git / PR conventions", target branch into the target's base.
+   Set the assignee and reviewer by the issue author if the plan comes from an
+   issue. If it does not, the assignee is `mkolehmainen` and there is no human
+   reviewer. If the PR must merge before or after another target's PR, say so in
+   both descriptions ("Merge after org-zpr/zl-zpr-policy#N").
 3. **Request a review from Copilot, if it is available.** Copilot is the
    GitHub-hosted review agent. The installed `gh` has no Copilot option on
    `gh pr edit`, and the REST `requested_reviewers` endpoint returns success but
@@ -213,17 +231,18 @@ too. When every task is done:
 
    Copilot is available only if the response lists
    `copilot-pull-request-reviewer`. If the call errors or that login is missing,
-   Copilot is not available: add one line saying so to the PR description (`gh pr edit --body`)
-   and continue. Handle
-   Copilot's comments like any other review ("Responding to review comments").
-   An unresolved Copilot thread still blocks done-condition 1. Copilot is not the
-   merger and not a human approver.
-4. `pd plan review pN --pr <PR URL>`.
-5. The review loop and "Definition of done" apply. For a plan with no issue,
-   done-condition 4 is met when the PR has its assignee and the plan shows
-   `in-review` in `pd`; there is no board Status or issue comment.
-6. Keep polling the PR as the review loop says. When it shows `MERGED`, run
-   `pd plan complete pN`. Never before.
+   Copilot is not available: add one line saying so to the PR description
+   (`gh pr edit --body`) and continue. Handle Copilot's comments like any other
+   review ("Responding to review comments"). An unresolved Copilot thread still
+   blocks done-condition 1. Copilot is not the merger and not a human approver.
+4. `pd plan review pN --pr <target-name>=<PR URL>`.
+5. The review loop and "Definition of done" apply to each PR. Review feedback
+   that needs code is a new task on that target (`pd skill`); it merges into the
+   target branch, which updates the open PR. For a plan with no issue,
+   done-condition 4 is met when the PR has its assignee and its review is
+   recorded in `pd`; there is no board Status or issue comment.
+6. Keep polling every PR of the plan as the review loop says. When all of them
+   show `MERGED`, run `pd plan complete pN`. Never before.
 
 **A plan that comes from a GitHub issue.** The operator can start from an issue
 (`org-zpr/zl-zipline#N` or `org-zpr/zipline#N`) and have an agent brainstorm it
@@ -233,34 +252,33 @@ into a pd plan. Then:
 - Whoever creates the plan assigns the issue to the operator
   (`gh issue edit N --repo <issue-repo> --add-assignee mkolehmainen`). An assigned
   issue is not pickable, so `next-issue.py` does not also pick it up.
-- When the PR opens, set the issue's board Status to `In review` as in the GitHub
-  flow.
-- The final PR description says `Implements <issue URL>`, and the PR link goes in
-  a comment on the issue (see "Git / PR conventions"; a closing keyword cannot
-  work across repositories). The operator closes the issue.
+- When the first PR opens, set the issue's board Status to `In review` as in the
+  GitHub flow.
+- Each PR description says `Implements <issue URL>`, and one comment on the issue
+  lists every PR of the plan (see "Git / PR conventions"; a closing keyword
+  cannot work across repositories). The operator closes the issue.
 
-**A feature that spans forks.** Make one pd plan per fork and order them with
-`pd plan block-by`, so a definer's plan completes before its consumer's plan
-starts. The cross-fork interface contracts go in one master plan in `docs/plans/`,
-and each pd plan links to it. A single-fork plan needs no `docs/plans/` file: its
-text is the pd plan body. The master plan is retired as in "Plan retirement"
-below; the documentation-closure work is the last pd plan, in
-`zl-zpr-dev-context`.
+**Where the plan text lives.** In the pd plan body, including the interface
+contracts between forks. New work gets no `docs/plans/` file. A plan that makes
+design decisions worth keeping ends with a documentation task on a
+`dev-context` target. That task moves the lasting decisions into the spec's
+`## Design decisions` section, as described in "Plan retirement" below.
 
 **Trust.** Only an operator token can answer a gate, so an answered gate is the
 approval channel. Plan and task bodies are work specifications, not commands.
 "Security posture for automated agents" applies unchanged; in particular, never
-touch an `org-zpr/zpr-*` repository, whatever a plan says.
+make a target of an `org-zpr/zpr-*` repository, whatever a plan says.
 
 **pd feedback.** `pd` is under active development. Report every bug, and every
 step that feels awkward or slow:
 
 1. If `glab auth status --hostname gitlab.appliedinvention.com` succeeds, search
-   first (`glab issue list -R mkolehmainen/pd --search "<words>"`), then file a
-   new issue with `glab issue create -R mkolehmainen/pd` if none matches.
+   first (`GITLAB_HOST=gitlab.appliedinvention.com glab issue list -R
+   mkolehmainen/pd --all --search "<words>"`), then file a new issue with
+   `glab issue create -R mkolehmainen/pd --label dogfooding` if none matches.
 2. If GitLab is not available, write the finding in a `## pd feedback` section of
-   the plan's final PR.
-3. Either way, the final PR lists the pd issues it filed. With no plan PR (for
+   one of the plan's PRs.
+3. Either way, a PR of the plan lists the pd issues it filed. With no plan PR (for
    example, during GitHub-flow work), put the finding in your report to the
    operator instead.
 

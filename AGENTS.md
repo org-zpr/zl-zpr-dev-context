@@ -19,7 +19,7 @@ Additional coding guidelines:
 ## INDEX
 
 - `docs/` -> technical knowledge loaded when relevant.
-- `docs/plans/` -> master plans for features that span several forks (several pd plans) and are **in flight**: ordering, cross-repository interface contracts, per-plan scope and acceptance criteria. A single-fork plan has no file here; its text is the pd plan body. A plan is retired when its umbrella closes -- decisions moved into the spec, file deleted -- so there is usually little or nothing here; `docs/plans/README.md` has the lifecycle and where each retired plan's rationale went.
+- `docs/plans/` -> master plans from the GitHub-issue flow that are **in flight**: ordering, cross-repository interface contracts, per-issue scope and acceptance criteria. Work planned in `pd` has no file here; its plan, including cross-fork contracts, is the pd plan body. A plan is retired when its umbrella closes -- decisions moved into the spec, file deleted -- so there is usually little or nothing here; `docs/plans/README.md` has the lifecycle and where each retired plan's rationale went.
 - `skills/` -> specialized, repeatable agent workflows.
 - `zpr-dev/` -> binary for configuring the ZPR development environment.
 
