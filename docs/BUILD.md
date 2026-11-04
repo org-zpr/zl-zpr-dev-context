@@ -449,40 +449,39 @@ Two consequences worth knowing:
    consumers pinning different tags of the same crate as an error, so a set
    cannot be cut while a bump is half-applied.
 
-Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one
-minor across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
+Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
+across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
 `zl-zpr-visaservice`, `zl-zpr-core`), because `zl-zpr-common` publicly
 re-exports the generated capnp modules and a `[patch]` only replaces
-requirements it is semver-compatible with. **The minor is set by the
-FD-passing fork** (below): currently **0.26**. The 0.25 -> 0.26 upgrade landed
-as one round (zipline#135): `zl-zpr-common` moved first and was tagged
-**`v0.30.0`**, then `zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core`
-bumped their `capnp*` crates and their `zpr` pin to that tag in the same set,
-because generated capnp code and the `zpr` re-exports must agree on the capnp
-version. A future capnp bump follows the same shape — the fork first, since
-its minor sets the lockstep, then common, tag it, then every consumer in one
+requirements it is semver-compatible with. Currently **0.26**: until
+zl-zpr-core#93 the FD-passing fork (see "Design decisions") was pinned there
+and set the minor for all four repositories. With the fork gone, nothing holds
+the minor at 0.26 and the four repositories can move to a newer crates.io
+release. The 0.25 -> 0.26 upgrade landed as one round (zipline#135):
+`zl-zpr-common` moved first and was tagged **`v0.30.0`**, then
+`zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core` bumped their `capnp*`
+crates and their `zpr` pin to that tag in the same set, because generated capnp
+code and the `zpr` re-exports must agree on the capnp version. A future capnp
+bump follows the same shape: common first, tag it, then every consumer in one
 round. Gate 1 catches a half-applied **`zpr` tag** bump only — it compares git
 dependency pins, and the lock scan likewise ignores registry crates — so the
 direct crates.io `capnp*` requirements are invisible to it and must be checked
 separately: verify every consumer's `capnp`, `capnp-rpc` and `capnpc`
 requirements moved in the same round.
 
-`zl-zpr-common`, `zl-zpr-compiler` and `zl-zpr-visaservice` resolve the capnp
-crates to mainline crates.io. **`zl-zpr-core` patches them to the FD-passing
-fork** (zipline#142): a `[patch.crates-io]` block points `capnp`,
-`capnp-futures`, `capnp-rpc` and `capnpc` at `mkolehmainen/capnproto-rust`
-rev **`1e1d5ad692b4b2c2b942f04f32550df6445f4216`**, which is what gives unix
-builds FD passing over the admin RPC (the `capnp-ancillary` feature). Cargo
-cannot scope a patch to a target, so the patch is unconditional and **the fork
-must build on every target** — Windows included; only the FD-passing *use* is
-unix-gated. After changing the patch, re-resolve the lockfile
-(`cargo update -p capnp -p capnp-futures -p capnp-rpc -p capnpc`): against an
-existing lockfile a new patch is otherwise silently ignored apart from a Cargo
-warning. The commits the fork carries, the fast-forward-only maintenance
-rules, the verification to run before pushing it, and when to retire it live
-in the fork's
-[`ZIPLINE.md`](https://github.com/mkolehmainen/capnproto-rust/blob/zipline/ZIPLINE.md);
-the decision record is under "Design decisions" below.
+**All four repositories resolve the capnp crates to mainline crates.io.**
+`zl-zpr-core` no longer patches them to the `mkolehmainen/capnproto-rust`
+FD-passing fork (zl-zpr-core#93), so packet capture to a file is compiled out
+of normal builds: `ph` answers `setCaptureFile` with Unsupported on every
+platform, and `integration-test/capture-test.sh` skips. For a capture-enabled
+debug build, revert that PR's commit in a scratch branch. The revert restores
+the `[patch.crates-io]` block, the `capnp-ancillary` feature and the capture
+test together. Then re-resolve the lockfile
+(`cargo update -p capnp -p capnp-futures -p capnp-rpc -p capnpc`), because
+against an existing lockfile a new patch is ignored apart from a Cargo warning.
+Archive the fork rather than deleting it, so that its pinned rev stays
+reachable; its `ZIPLINE.md` records what it carries. The decision record is
+under "Design decisions" below.
 
 ### Versions and tags
 
@@ -922,3 +921,19 @@ capture hands the FD over the existing `setCaptureFile` admin RPC.
 The fixes are offered neither to emilazy (capnproto/capnproto-rust#666) nor
 to org-zpr. Recorded verbatim from the operator: "Option (D) — neither."
 ([zipline#143](https://github.com/org-zpr/zl-zipline/issues/143))
+
+**Fork dropped; packet capture compiled out (operator decision,
+2026-11-04).** *Supersedes the FD-passing entries above for normal builds.*
+`zl-zpr-core` no longer depends on `mkolehmainen/capnproto-rust`: the root
+`[patch.crates-io]` block, the `capnp-futures` workspace dependency, and the
+`capnp-ancillary` feature in `ph` and `ph-cli` are deleted, and every `capnp*`
+crate resolves to crates.io. Turning the feature off was not enough on its own.
+Cargo resolves optional git dependencies into `Cargo.lock` whatever features
+are on, and a `[patch]` applies regardless of features, so the fork would
+still be fetched by every build. The capture code stays in the tree behind
+`cfg(all(unix, feature = "capnp-ancillary"))`, and the existing `check-cfg`
+lint keeps it warning-free. Why: the fork served only packet capture, a debug
+facility, at the cost of a hand-maintained capnp fork that also pinned all four
+repositories to capnp 0.26. A capture-enabled debug build reverts the
+zl-zpr-core#93 commit (see "Cross-repository dependencies" above).
+([zl-zpr-core#93](https://github.com/org-zpr/zl-zpr-core/pull/93))
