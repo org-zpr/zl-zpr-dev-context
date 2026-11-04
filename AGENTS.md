@@ -19,7 +19,7 @@ Additional coding guidelines:
 ## INDEX
 
 - `docs/` -> technical knowledge loaded when relevant.
-- `docs/plans/` -> master plans for multi-issue features that are **in flight**: ordering, cross-repository interface contracts, per-issue scope and acceptance criteria. A plan is retired when its umbrella closes -- decisions moved into the spec, file deleted -- so there is usually little or nothing here; `docs/plans/README.md` has the lifecycle and where each retired plan's rationale went.
+- `docs/plans/` -> master plans for features that span several forks (several pd plans) and are **in flight**: ordering, cross-repository interface contracts, per-plan scope and acceptance criteria. A single-fork plan has no file here; its text is the pd plan body. A plan is retired when its umbrella closes -- decisions moved into the spec, file deleted -- so there is usually little or nothing here; `docs/plans/README.md` has the lifecycle and where each retired plan's rationale went.
 - `skills/` -> specialized, repeatable agent workflows.
 - `zpr-dev/` -> binary for configuring the ZPR development environment.
 
@@ -42,6 +42,7 @@ paths, so they can be opened directly.
 | When you are | Read |
 |---|---|
 | Taking a task through GitHub: issue, plan, branch, PR, review | `skills/zpr/SKILL.md` |
+| Picking up work from `pd`, or turning a GitHub issue into a pd plan | `skills/zpr/SKILL.md` ("Work source: pd first"), `pd skill` |
 | New to ZPR, or unsure how the pieces fit | `docs/SYSTEM_OVERVIEW.md`, `docs/TERMINOLOGY.md` |
 | Unsure which repository owns something | `docs/REPOSITORIES.md` |
 | Building, testing, or changing a cross-repository dependency | `docs/BUILD.md` |
