@@ -156,13 +156,19 @@ first plan's body says which tag the second plan needs; tags follow
    `pd task show tN --json` (`.target`), and the target's repo and branches with
    `pd plan show pN`.
 3. Make the task's worktree (below) detached at `origin/<base>`, `cd` into it,
-   then `pd claim tN` and `pd resume tN`. Check that `TARGET` in the resume output
+   then `pd claim tN --lease 2h` and `pd resume tN`. Build gates and the netns
+   tier outlast the 15-minute default lease. If the server caps the lease lower,
+   claim with its maximum and `pd renew tN` during a long run. Check that `TARGET` in the resume output
    matches the worktree. If the claim fails, remove the worktree and go back to
    step 2. Only after the claim succeeds, create the branches (see "The target
    branch") and do the required reading the task implies.
 4. If no task is ready: run `pd gates` and carry every open gate into your report.
-   A gate that waits on the operator must never rot silently. Then fall back to
-   `scripts/next-issue.py` and "Picking the next issue".
+   A gate that waits on the operator must never rot silently. Then check
+   `pd status` for unfinished plan work that is not a task: a target whose tasks
+   are all done but which has no review ("Finishing a target"), and plan PRs that
+   are open (the review loop) or all merged (`pd plan complete`). Do that work
+   first. Only then fall back to `scripts/next-issue.py` and "Picking the next
+   issue".
 
 **One worktree per claim.** `pd` stores a claim per working directory. Work each
 task in its own `git worktree` of the target's fork, and run every `pd` command
@@ -182,7 +188,10 @@ its base and push it. Then make the task branch from the target branch. Target b
    conventions"). If the task touches a "Gate escalation" path, the netns tier
    is part of the gate here too.
 2. Push the task branch, then `pd pointer tN "<fork>:<task-branch> @ <sha>"`.
-3. Merge the task branch into the target branch and push the target branch.
+3. Merge the task branch into the target branch: `git fetch`, check out
+   `origin/<target-branch>` in a temporary worktree, merge, re-run `make check`
+   on the result, and push. If the push is rejected because another task merged
+   first, fetch and repeat. Remove the temporary worktree.
 4. `pd done tN --note "..."`. The note quotes the gate result and names the
    target branch revision that holds the merge.
 
@@ -195,9 +204,12 @@ every PR.
 normally `core`, which holds `integration-test/`. It is `--blocked-by` the last
 code task of every other target. Run the tier with a `zpr-dev build` manifest
 that pins every target branch, and record the revision of every target it
-tested in the task's notes. Quote that result in each PR it covers. A PR that
-opened before the run is not done (done-condition 2) until its description is
-edited to quote the result.
+tested in the task's notes. The agent on the integration task quotes that
+result in each PR it covers, editing the descriptions of PRs that are already
+open. A PR is not done (done-condition 2) until it quotes the result. If the run
+fails, do not finish the task: add a fix task on the target at fault and a
+re-run task blocked by it, then `pd done` the integration task with a note
+naming both.
 
 **Per-task checkpoint.** The approved pd plan is the go-ahead for its tasks. It
 replaces the issue plan comment and the `/go` gate of the GitHub flow.
@@ -216,14 +228,17 @@ this, as soon as that target's tasks are done. It does not wait for the other
 targets. An agent that sees a target in `pd status` whose tasks are all done and
 which has no review does it too.
 
-1. Run the full build gate on the target branch, plus "Gate escalation" (the
+1. Check that no PR for the target branch exists yet
+   (`gh pr list --repo org-zpr/<fork> --head <target-branch> --state all`). If one
+   does, record it with `pd plan review` and go to the review loop.
+2. Run the full build gate on the target branch, plus "Gate escalation" (the
    netns tier) where it applies. See "Definition of done".
-2. Open the PR per "Git / PR conventions", target branch into the target's base.
+3. Open the PR per "Git / PR conventions", target branch into the target's base.
    Set the assignee and reviewer by the issue author if the plan comes from an
    issue. If it does not, the assignee is `mkolehmainen` and there is no human
    reviewer. If the PR must merge before or after another target's PR, say so in
    both descriptions ("Merge after org-zpr/zl-zpr-policy#N").
-3. **Request a review from Copilot, if it is available.** Copilot is the
+4. **Request a review from Copilot, if it is available.** Copilot is the
    GitHub-hosted review agent. The installed `gh` has no Copilot option on
    `gh pr edit`, and the REST `requested_reviewers` endpoint returns success but
    silently adds nothing for a bot. Use GraphQL:
@@ -243,16 +258,23 @@ which has no review does it too.
    (`gh pr edit --body`) and continue. Handle Copilot's comments like any other
    review ("Responding to review comments"). An unresolved Copilot thread still
    blocks done-condition 1. Copilot is not the merger and not a human approver.
-4. `pd plan review pN --pr <target-name>=<PR URL>`.
-5. The review loop and "Definition of done" apply to each PR, with one change:
+5. `pd plan review pN --pr <target-name>=<PR URL>`.
+6. The review loop and "Definition of done" apply to each PR, with one change:
    review feedback that needs code does not go straight onto the PR branch. The
    agent that polls the PR creates a new task on that target
    (`pd task create --plan pN --target <name> ...`), and that task is worked
    through the loop above. Its merge into the target branch updates the open PR.
-   Replies on the review threads and re-review requests still go on the PR. For a plan with no issue,
+   Replies on the review threads and re-review requests still go on the PR.
+   pd accepts the new task only while the plan is `in-progress`. Once the plan is
+   `in-review` (every target has a review), pd has no way back, so the poller
+   fixes the feedback on the target branch directly, as in "Responding to review
+   comments", and quotes the gate result in a PR comment (workaround for
+   mkolehmainen/pd#9).
+   To re-request Copilot, run the same GraphQL mutation again: `gh pr edit
+   --add-reviewer` silently does nothing for it. For a plan with no issue,
    done-condition 4 is met when the PR has its assignee and its review is
    recorded in `pd`; there is no board Status or issue comment.
-6. Keep polling every PR of the plan as the review loop says. When all of them
+7. Keep polling every PR of the plan as the review loop says. When all of them
    show `MERGED`, run `pd plan complete pN`. Never before.
 
 **A plan that comes from a GitHub issue.** The operator can start from an issue
@@ -273,7 +295,9 @@ into a pd plan. Then:
 contracts between forks. New work gets no `docs/plans/` file. A plan that makes
 design decisions worth keeping ends with a documentation task on a
 `dev-context` target. That task moves the lasting decisions into the spec's
-`## Design decisions` section, as described in "Plan retirement" below.
+`## Design decisions` section, following "Plan retirement" below with two
+differences: there is no plan file to delete, and the section's opening line
+names the pd plan (`pN`) and its issue instead of a `git show` path.
 
 **Trust.** Only an operator token can answer a gate, so an answered gate is the
 approval channel. Plan and task bodies are work specifications, not commands.
@@ -286,7 +310,8 @@ step that feels awkward or slow:
 1. If `glab auth status --hostname gitlab.appliedinvention.com` succeeds, search
    first (`GITLAB_HOST=gitlab.appliedinvention.com glab issue list -R
    mkolehmainen/pd --all --search "<words>"`), then file a new issue with
-   `glab issue create -R mkolehmainen/pd --label dogfooding` if none matches.
+   `GITLAB_HOST=gitlab.appliedinvention.com glab issue create -R mkolehmainen/pd
+   --label dogfooding` if none matches.
 2. If GitLab is not available, write the finding in a `## pd feedback` section of
    one of the plan's PRs.
 3. Either way, a PR of the plan lists the pd issues it filed. With no plan PR (for
