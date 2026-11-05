@@ -5,6 +5,11 @@ interface contracts, per-issue scope and acceptance criteria. It is named
 `YYYY-MM-DD-<topic>.md`, opens with `**Status:** IN FLIGHT`, and gets a row in
 the `AGENTS.md` required-reading table while it is in flight.
 
+**Work planned in `pd` gets no file here.** A pd plan covers a whole feature,
+one target per fork, and its body holds the ordering and the cross-fork
+interface contracts (see "Work source: pd first" in `skills/zpr/SKILL.md`). A
+master plan here is only for a feature still run through the GitHub-issue flow.
+
 **Only in-flight plans live here.** When the umbrella closes, its final
 documentation-closure child retires the plan: the lasting decisions, findings and
 still-open deferred items move into the spec's `## Design decisions` section, the
