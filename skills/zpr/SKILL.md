@@ -126,8 +126,9 @@ for the commands, the work loop, targets, gates, and handoff notes. This section
 adds only the ZPR mapping; it does not repeat `pd skill`.
 
 **Detection.** `pd` is available when `pd whoami` exits 0. The URL and token come
-from the workspace `.pd/` directory (`~/src/zl_zpr/.pd/`), so run it from inside
-the workspace. If it fails, use "Picking the next issue" and do not stop.
+from the workspace `.pd/` directory, so run it from inside the workspace.
+Below, `<workspace>` is the workspace root that `zpr-dev` uses: `--workspace`,
+else `$ZPR_WORKSPACE`, else `~/src/zl_zpr`. If it fails, use "Picking the next issue" and do not stop.
 
 **How pd maps onto ZPR.** One pd plan is one feature, however many forks it
 touches. Each fork it touches is one **target** of the plan.
@@ -162,6 +163,12 @@ first plan's body says which tag the second plan needs; tags follow
    matches the worktree. If the claim fails, remove the worktree and go back to
    step 2. Only after the claim succeeds, create the branches (see "The target
    branch") and do the required reading the task implies.
+   **The worktree has no generated `AGENTS.md`**: `zpr-dev` writes it only into
+   `<workspace>/<fork>`, and it is untracked. Read
+   `<workspace>/<fork>/AGENTS.md` (the "Coding conventions" source of truth)
+   before you write code. If the task changes the fork's `AGENTS.repo.md`, read
+   that file in the worktree too, because the generated copy reflects the main
+   checkout's version.
 4. If no task is ready: run `pd gates` and carry every open gate into your report.
    A gate that waits on the operator must never rot silently. Then check
    `pd status` for unfinished plan work that is not a task: a target whose tasks
@@ -173,7 +180,7 @@ first plan's body says which tag the second plan needs; tags follow
 **One worktree per claim.** `pd` stores a claim per working directory. Work each
 task in its own `git worktree` of the target's fork, and run every `pd` command
 for that task from there. Two agents never share a directory. Put the worktree
-inside the workspace, at `~/src/zl_zpr/.worktrees/<fork>--tN`, so `pd` still
+inside the workspace, at `<workspace>/.worktrees/<fork>--tN`, so `pd` still
 finds the workspace `.pd/` directory. Remove it after `pd done` or `pd release`.
 
 **The target branch.** After a successful claim, if the fork does not have the
