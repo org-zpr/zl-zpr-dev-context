@@ -1,7 +1,7 @@
 ---
 name: zpr-project
 description: Use when working on the zipline fork of ZPR (org-zpr/zl-zpr-*) — taking a task from a pd plan or a GitHub issue to merged PR. Also use on "work on the next issue" / "what is next", which takes ready pd work first, else picks the next unblocked issue from the tracker, and runs the pickup sequence.
-version: 2.10.0
+version: 2.11.0
 license: proprietary
 metadata:
   tags: [zpr, rust, capnp, networking, zero-trust]
@@ -130,6 +130,17 @@ from the workspace `.pd/` directory, so run it from inside the workspace.
 Below, `<workspace>` is the workspace root that `zpr-dev` uses: `--workspace`,
 else `$ZPR_WORKSPACE`, else `~/src/zl_zpr`. If it fails, use "Picking the next issue" and do not stop.
 
+**Project filter (site-specific).** A site can limit an agent to some pd project
+tags. The list is in the site's own instructions, for example a
+`pd projects for this site: <tag>, <tag>` line in `<workspace>/AGENTS.md`. This
+skill does not keep that list, because it differs from site to site, and pd has
+no setting for a default project. If the site names tags, add `--project <tag>`
+to every `pd ready`, `pd plan ready`, `pd status` and `pd gates` below, and run
+each command once per tag. Do not take a plan or task outside those tags. If the
+site names no tags, do not filter. If a filtered command prints
+`hint: no plan has project TAG`, report the tag as possibly misspelled
+(`pd projects` lists the tags in use).
+
 **How pd maps onto ZPR.** One pd plan is one feature, however many forks it
 touches. Each fork it touches is one **target** of the plan.
 
@@ -169,7 +180,12 @@ first plan's body says which tag the second plan needs; tags follow
    before you write code. If the task changes the fork's `AGENTS.repo.md`, read
    that file in the worktree too, because the generated copy reflects the main
    checkout's version.
-4. If no task is ready: run `pd gates` and carry every open gate into your report.
+4. If no task is ready, run `pd plan ready`. It lists only plans that
+   `pd plan start` accepts now: approved, every blocking plan completed, and no
+   open gate. Take the first one, run `pd plan start pN`, and go back to step 2.
+   If the start fails with `pN is already in-progress`, another agent started it
+   first: go back to step 2.
+5. If no plan is ready either: run `pd gates` and carry every open gate into your report.
    A gate that waits on the operator must never rot silently. Then check
    `pd status` for unfinished plan work that is not a task: a target whose tasks
    are all done but which has no review ("Finishing a target"), and plan PRs that
