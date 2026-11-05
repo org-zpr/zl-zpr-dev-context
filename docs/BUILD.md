@@ -483,8 +483,13 @@ requirements moved in the same round.
 `zl-zpr-core` no longer patches them to the `mkolehmainen/capnproto-rust`
 FD-passing fork (zl-zpr-core#93), so packet capture to a file is compiled out
 of normal builds: `ph` answers `setCaptureFile` with Unsupported on every
-platform, and `integration-test/capture-test.sh` skips. For a capture-enabled
-debug build, revert that PR's commit in a scratch branch. The revert restores
+platform, and `integration-test/capture-test.sh` skips. The fork is 0.26 only
+and cannot be combined with 0.27: a `[patch]` does not apply to the
+`capnp = "0.27.3"` requirement, and `zpr` `zl-v0.31.0` re-exports 0.27
+generated code. So a capture-enabled debug build needs the pre-0.27 dependency
+set. In a scratch branch, start from a `zl-zpr-core` revision before the 0.27
+bump (`capnp` and `capnp-rpc` 0.26, `zpr` pinned to `zl-v0.30.3`), or revert
+the 0.27 bump first. Then revert zl-zpr-core#93's commit. The revert restores
 the `[patch.crates-io]` block, the `capnp-ancillary` feature and the capture
 test together. Then re-resolve the lockfile
 (`cargo update -p capnp -p capnp-futures -p capnp-rpc -p capnpc`), because
