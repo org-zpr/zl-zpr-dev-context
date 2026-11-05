@@ -453,17 +453,27 @@ Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
 across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
 `zl-zpr-visaservice`, `zl-zpr-core`), because `zl-zpr-common` publicly
 re-exports the generated capnp modules and a `[patch]` only replaces
-requirements it is semver-compatible with. Currently **0.26**: until
+requirements it is semver-compatible with. Currently **0.27**. Until
 zl-zpr-core#93 the FD-passing fork (see "Design decisions") was pinned there
-and set the minor for all four repositories. With the fork gone, nothing holds
-the minor at 0.26 and the four repositories can move to a newer crates.io
-release. The 0.25 -> 0.26 upgrade landed as one round (zipline#135):
-`zl-zpr-common` moved first and was tagged **`v0.30.0`**, then
-`zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core` bumped their `capnp*`
-crates and their `zpr` pin to that tag in the same set, because generated capnp
-code and the `zpr` re-exports must agree on the capnp version. A future capnp
-bump follows the same shape: common first, tag it, then every consumer in one
-round. Gate 1 catches a half-applied **`zpr` tag** bump only — it compares git
+and held all four repositories at 0.26. The 0.25 -> 0.26 upgrade landed as one
+round (zipline#135): `zl-zpr-common` moved first and was tagged **`v0.30.0`**,
+then `zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core` bumped their
+`capnp*` crates and their `zpr` pin to that tag in the same set, because
+generated capnp code and the `zpr` re-exports must agree on the capnp version.
+The 0.26 -> 0.27 upgrade had the same shape (zl-zipline#211): `zl-zpr-common`
+moved first and was tagged **`zl-v0.31.0`**, then `zl-zpr-compiler`,
+`zl-zpr-visaservice` and `zl-zpr-core` bumped their `capnp*` crates and their
+`zpr` pin to that tag in the same set. A future capnp bump follows the same
+shape: common first, tag it, then every consumer in one round.
+
+Write the `capnp` and `capnp-rpc` requirements with a patch-level floor
+(`"0.27.3"`, not `"0.27"`). A bare minor lets a lockfile resolve a release
+older than the upstream security fixes that the dropped fork used to carry (see
+the fork's
+[`ZIPLINE.md`](https://github.com/mkolehmainen/capnproto-rust/blob/zipline/ZIPLINE.md)).
+`capnpc` is a build dependency and takes the minor only (`"0.27"`).
+
+Gate 1 catches a half-applied **`zpr` tag** bump only — it compares git
 dependency pins, and the lock scan likewise ignores registry crates — so the
 direct crates.io `capnp*` requirements are invisible to it and must be checked
 separately: verify every consumer's `capnp`, `capnp-rpc` and `capnpc`
@@ -886,6 +896,8 @@ defence-in-depth fixes, which guard internal APIs that generated code does
 not call with attacker-controlled values. If upstream ships a security fix
 later, follow the fork's
 [`ZIPLINE.md`](https://github.com/mkolehmainen/capnproto-rust/blob/zipline/ZIPLINE.md).
+*Superseded:* zl-zpr-core#93 dropped the fork; zl-zipline#211 moved all four
+repos to capnp 0.27.3.
 ([zipline#141](https://github.com/org-zpr/zl-zipline/issues/141))
 
 **The fork lives at `mkolehmainen/capnproto-rust`, branch `zipline`, pinned by
