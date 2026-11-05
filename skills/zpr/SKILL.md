@@ -1,7 +1,7 @@
 ---
 name: zpr-project
 description: Use when working on the zipline fork of ZPR (org-zpr/zl-zpr-*) — taking a task from a pd plan or a GitHub issue to merged PR. Also use on "work on the next issue" / "what is next", which takes ready pd work first, else picks the next unblocked issue from the tracker, and runs the pickup sequence.
-version: 2.11.0
+version: 2.11.1
 license: proprietary
 metadata:
   tags: [zpr, rust, capnp, networking, zero-trust]
@@ -198,6 +198,11 @@ task in its own `git worktree` of the target's fork, and run every `pd` command
 for that task from there. Two agents never share a directory. Put the worktree
 inside the workspace, at `<workspace>/.worktrees/<fork>--tN`, so `pd` still
 finds the workspace `.pd/` directory. Remove it after `pd done` or `pd release`.
+If the fork has initialized submodules (`zl-zpr-common`), git refuses
+`git worktree remove` ("working trees containing submodules cannot be moved or
+removed"). `--force` discards uncommitted work, so first confirm that
+`git status --porcelain` and `git submodule foreach --quiet git status --porcelain`
+both print nothing and the branch is pushed, then run `git worktree remove --force`.
 
 **The target branch.** After a successful claim, if the fork does not have the
 target branch yet (`git ls-remote --heads origin <target-branch>`), create it from
@@ -214,7 +219,8 @@ its base and push it. Then make the task branch from the target branch. Target b
 3. Merge the task branch into the target branch: `git fetch`, check out
    `origin/<target-branch>` in a temporary worktree, merge, re-run `make check`
    on the result, and push. If the push is rejected because another task merged
-   first, fetch and repeat. Remove the temporary worktree.
+   first, fetch and repeat. Remove the temporary worktree (with the submodule
+   check in "One worktree per claim").
 4. `pd done tN --note "..."`. The note quotes the gate result and names the
    target branch revision that holds the merge.
 
@@ -269,11 +275,14 @@ which has no review does it too.
    ```sh
    ID=$(gh pr view <N> --repo org-zpr/<repo> --json id -q .id)
    gh api graphql -f id="$ID" -f query='mutation($id:ID!){
-     requestReviewsByLogin(input:{pullRequestId:$id,
+     requestReviewsByLogin(input:{pullRequestId:$id, union:true,
                                   botLogins:["copilot-pull-request-reviewer"]}){
        pullRequest{ reviewRequests(first:10){ nodes{ requestedReviewer{
          ... on Bot{ login } } } } } } }'
    ```
+
+   Keep `union:true`. Without it the mutation replaces the PR's review requests
+   and silently drops the human reviewer set in step 3.
 
    Copilot is available only if the response lists
    `copilot-pull-request-reviewer`. If the call errors or that login is missing,
