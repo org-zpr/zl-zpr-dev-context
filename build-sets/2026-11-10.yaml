@@ -1,0 +1,147 @@
+version: 1
+name: tip
+repositories:
+  zl-zpr-compiler: ee188d312a6cb4a39f533b9cf732ba1f2820a62e
+  zl-zpr-core: 5bd54d0a94243d573689bd0fd41ca72292040722
+  zl-zpr-coredns: 39d49be4c019bbfd9bf535af171dbab0b3aa3d45
+  zl-zpr-demo: 20fe62b257cb37fdf60df6e22462313118ffb3dc
+  zl-zpr-visaservice: 606e29e01ce50940977ed749310fc0937905457f
+resolved:
+  built_at: 2026-11-10T15:50:11Z
+  built_from:
+    manifest: --tip
+    context: e3892f8
+    tip: true
+  host:
+    arch: x86_64
+    capnp: Cap'n Proto version 1.1.0
+    cargo: cargo 1.98.1 (797e8a9bc 2026-08-05)
+    go: go version go1.27.0 linux/amd64
+    os: linux
+    rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+  pins:
+  - crate: cbpf-rs
+    url: https://github.com/org-zpr/zl-zpr-utils.git
+    tag: cbpf-rs-v0.2.0
+    pinned_by:
+    - zl-zpr-core/Cargo.toml
+    - zl-zpr-core/adapter/ph/Cargo.toml
+    - zl-zpr-core/adapter/cli/Cargo.toml
+  - crate: cslab
+    url: https://github.com/org-zpr/zl-zpr-utils.git
+    tag: zl-cslab-v0.1.5
+    pinned_by:
+    - zl-zpr-core/adapter/ph/Cargo.toml
+  - crate: rcu
+    url: https://github.com/org-zpr/zl-zpr-utils.git
+    tag: zl-rcu-v0.1.6
+    pinned_by:
+    - zl-zpr-core/adapter/ph/Cargo.toml
+    - zl-zpr-common/Cargo.toml
+  - crate: zpr
+    url: https://github.com/org-zpr/zl-zpr-common.git
+    tag: zl-v0.31.2
+    pinned_by:
+    - zl-zpr-compiler/Cargo.toml
+    - zl-zpr-visaservice/Cargo.toml
+    - zl-zpr-visaservice/vs/Cargo.toml
+    - zl-zpr-visaservice/libeval/Cargo.toml
+    - zl-zpr-visaservice/zpt/Cargo.toml
+    - zl-zpr-visaservice/vs-admin/Cargo.toml
+    - zl-zpr-core/Cargo.toml
+    - zl-zpr-core/adapter/ph/Cargo.toml
+    - zl-zpr-core/libnode2/Cargo.toml
+  - crate: zpr-ext
+    url: https://github.com/org-zpr/zl-zpr-utils.git
+    tag: zpr-ext-v0.6.1
+    pinned_by:
+    - zl-zpr-core/Cargo.toml
+    - zl-zpr-core/adapter/ph/Cargo.toml
+    - zl-zpr-core/adapter/cli/Cargo.toml
+  - crate: zpr-utils
+    url: https://github.com/org-zpr/zl-zpr-utils.git
+    tag: zpr-utils-v0.2.3
+    pinned_by:
+    - zl-zpr-core/Cargo.toml
+    - zl-zpr-core/adapter/ph/Cargo.toml
+    - zl-zpr-core/libnode2/Cargo.toml
+  versions:
+    vs_policy_min_compiler: 0.20.0
+    zplc: 0.20.1
+  binaries:
+  - name: zplc
+    sha256: 5bd76f0341d16717ef8acd9c260c30de4c796a4b1907f234df0a5922c5ce8105
+    bytes: 2859584
+    from: zl-zpr-compiler
+  - name: zpdump
+    sha256: 1da8bf1c3933a91a0944577643d7bea3bff2387a841f417171f1cb4d2b0bfb84
+    bytes: 1478608
+    from: zl-zpr-compiler
+  - name: vs
+    sha256: a053f50abf3048eee265d59a68c0c444cef20f12b148be7482108d18fbb0d146
+    bytes: 22253320
+    from: zl-zpr-visaservice
+  - name: vs-admin
+    sha256: 2911ebeb3e73cd1fa41657721c98cb077a2b361baa00640f9040198fc8e9fbac
+    bytes: 10296904
+    from: zl-zpr-visaservice
+  - name: vsapikey
+    sha256: 928ee8b9c52a5cb96abb0582df5d3ee92233017c0c42ecadd74f2c362da9abd1
+    bytes: 1869904
+    from: zl-zpr-visaservice
+  - name: zpt
+    sha256: 3788b64c7ff527bf8e0bb058a6bd33a64048ed10718112ef425972daf008c0ff
+    bytes: 2626504
+    from: zl-zpr-visaservice
+  - name: zpr-dashboard
+    sha256: 66d976122869197bb9cc9a4365aeca01b7e552739d94b153aca2f7093077a22d
+    bytes: 9433351
+    from: zl-zpr-visaservice
+  - name: zpr-attr-server
+    sha256: de7cd80e656a4074dfec19a7f42b44199bdc437831c252fd88fb043683ccea33
+    bytes: 11379184
+    from: zl-zpr-visaservice
+  - name: ph
+    sha256: b5444b8dc6ccd35512cc31a5cbaed36e9ce93d4d0c9e34cddadb3a6dd7505427
+    bytes: 11349448
+    from: zl-zpr-core
+  - name: ph-cli
+    sha256: 0aa632752aac74e6fa47b628b054baa33cb31f19a9a0a9fd149c783a0fb01b9d
+    bytes: 9668528
+    from: zl-zpr-core
+  - name: coredns
+    sha256: a0e385eb6d10b67151792a03cb3fc027cd32c727263b1e19a860cc473d42d656
+    bytes: 108573834
+    from: zl-zpr-coredns
+  tests_requested: all
+  tiers:
+    docker:
+      status: passed
+      repos:
+        deploy: passed
+        stage: passed
+        teardown: passed
+        test: passed
+    netns:
+      status: passed
+      repos:
+        a2a-pubkey-test.sh: passed
+        attr-query-test.sh: passed
+        capture-test.sh: passed
+        fake-idp-smoke-test.sh: passed
+        node-restart-test.sh: passed
+        oidc-file-interplay-test.sh: passed
+        one-node-oidc-renewal-test.sh: passed
+        one-node-oidc-test.sh: passed
+        one-node-policy-reauth-test.sh: passed
+        one-node-test.sh: passed
+        one-node-v6-test.sh: passed
+      privilege: userns
+    unit:
+      status: passed
+      repos:
+        zl-zpr-compiler: passed
+        zl-zpr-core: passed
+        zl-zpr-coredns: passed
+        zl-zpr-demo: 'skipped: no unit tests (docker tier covers it)'
+        zl-zpr-visaservice: passed
