@@ -208,11 +208,19 @@ Never infer a type value from 6.4.
 | 138 / 139 | Acquire / Grant ZPR Address † | no |
 | 140 | Revoke ZPR Address | no |
 | 141 | Init Authentication Request † | no |
+| 142 / 143 | Start Authentication / Abandon Authentication Attempt † | no |
+| 144 / 145 | Renew Authentication Request / Response ‡ | no |
 | 252 / 253 | Canceled / Cancel † | no |
 | 254 | Acknowledgement | no |
 | 255 | Reserved — silently discard | — |
 
-† marked `TODO: add to RFC` in `zdp.rs`: implemented ahead of the spec.
+† marked `TODO: add to RFC` or *experimental* in `zdp.rs`: implemented ahead of
+the spec. 142/143 are upstream zpr-core #1410's experimental actor-authorization
+assignments (`diagrams/actor_authorization.md` in zl-zpr-core).
+
+‡ zipline-only (zipline#66): node-to-adapter credential renewal. They were 142/143
+until zl-zpr-core#96 merged #1410, which claimed those numbers; zipline's moved,
+so zipline nodes and adapters from before and after that merge do not interoperate.
 
 Note the shape of the divergence: the RFC has separate Echo Request/Response
 and Terminate Request/Response/Indication types; the implementation has one
@@ -305,19 +313,41 @@ platform serves many adapters, adapters often have no fixed substrate address,
 and probing would be wasteful and noisy. For node-to-node links, whichever node
 has the numerically smaller node number initiates.
 
-The sequence is: keying (Noise) → `Hello` Request/Response → address
-registration → `Echo` keep-alives. A Hello Response may accept, reject, or
+The sequence is: keying (Noise) → `Hello` Request/Response → link Active with
+`Echo` keep-alives → actor authorization. A Hello Response may accept, reject, or
 redirect to another dock. Each side names the connection policy under which it
 initiated or accepted.
 
-`link_state.rs` models this as an FSM. States: `Inactive`, `Keying`,
-`Helloing`, `WaitForInitAuth`, `WaitForAcquireZprAddress`, `RegisterAA`,
-`Active`, `Closing`, `Resetting`, `Disconnecting`, `Error`. Link types:
-`Internal`, `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` — the last
-marked *currently unsupported*.
+Since zl-zpr-core#96 (which merged upstream #1410) **the link and the actor have
+separate state machines.** The link is Active once Hello completes; it then runs
+actor authorization as its own exchange, and a failed authorization no longer
+tears the link down.
+
+- **Link** (`link_state.rs`). States: `Inactive`, `Keying`, `Helloing`, `Active`,
+  `Closing`, `Resetting`, `Disconnecting`, `Error`. Link types: `Internal`,
+  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` — the last marked
+  *currently unsupported*.
+- **Actor** (`actor_auth.rs`, `ActorAuthorization`). One transaction carries
+  `Start Authentication` → `Init Authentication` (the node's challenge) →
+  `Acquire ZPR Address` (the adapter's evidence) → `Grant ZPR Address`, or
+  `Abandon Authentication Attempt` on a local failure. Grant and Renew Response
+  carry an `AuthenticationStatus`: `Success` 0, `Rejected` 1, `Retryable` 2, and
+  the zipline-only `PolicyDenied` 3. With auto-connect off every failure ends
+  the attempt; with it on, transient failures retry with backoff and explicit
+  denials latch. Either way the operator retries with `ph-cli connect` (or by
+  restarting the adapter).
+
+The Hello exchange carries TLVs 9 `ACTOR_AUTH_PROTOCOL` (both directions,
+version 1, mandatory), 10 `VS_BOOTSTRAP_LINK` (response, verified VS adapter
+only), and the zipline-only 11 `OIDC_IDP` (response, one per advertised OIDC
+identity provider; it was 9 before zl-zpr-core#96). The upstream ASA TLV (4) is
+not used: zipline removed it with the BAS client (zipline#15).
 
 Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
-3-second timeout; `LINK_HELLO_TIMEOUT = 3 s`, restart holddown 5 s.
+3-second timeout; a link is torn down after `KEEP_ALIVE_MAX_MISSES = 3`
+consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
+5 s, and a node drops a link whose keying does not finish within
+`NODE_KEYING_TIMEOUT = 60 s` (zipline#173).
 
 ### Flow setup
 
@@ -412,7 +442,8 @@ Specified, not implemented:
 
 Implemented ahead of the RFC: the reliability layer (`Cancel`/`Canceled`/
 `Acknowledgement`), `Bind Egress Stream`, `Acquire`/`Grant ZPR Address`,
-`Init Authentication`, and transaction IDs.
+`Init Authentication`, `Start`/`Abandon Authentication`, the zipline-only
+`Renew Authentication` pair, and transaction IDs.
 
 Before assuming a message or field works, read `zdp.rs` and grep
 `mgmt/handlers.rs` for a handler. A type in the enum does not imply a

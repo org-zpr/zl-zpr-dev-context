@@ -1052,6 +1052,22 @@ code half, including the end-to-end fixture. Where the design sections above
 and the code disagree, the code wins; the decisions that changed the design
 during the build are under *Design decisions*.
 
+**The auth flow moved out of the link state machine** in zl-zpr-core#96, which
+merged upstream zpr-core #1410 ("Separate actor authorization from link
+establishment"). The design sections above describe the adapter's OIDC login
+inside `link_state.rs` (`WaitForUserAuth`, `ReceivedInitAuth`,
+`process_authentication_failure` tearing the link down). Now the link is Active
+after Hello, and the actor authenticates afterwards in its own state machine
+(`actor_auth.rs`); the zipline parts live in `auth_agent.rs` (OIDC through the
+AuthAgent, failure reasons), `actor_activation.rs` (granted-address checks) and
+`actor_renewal.rs` (renewal). A failed login no longer closes the link: with
+auto-connect off it ends the attempt, and `ph-cli connect` succeeds once the
+*actor* is `Authorized`, retrying on a live link instead of restarting it. The
+Grant's failure codes became `AuthenticationStatus` (`Rejected`, `Retryable`,
+`PolicyDenied`) instead of zipline's `ResponseCode` additions, and the OIDC IdP
+advertisement moved from Hello TLV 9 to 11. See `docs/ZDP.md` ("Link and
+docking-session bring-up").
+
 **Silent re-authentication** was built separately, umbrella
 [zipline#40](https://github.com/org-zpr/zl-zipline/issues/40) (closed), and is
 what the *Credential lifetimes and re-authentication* section above describes.
@@ -1171,16 +1187,20 @@ what the *Credential lifetimes and re-authentication* section above describes.
   connection all live on the **node's** `NodeToAdapter` link, while the
   `AuthAgent` `ph-cli` registers lives on the **adapter's** `AdapterToNode`
   link, so the node reached its deadline with no agent to ask. R8
-  (zipline#66) added the missing hop: ZDP `RenewAuthenticationRequest = 142`
-  / `RenewAuthenticationResponse = 143` (`adapter/ph/src/zdp.rs`). The node
+  (zipline#66) added the missing hop: ZDP `RenewAuthenticationRequest = 144`
+  / `RenewAuthenticationResponse = 145` (`adapter/ph/src/zdp.rs`; 142/143
+  until zl-zpr-core#96 gave those numbers to upstream's Start/Abandon
+  Authentication). The node
   sends one on the renewal deadline with a fresh challenge; the adapter
   answers from its registered `AuthAgent` through the R6 bridge with
-  `interactive = false`, or `ResponseCode::AuthUnavailable` when there is no
+  `interactive = false`, or `AuthenticationStatus::Retryable` (formerly
+  `ResponseCode::AuthUnavailable`) when there is no
   agent or no advertised IdP, so the node records *why* renewal was
   impossible rather than seeing a dropped packet; the node verifies the
   echoed challenge and completes with `reauthorize` against the issuer
   stashed at login (`RenewalIdentity`). One attempt is in flight at a time
-  (`renewal_in_flight`, cleared on success and on failure, and bounded so a
+  (`RenewalState`'s in-flight flag in `actor_renewal.rs`, cleared on success
+  and on failure, and bounded so a
   hung agent cannot pin it past expiry), and the link stays Active
   throughout.
 - **`authorize_connect` returns the authentication expiry as `authExpires`** —
@@ -1224,10 +1244,11 @@ what the *Credential lifetimes and re-authentication* section above describes.
   change still needs the local netns tier ("Gate escalation" in
   `skills/zpr/SKILL.md`).
 - **The renewal ZDP messages are not in the RFC.**
-  `RenewAuthenticationRequest = 142` and `RenewAuthenticationResponse = 143`
+  `RenewAuthenticationRequest = 144` and `RenewAuthenticationResponse = 145`
   are implemented and unit-tested but carry a `TODO: add to RFC 6`
-  (`adapter/ph/src/zdp.rs:42-43`), so RFC 6 does not yet describe a message
-  pair that is on the wire.
+  (`adapter/ph/src/zdp.rs`), so RFC 6 does not yet describe a message pair
+  that is on the wire. They are zipline-only numbers, chosen to avoid upstream
+  #1410's 142/143.
 - Real-Google validation is a manual release checklist
   (`zl-zpr-core/integration-test/OIDC-RELEASE-CHECKLIST.md`), not automated —
   the fake IdP cannot prove the `hd`-absent rejection against Google's actual
