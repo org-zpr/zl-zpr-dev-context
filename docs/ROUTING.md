@@ -197,12 +197,13 @@ A link becomes live when **both** of its endpoints are connected nodes:
 
 Three caveats, all documented in the code as TODOs:
 
-- **A declared peering between two connected nodes is taken as evidence the link
-  is up.** The visa service cannot see which peer forwarded a node's VSAPI
-  connection, so a node with several connected peers gets edges for all of them.
-  The suggested fix is to have the node report the link it came in over as a
-  connect parameter. For Zodes the schema now carries the replacement contract
-  (see "Link-state reports" below); nothing implements it yet.
+- **For a node that does not report link state, a declared peering between two
+  connected nodes is taken as evidence the link is up.** The visa service cannot
+  see which peer forwarded a node's VSAPI connection, so such a node gets edges
+  for all its connected peers. Nodes that report (see "Link-state reports"
+  below) replace that assumption with what they actually see; until the node
+  side lands ([#223](https://github.com/org-zpr/zl-zipline/issues/223)) no node
+  reports, and every link follows this legacy rule.
 - **A failed `add_linked_node` is logged, not retried.** It leaves the edge in
   neither the router nor state, and `revalidate_against_policy` only works the
   union of those two — so the link stays missing until an endpoint reconnects.
@@ -214,14 +215,14 @@ Three caveats, all documented in the code as TODOs:
   which takes a node's own substrate address from the first resolved link it
   finds.
 
-### Link-state reports (schema only)
+### Link-state reports
 
-`vs.capnp` on `feature/zodes` defines how a node tells the visa service which
-of its links are up
-([#217](https://github.com/org-zpr/zl-zipline/issues/217)). Nothing sends or
-reads it yet: the node side is
-[#223](https://github.com/org-zpr/zl-zipline/issues/223), the routing that uses
-it is [#224](https://github.com/org-zpr/zl-zipline/issues/224).
+A node tells the visa service which of its links are up with
+`VSHandle.reportLinkStates` (schema
+[#217](https://github.com/org-zpr/zl-zipline/issues/217)). The visa service
+implements it on `feature/zodes`
+([#224](https://github.com/org-zpr/zl-zipline/issues/224)); the node side, which
+sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
 
 - **`VSHandle.reportLinkStates(links :List(LinkStateReport))`.** Each
   `LinkStateReport` names a peer by its link-certificate CN (`peerCn`, the same
@@ -234,15 +235,38 @@ it is [#224](https://github.com/org-zpr/zl-zipline/issues/224).
   reported before. A link the node does not list is not up. The node sends a
   snapshot whenever a link changes state, and again after every (re)connect to
   the visa service.
-- **What the visa service accepts.** An entry whose `peerCn` is a peer of this
-  node in its current topology, or in the links policy declares for it (which
-  include its configured initial links), whether or not `setTopology` has
-  delivered that link yet. It logs and ignores any other entry, because a
-  report can race a topology change; that is not an error.
-- **The intended rule.** The router uses a link only when both of its ends
-  report it `up`, so one node cannot claim a link its peer denies. This
-  replaces the "declared peering is evidence the link is up" caveat above once
-  [#224](https://github.com/org-zpr/zl-zipline/issues/224) lands.
+- **What the visa service accepts.** A report from a live session, with at most
+  as many entries as policy declares links for the node, each with a non-empty
+  `peerCn` that appears once. Anything else is refused: `authRequired` for a
+  dead handle, `paramError` otherwise, and nothing is stored. Entries are kept
+  by CN exactly as sent and matched to a peer only when a link is evaluated,
+  using the CN policy declares for the peer's address
+  (`Policy::node_cn_for_addr`). So a report about a link that is not installed
+  yet — the relay link reported before the endpoint has authenticated, or a
+  link `setTopology` has not delivered — applies as soon as the link is. An
+  entry whose CN matches none of the node's declared peers can never make a
+  link usable; it is logged at debug, not refused, because a report can race a
+  policy change.
+- **The rule.** The router uses a link only while both of its ends agree it is
+  up, so one node cannot claim a link its peer denies. An end that has reported
+  agrees only if its latest snapshot lists the peer's CN as `up`; a peer whose
+  CN policy does not know never matches. An end that has **never** reported
+  agrees — the legacy rule that keeps today's nodes working until they report
+  ([#223](https://github.com/org-zpr/zl-zipline/issues/223)); its removal is
+  [#242](https://github.com/org-zpr/zl-zipline/issues/242).
+- **What a change does.** A link that is not usable stays in the graph and in
+  persisted state with its id, attributes and cost; both route queries simply
+  skip it, so policy revalidation does not mistake it for drift, and a policy
+  rebuild of the link keeps it down. When a link goes from up to down, every
+  live visa whose recorded node path crosses it is marked `PendingRevoke`, VSS
+  housekeeping revokes it, and the flow re-requests and gets a route around the
+  link — the relay path, for a direct endpoint link. A link coming back up
+  affects new visas only; existing flows stay where they are until their visas
+  expire or a later policy sweep moves them.
+- **Lifetime.** Reports live in the visa service's memory. A node's reports go
+  when it disconnects or is reset. After a visa-service restart every node
+  follows the legacy rule until it re-sends its snapshot, which it does after
+  every reconnect.
 
 ### Substrate address changes (schema only)
 
@@ -264,7 +288,9 @@ it changes networks. Not implemented: the node side is
 `Router` wraps a `Graph` of `nodes: NodeId -> {edges}` and
 `edges: LinkId -> {a, b, attributes, cost}` behind one `RwLock`. Two queries:
 
-**`get_best_route(a, b)`** — lowest total cost, ties broken arbitrarily. Served
+**`get_best_route(a, b)`** — lowest total cost; a tie goes to the route with
+fewer hops, then to the one whose last link id is lexicographically smaller, so
+the same graph always yields the same route. Served
 from `Graph::best_routes`, an **all-pairs table recomputed by running Dijkstra
 from every node** on each topology mutation. `a == b` short-circuits to a
 `DirectSameNode` route: both actors dock on the same node, no link is traversed,
@@ -546,8 +572,49 @@ visa service would have to treat as untrusted input.
 A Zode's link to the relay is configured, not pushed, and it comes up before
 the first `setTopology` arrives over it. Accepting entries for any link policy
 declares for the node means that first report is not dropped; entries for
-anything else are logged and ignored.
+anything else can never make a link usable.
 ([org-zpr/zl-zipline#217](https://github.com/org-zpr/zl-zipline/issues/217))
+
+**Reports are stored by CN and resolved when a link is evaluated.** Resolving a
+`peerCn` to an address when the report arrives would drop the relay-link entry
+an endpoint's relay sends before the endpoint has authenticated, and under
+snapshot semantics nothing would re-send it while the link stays up. Storing
+the CN and matching it against policy's CN for the peer at evaluation time
+applies the report whenever the link appears.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**A link is usable only while both ends agree it is up.** A single end's word
+would let one node keep a link its peer has lost or refuses, or take down a
+link its peer still uses only to divert traffic. Requiring both ends costs one
+extra report and closes both.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**A down link stays in the graph.** Removing it from the router would make
+policy revalidation reinstall it as drift between the router and persisted
+state, and would lose its id and cost. A per-link up flag that route queries
+skip keeps persistence untouched; a policy rebuild carries the flag over.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**Link down revokes; link up does not.** A flow on a dead link is broken, so
+its visas are revoked at once and it re-requests around the failure (no
+re-heralding, ZRFC 6.4 §5.11, in v1). A flow on the relay path still works when
+the direct link comes back, so moving it is left to its visa's expiry or a
+later optimization.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**Nodes that never report keep the old rule, for now.** Until the node side
+lands ([#223](https://github.com/org-zpr/zl-zipline/issues/223)) no node
+reports; failing closed would take every multi-node route down. A non-reporting
+end agrees, and its peer can still veto by reporting the link down. The rule is
+transitional and marked for removal by
+[#242](https://github.com/org-zpr/zl-zipline/issues/242). Operator decision on
+pd gate g43. ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**Policy cost decides direct versus relay; the router only breaks ties.** A
+direct endpoint link at the default cost (1) already beats two hops through the
+relay (1 + 1), so the visa service adds no Zode-specific preference. Ties go to
+fewer hops, then to the smaller last-link id, so routing is deterministic.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **Carrying other nodes' traffic is opt-in per node.** The `forwarding` setting
 (`[node] forwarding`, `ph node --forwarding`) defaults to off, and a node with
@@ -587,34 +654,40 @@ Specified or designed, not working:
   exact next hop, or a constrained set of permissible next hops, versus leaving
   the choice to the forwarder. The implementation always computes the whole path
   centrally and pins every hop.
-- **Link/route liveness.** Nothing detects a link going down and reroutes; ZRFC
-  6.4 §5.12 requires docks and forwarders to report link and peer state changes
-  to the admin service, and §5.11 describes re-heralding a visa onto a new path
-  around a failure. Today a topology change revokes affected visas and the flow
-  re-requests. The Zodes contract for this is `reportLinkStates` (see
-  "Link-state reports"), schema only
-  ([#223](https://github.com/org-zpr/zl-zipline/issues/223),
-  [#224](https://github.com/org-zpr/zl-zipline/issues/224)).
+- **Link/route liveness.** The visa service acts on `reportLinkStates` (see
+  "Link-state reports"; [#224](https://github.com/org-zpr/zl-zipline/issues/224)),
+  but no node sends it yet ([#223](https://github.com/org-zpr/zl-zipline/issues/223)),
+  so every link still follows the legacy rule. The end-to-end check — block a
+  direct link, the flow moves to the relay — waits for node-to-node links and
+  the demo integration test
+  ([#222](https://github.com/org-zpr/zl-zipline/issues/222),
+  [#231](https://github.com/org-zpr/zl-zipline/issues/231)). ZRFC 6.4 §5.12
+  sends these reports to the admin service and §5.11 re-heralds a visa onto a
+  new path; the implementation folds the first into the visa service and
+  replaces the second with revoke-and-re-request.
 - **Backup links.** `LinkRole::backup` exists in the schema; only `Active` is
   ever sent.
-- **Multi-homed nodes**, and equal-cost multipath (ties are broken arbitrarily).
+- **Multi-homed nodes**, and equal-cost multipath (a tie picks one route
+  deterministically; see "Path computation").
 - **`FwdPep.symmetric`** — always `OneWay`.
 - **Peerings without a substrate address, and `Policy.transitNodes`**, are in
   the schema and in `zl-zpr-common` on `feature/zodes`, and nothing produces or
   reads them yet. The compiler always emits both substrate addresses and never
   emits `transitNodes`
-  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)). The visa service
-  still pins the previous `zl-zpr-common`, where an unset end decodes as
-  hostname `""` port 0 and fails DNS resolution at policy install, and it does
-  not read `transitNodes`
-  ([#227](https://github.com/org-zpr/zl-zipline/issues/227); the pin moves in
-  [#238](https://github.com/org-zpr/zl-zipline/issues/238)).
+  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)). Since
+  [#238](https://github.com/org-zpr/zl-zipline/issues/238) every consumer pins
+  `zl-zpr-common` `zl-v0.32.0-zodes.1`, where an unset end decodes as `None`;
+  the visa service skips such a peer with a warning when it resolves peers,
+  rather than failing policy install. It does not read `transitNodes` and does
+  not yet fill an unset end from the node's reported address
+  ([#227](https://github.com/org-zpr/zl-zipline/issues/227)).
 - **`Link.peerCn`, `reportLinkStates` and `updateSubstrateAddr`** are in
   `vs.capnp` on `feature/zodes`
   ([#217](https://github.com/org-zpr/zl-zipline/issues/217)) and nothing uses
-  them. The visa service answers both calls with the generated default
-  ("unimplemented") and sends `peerCn` empty; the node neither sends the calls
-  nor checks `peerCn`. Implemented by
+  them, except that the visa service implements `reportLinkStates`
+  ([#224](https://github.com/org-zpr/zl-zipline/issues/224)). It answers
+  `updateSubstrateAddr` with the generated default ("unimplemented") and sends
+  `peerCn` empty; the node neither sends the calls nor checks `peerCn`. Implemented by
   [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)
   and [#227](https://github.com/org-zpr/zl-zipline/issues/227).
 
@@ -635,7 +708,8 @@ distributes next hops **per visa** instead. Nodes hold no routing table at all.
 | Peer table, link attributes, `describe_link`, default cost | `zl-zpr-visaservice/libeval/src/policy.rs` |
 | Route and predicate types | `libeval/src/route.rs` |
 | Route-constraint evaluator (unimplemented) | `libeval/src/eval_route.rs` |
-| Graph, Dijkstra, all-paths DFS, route cache | `zl-zpr-visaservice/vs/src/router.rs` |
+| Graph, Dijkstra, all-paths DFS, route cache, link up/down flag | `zl-zpr-visaservice/vs/src/router.rs` |
+| Link-state snapshots and the both-ends rule | `vs/src/link_state.rs`; applied by `vs/src/topology_mgr.rs`, handled in `vs/src/vsapi_worker.rs` (`report_link_states`), revocation in `vs/src/visa_reconciler.rs` (`revoke_visas_over_link`) |
 | Live graph, persistence, policy revalidation | `vs/src/topology_mgr.rs`, `vs/src/db/link.rs` |
 | DNS resolution of substrate hostnames | `vs/src/policy_mgr.rs` (`PolicyResolver`) |
 | Docking-node resolution, route selection, `NoRoute` | `vs/src/visa_policy.rs` |
