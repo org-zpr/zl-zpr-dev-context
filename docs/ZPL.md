@@ -303,7 +303,7 @@ suggested order:
 
 | Block | Purpose |
 |---|---|
-| `[nodes.<ID>]` | Node identity, `zpr_address`, provider attributes, substrate addresses |
+| `[nodes.<ID>]` | Node identity, `zpr_address`, provider attributes, optional substrate addresses (a node without them reports its own, and may still be a link peer), and `transit = true` for a node that may carry other nodes' traffic (default false) |
 | `[links.<ID>]` | Topology, plus the link `attributes` an `over` clause matches. A tag is a `#`-prefixed key with an empty value |
 | `[trusted_services.<NAME>]` | Where attributes come from: `file` (local JSON), `oidc` (an OpenID Connect identity provider), or `zpr-attr/1` (networked attribute service); any other `api` is a configuration error. `default` is special — it is ZPR's own trusted service, the visa service itself verifying bootstrap (RSA) authentications against the policy's `[bootstrap]` keys |
 | `[bootstrap]` | Maps a Noise CN to an RSA public key, for self-authentication before trusted services are reachable |

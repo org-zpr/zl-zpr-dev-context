@@ -167,6 +167,12 @@ Two parts of `policy.capnp` exist for Zodes (see "Design decisions" and
   traffic between other nodes. It fails closed: a node that is not listed is
   not transit-capable, and an unset or empty list means no node is.
 
+In the `.zplc`, a node with no `substrate_addrs` may still be a link peer, and
+the compiler leaves its end of the `Peering` unset. A peer on such a node must
+not name an `interface`. `transit = true` on `[nodes.<ID>]` puts the node in
+`transitNodes`; the compiler writes the list sorted, and leaves it unset when no
+node is marked (`zl-zpr-compiler/README_ZPLC.md`).
+
 A `PolicySnapshot` additionally caches `resolved_peers_by_node`: the same peer
 list with hostnames already resolved to `SocketAddr`. Resolution happens once,
 at policy load — a failing lookup fails the whole policy install, and DNS
@@ -565,6 +571,23 @@ The node logs the refusal and counts the op as processed instead. ([zipline#219]
 node keeps it out of the five-tuple lookup table and uses it only to bind a
 stream that the previous node asks for by visa ID. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
+**Transit is marked on the node in the `.zplc`.** `transit = true` sits beside
+the node's other settings and defaults to false, so a node is transit-capable
+only if someone wrote that line for it. A top-level `transit_nodes` list was
+rejected: it would be a second place to keep in step when a node is renamed.
+The compiler turns the flags into `Policy.transitNodes`.
+([org-zpr/zl-zipline#226](https://github.com/org-zpr/zl-zipline/issues/226))
+
+**The compiler version did not move with the new fields.** The visa service
+accepts only a policy whose compiler major and minor equal its minimum, so
+bumping the compiler's minor alone would fail `zpr-dev build` gate 3 on the
+feature branch. The fields only become load-bearing once the visa service
+enforces transit: a policy from an older compiler then has no transit nodes and
+every multi-hop path gets `NoRoute`. So the compiler minor and
+`POLICY_MIN_COMPILER_*` move together in
+[#227](https://github.com/org-zpr/zl-zipline/issues/227).
+([org-zpr/zl-zipline#226](https://github.com/org-zpr/zl-zipline/issues/226))
+
 ---
 
 ## Implementation status
@@ -599,16 +622,15 @@ Specified or designed, not working:
   ever sent.
 - **Multi-homed nodes**, and equal-cost multipath (ties are broken arbitrarily).
 - **`FwdPep.symmetric`** — always `OneWay`.
-- **Peerings without a substrate address, and `Policy.transitNodes`**, are in
-  the schema and in `zl-zpr-common` on `feature/zodes`, and nothing produces or
-  reads them yet. The compiler always emits both substrate addresses and never
-  emits `transitNodes`
-  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)). The visa service
-  still pins the previous `zl-zpr-common`, where an unset end decodes as
-  hostname `""` port 0 and fails DNS resolution at policy install, and it does
-  not read `transitNodes`
-  ([#227](https://github.com/org-zpr/zl-zipline/issues/227); the pin moves in
-  [#238](https://github.com/org-zpr/zl-zipline/issues/238)).
+- **Peerings without a substrate address, and `Policy.transitNodes`**: the
+  compiler emits both on `feature/zodes`
+  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)), and the visa
+  service does not use them yet. Since the `zl-zpr-common` pin move
+  ([#238](https://github.com/org-zpr/zl-zipline/issues/238)) it decodes an
+  unset end as `None` and skips that peer with a WARN, so the link gets no
+  substrate address until the visa service fills it from the node's report. It
+  does not read `transitNodes`, so path computation still routes through any
+  node ([#227](https://github.com/org-zpr/zl-zipline/issues/227)).
 - **`Link.peerCn`, `reportLinkStates` and `updateSubstrateAddr`** are in
   `vs.capnp` on `feature/zodes`
   ([#217](https://github.com/org-zpr/zl-zipline/issues/217)) and nothing uses
