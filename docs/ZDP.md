@@ -272,8 +272,16 @@ counted.
 **Keying.** The RFC specifies IKEv2, with a long editorial aside about
 redefining it to run over non-IP substrates. `zl-zpr-core` implements **Noise**
 (`km_noise.rs`, `KM_ID_NOISE = 2`) with X.509 certificates carrying Noise
-public keys, signed by a CA (`km_cert_exchange.rs`, `pki.rs`). `KM_ID_IKEV2 = 1`
-exists as a constant and a predicate; there is no IKEv2 implementation.
+public keys, signed by a CA (`km_cert_exchange.rs`, `pki.rs`). On a link
+between two Zodes both ends send their certificate and both verify the peer's:
+the handshake aborts on a missing certificate, a certificate not signed by the
+local CA, or a certificate whose key is not the peer's Noise static key, and a
+Zode without a CA certificate does not start the link. After keying, the
+certificate's CN must be a `peerCn` in the node's current topology, or the link
+is closed before Hello (see [SECURITY_MODEL.md](SECURITY_MODEL.md), *Design
+decisions*; [zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)).
+`KM_ID_IKEV2 = 1` exists as a constant and a predicate; there is no IKEv2
+implementation.
 RFC 8019 anti-DDoS measures for the responder are not implemented.
 
 ---
