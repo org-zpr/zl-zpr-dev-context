@@ -283,14 +283,33 @@ path differs from the stored one → **revoke**. Routes are never edited in plac
 
 Two halves, and only one of them is wired up.
 
-**Visas — implemented.** `visa_mgmt::insert_visa` takes `fwd_pep.next_hop` (or
-the dock PEP's destination address when there is no `FwdPep`), resolves it to a
-link with `Assembly::find_egress_link` — which matches the address against the
-node's own ZPR addresses first, then against each peer's registered actor
-addresses — and stores it in the visa table. A next hop that resolves to no link
-is rejected as `DestNotFound`. From there forwarding is pure Stream ID switching
-(see [ZDP.md](ZDP.md)); the next hop is consulted once, at visa install, not per
-packet.
+**Visas — implemented.** `visa_mgmt::insert_visa` is the single entry point for
+visas from the visa service, pushed or pulled. It checks that the visa's shape
+matches its type (a full visa has a dock PEP; a `forwardOnly` visa has no dock
+PEP and a `FwdPep` with a specified next hop) and refuses a malformed one rather
+than trusting it. It stores the visa even if its next hop — `fwd_pep.next_hop`,
+or the dock PEP's destination address when there is no `FwdPep` — has no link
+yet, with a warning: the next hop is resolved to a link again, with
+`Assembly::find_egress_link`, when a stream is bound, and a bind whose next hop
+still has no link is refused (`DestNotFound`). `find_egress_link` matches the
+address against the node's own ZPR addresses first, then against each peer's
+registered actor addresses. From there forwarding is pure Stream ID switching
+(see [ZDP.md](ZDP.md)); the next hop is consulted when a stream is bound, not
+per packet.
+
+**`forwardOnly` visas — implemented on the node, opt-in.** A node installs one
+only if its `forwarding` setting is on: `forwarding = true` in the `[node]`
+section of the `ph node` config file, or `ph node --forwarding true`, which
+overrides the file. The default is off. With it off, `insert_visa` refuses the
+visa with `ForwardingDisabled` and logs a warning; a pushed visa is then dropped
+but still acknowledged, and a visa fetched for a bind fails that bind. A
+`forwardOnly` visa has no five-tuple, so it never enters the five-tuple lookup
+table and never matches a new flow. It is used only when the previous node on
+the path sends a `Stream ID Request` naming it: the node asks the next hop for a
+stream for the same visa and maps the upstream stream to the downstream one in
+its PFT. An adapter at either end is refused, because an adapter binds by
+traffic classifier, which a `forwardOnly` visa does not have; an adapter
+requestor is refused before anything is asked of the next hop. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
 **`setTopology` — a stub.** `vss_worker::process_topology` logs each link and
 returns `Ok`:
@@ -305,8 +324,8 @@ fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyRespon
 So a node is told its peers, their substrate addresses, their ZPR addresses, and
 carries bootstrap visas for them — and does nothing with any of it. No
 node-to-node link is ever brought up: `LinkType::NodeToNode` is marked
-*currently unsupported* in `link_state.rs`, and `insert_visa` outright panics on
-a `forwardOnly` visa (`"Forward only visas not yet supported"`).
+*currently unsupported* in `link_state.rs`. So although an intermediary node can
+now install and bind a `forwardOnly` visa, no path through one runs end to end.
 
 The consequence is worth stating plainly: **the control plane computes
 multi-hop routes that the data plane cannot yet use.** Everything above —
@@ -423,15 +442,38 @@ comes from a table lookup rather than from prefix containment.
 
 ---
 
+## Design decisions
+
+**Carrying other nodes' traffic is opt-in per node.** The `forwarding` setting
+(`[node] forwarding`, `ph node --forwarding`) defaults to off, and a node with
+it off refuses every `forwardOnly` visa. Nothing in the node's code says
+"relay": a Zode relays because it is configured to. The visa service's routing
+is meant to be the primary non-transit check; the node's refusal is defence in
+depth, and it surfaces a misconfigured relay early. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
+
+**A refused pushed visa is acknowledged, not failed.** Reporting the push as
+failed makes the visa service retry it and blocks every visa queued behind it.
+The node logs the refusal and counts the op as processed instead. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
+
+**A `forwardOnly` visa never matches a new flow.** It has no dock PEP, so the
+node keeps it out of the five-tuple lookup table and uses it only to bind a
+stream that the previous node asks for by visa ID. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
+
 ## Implementation status
 
 Specified or designed, not working:
 
 - **Node-side topology.** `setTopology` is a log-only stub; no node-to-node link
   is established.
-- **`forwardOnly` visas** panic on install, so a path with an intermediary node
-  cannot work. Two nodes with one link between them need only ingress and egress
-  visas, which is why that is the frontier.
+- **Paths through an intermediary node.** `forwardOnly` visas install and bind
+  on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)), but with no node-to-node link no such
+  path runs end to end; this is unit-tested in-process only. Two nodes with one
+  link between them need only ingress and egress visas, which is why that is
+  the frontier.
+- **Non-transit routing in the visa service.** Path computation may route
+  through any node; nothing yet keeps flows off nodes that policy does not mark
+  as transit-capable. A node with `forwarding` off refusing `forwardOnly` visas
+  is the only guard today. See [SECURITY_MODEL.md](SECURITY_MODEL.md).
 - **Route constraints** (`over`) are compiled and never enforced.
 - **Next-hop selection modes** from ZRFC 6.4 §5.11.2 — a visa specifying an
   exact next hop, or a constrained set of permissible next hops, versus leaving
@@ -475,6 +517,8 @@ distributes next hops **per visa** instead. Nodes hold no routing table at all.
 | Address pools, AAA prefixes | `vs/src/net_mgr.rs` |
 | Wire contract (`FwdPep`, `Link`, `setTopology`) | `zl-zpr-vsapi/vs.capnp` |
 | Node: visa install, next hop → egress link | `zl-zpr-core/adapter/ph/src/visa_mgmt.rs`, `visa_table.rs`, `assembly.rs` |
+| Node: stream binding, incl. `forwardOnly` link to link | `zl-zpr-core/adapter/ph/src/mgmt/node.rs` |
+| Node: `forwarding` setting | `zl-zpr-core/adapter/ph/src/config.rs`, `main_args.rs` |
 | Node: `setTopology` receive (stub) | `zl-zpr-core/adapter/ph/src/vss_worker.rs`, `libnode2/src/vss.rs` |
 | Two-node deployment | `zl-zpr-demo/multinode-demo/` |
 
