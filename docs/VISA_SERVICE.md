@@ -751,8 +751,9 @@ the peer's traffic first; and they ride only on the link whose `zprAddr` and
 `peerCn` name the joining peer. A non-relay neighbour of an unconnected node
 gets the link and no visas, so an endpoint never relays a joiner's traffic.
 `peerCn` itself comes from the peer's node join policy
-(`Policy::node_cn_for_addr`); a peer policy does not name is left out of the
-topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+(`Policy::node_cn_for_addr`). A peer whose address has no CN in policy — no node
+join policy pins that address together with a `device.zpr.adapter.cn`, or two
+pin it with different CNs — is left out of the topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
 
 ### Deferred
 

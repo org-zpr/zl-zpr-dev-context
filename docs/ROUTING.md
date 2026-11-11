@@ -379,8 +379,9 @@ fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyRespon
 }
 ```
 
-So a node is told its peers, their substrate addresses, their ZPR addresses, and
-carries bootstrap visas for them — and does nothing with any of it. No
+So a node is told its peers, their substrate addresses, their ZPR addresses and
+CNs — and, on the relay only, holds bootstrap visas for joining peers (see
+"Bootstrap routing") — and does nothing with any of it. No
 node-to-node link is ever brought up: `LinkType::NodeToNode` is marked
 *currently unsupported* in `link_state.rs`. So although an intermediary node can
 now install and bind a `forwardOnly` visa, no path through one runs end to end.
@@ -395,8 +396,10 @@ every topology, this is also what makes deletion effective without a
 revocation list. The visa service fills it
 ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) from the peer's node
 join policy, which pins the peer's `zpr.addr` and names its
-`device.zpr.adapter.cn` (`Policy::node_cn_for_addr`); a peer policy does not
-name is left out of the topology message, with a warning. The node does not
+`device.zpr.adapter.cn` (`Policy::node_cn_for_addr`). A peer whose address has
+no CN in policy — no node join policy pins that address together with a
+`device.zpr.adapter.cn`, or two pin it with different CNs — is left out of the
+topology message, with a warning. The node does not
 check it yet ([#220](https://github.com/org-zpr/zl-zipline/issues/220)), and no
 node-to-node link exists to check it on
 ([#222](https://github.com/org-zpr/zl-zipline/issues/222)).
@@ -647,10 +650,11 @@ Specified or designed, not working:
   [#238](https://github.com/org-zpr/zl-zipline/issues/238)).
 - **`Link.peerCn`, `reportLinkStates` and `updateSubstrateAddr`** are in
   `vs.capnp` on `feature/zodes`
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217)) and nothing uses
-  them. The visa service answers both calls with the generated default
-  ("unimplemented") and sends `peerCn` empty; the node neither sends the calls
-  nor checks `peerCn`. Implemented by
+  ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The visa service
+  fills `peerCn` from policy
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and answers both
+  calls with the generated default ("unimplemented"); the node neither sends
+  the calls nor checks `peerCn`. Implemented by
   [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)
   and [#227](https://github.com/org-zpr/zl-zipline/issues/227).
 
