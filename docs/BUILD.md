@@ -541,6 +541,22 @@ PR moves it. The per-repository rules:
    has moved past its newest tag, the next tag continues from the version, not
    from the old tag line.
 
+6. **A tag cut from a long-lived feature branch carries a pre-release
+   suffix.** When a feature branch (for example `feature/zodes`) changes a
+   shared crate before it merges into `zipline`, its consumers on that
+   feature branch still need a tag to pin. Tag the feature branch's merge
+   commit with the *next* version plus `-<feature>.<n>`: `zl-v0.32.0-zodes.1`,
+   then `-zodes.2` for the next schema change on the same branch. The
+   `Cargo.toml` version matches, per rule 5 (`0.32.0-zodes.1`). A bare
+   `zl-v0.32.0` stays free for `zipline`, so the two lines never claim the same
+   number for different code. When the feature branch merges into `zipline`,
+   cut the plain release tag from `zipline` and move every consumer to it in
+   one round. Consumers on the feature branch move their pin **together**, in
+   one issue, never one by one inside unrelated feature issues: gate 1 of
+   `zpr-dev build` rejects a set whose consumers pin two tags of one crate, so
+   staggered pin moves break every cross-repository build of the branch in
+   between (`org-zpr/zl-zipline#218`, `#238`).
+
 Why not bump-per-change: a version line that moves in every PR makes every PR
 conflict with every other on that line, and two branches rebased past each
 other can ship the same number for different code. It would also dilute the
