@@ -120,6 +120,22 @@ docked — nodes cannot authenticate connections by themselves. Each time a new
 trusted service connects, the visa service refreshes attributes for every
 connected actor.
 
+### VS-API calls added for Zodes (schema only)
+
+`vs.capnp` on `feature/zodes` adds three `VSHandle` calls a node makes over its
+existing session ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
+The visa service does not implement them yet: capnp gives every unimplemented
+method a default body, so each one currently returns "unimplemented".
+
+| Call | Contract | Errors | Implemented by |
+|---|---|---|---|
+| `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states; see [ROUTING.md](ROUTING.md), "Link-state reports" | entries for unknown peers are logged and ignored, not errors | [#224](https://github.com/org-zpr/zl-zipline/issues/224) |
+| `updateSubstrateAddr @9 (addr :SockAddr) -> (res :OkOrError)` | The node's substrate address changed; no re-authentication; the visa service re-sends `setTopology` to the node's peers | `paramError`: unspecified IP or port 0 | [#227](https://github.com/org-zpr/zl-zipline/issues/227) |
+| `getLoginNonce @10 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
+
+How the nonce is checked on `reauthorize`, and the exception to the exact-set
+rule it serves, are documented with #232.
+
 ### Loading policy
 
 A policy is required at startup; later updates arrive over the admin API. The
@@ -758,6 +774,12 @@ No tracker issues are filed for these unless linked.
   requiring a fresh request; and how nodes are told which other nodes to link
   to. Its sections on state and resiliency, logging, visualization, and
   replication are headings only.
+- **Which links a node should have now has a contract**, outside the design
+  document: `setTopology` names each peer with its link-certificate CN
+  (`Link.peerCn`), and the node answers with `reportLinkStates` (see
+  ROUTING.md). Both are schema only on `feature/zodes`
+  ([#217](https://github.com/org-zpr/zl-zipline/issues/217); implemented by
+  [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)).
 
 ---
 
