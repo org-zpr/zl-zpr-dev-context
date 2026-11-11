@@ -408,14 +408,14 @@ and `vs.zpr`, and the relay grants the visa service's visas only for
 `vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
 never falls back to a source the kernel picks.
 
-The HTTP clients for `api = "zpr-attr/1"` attribute stores and OIDC JWKS
-fetches are **not** bound. An attribute store at a substrate URL would break
-if its client bound a ZPR IPv6 address. **Known limitation:** the OIDC JWKS
-leg goes over the ZPRnet to an on-net `CONNECT` proxy (see
-[OIDC.md](OIDC.md)), so on a relay Zode a JWKS fetch can leave from the relay's
-address instead of `vs.zpr`, and the proxy visa does not cover it. The fix is
-to bind the JWKS client to `vs_addr` when its proxy is on-net,
-[zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240).
+An OIDC JWKS fetch that goes through the policy's `jwks_proxy_service` binds
+`vs_addr` too. That `CONNECT` proxy is always an actor on the ZPRnet (see
+[OIDC.md](OIDC.md)): the visa service resolves it to the providing actor's ZPR
+address. So on a relay Zode the fetch leaves from `vs.zpr`, which the proxy
+visa covers, not from the relay's address. A direct, unproxied JWKS fetch and
+the HTTP clients for `api = "zpr-attr/1"` attribute stores are **not** bound:
+they reach substrate URLs, and binding a ZPR IPv6 address would break them.
+([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
 
 ### Constants that must stay in sync with the compiler
 
@@ -732,13 +732,14 @@ would break a store at a substrate URL. Bind them only when one is on-net, and
 only for ZPR-address URLs.
 ([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
 
-**The JWKS client was left unbound too, and that is a known gap.** Its leg to
-the on-net `CONNECT` proxy is on the ZPRnet, so on a relay Zode it has the same
-source-selection problem as VSS had. Review of the docs found it; the
-operator chose to document it now and fix it in
-[zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240), which
-blocks the relay Zode work (zl-zipline#229).
-([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
+**A JWKS fetch binds `vs_addr` only when it goes through the proxy.** The
+`jwks_proxy_service` proxy is on the ZPRnet by construction (the visa service
+resolves it to an actor's ZPR address), so that leg has the same
+source-selection problem VSS had on a relay Zode, and binding fixes it. No
+address-range check is needed. A direct fetch goes to a substrate URL and stays
+unbound, like the attribute-store clients. Review of the #228 docs found the
+gap.
+([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
 
 ### Deferred
 
@@ -766,11 +767,6 @@ No tracker issues are filed for these unless linked.
 
 ## Where the implementation diverges from the design document
 
-- **JWKS fetches on a relay Zode may leave from the relay's address.** VSS
-  connections bind `vs_addr`, but the OIDC JWKS client does not. With the
-  visa service on a relay Zode and an on-net `CONNECT` proxy, a JWKS fetch can
-  take the relay's address as its source, which the proxy visa does not
-  cover, until [zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240).
 - **Cap'n Proto, not Thrift.** The design document specifies Thrift for the
   binary policy and the node APIs. The implementation uses Cap'n Proto
   throughout (see `zl-zpr-policy/policy.capnp`, `zl-zpr-vsapi/vs.capnp`); there is no
