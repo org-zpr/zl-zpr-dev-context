@@ -740,6 +740,20 @@ operator chose to document it now and fix it in
 blocks the relay Zode work (zl-zipline#229).
 ([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
 
+### Bootstrap visas: relay-only, next to the peer's CN
+
+A node that has not connected reaches VSAPI on bootstrap visas the visa service
+mints from the policy-declared peering (`vs/src/visa_bootstrap.rs`; ROUTING.md,
+"Bootstrap routing"). For Zodes this is the defined v1 join path, under three
+rules: only the visa service mints them; only the relay — the node the visa
+service docks on — receives them, pushed in `Link.visas` or pulled when it sees
+the peer's traffic first; and they ride only on the link whose `zprAddr` and
+`peerCn` name the joining peer. A non-relay neighbour of an unconnected node
+gets the link and no visas, so an endpoint never relays a joiner's traffic.
+`peerCn` itself comes from the peer's node join policy
+(`Policy::node_cn_for_addr`); a peer policy does not name is left out of the
+topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
 ### Deferred
 
 No tracker issues are filed for these unless linked.
@@ -797,9 +811,12 @@ No tracker issues are filed for these unless linked.
 - **Which links a node should have now has a contract**, outside the design
   document: `setTopology` names each peer with its link-certificate CN
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
-  ROUTING.md). Both are schema only on `feature/zodes`
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217); implemented by
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)).
+  ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The
+  visa service fills `peerCn` from policy
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)); the node's check
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)) and
+  `reportLinkStates` ([#223](https://github.com/org-zpr/zl-zipline/issues/223),
+  [#224](https://github.com/org-zpr/zl-zipline/issues/224)) are not built yet.
 
 ---
 

@@ -471,6 +471,17 @@ the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
 half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
+**A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
+a node that has no actor yet reach VSAPI, so whoever carries them relays that
+node's traffic. The visa service mints them only for the node it docks on (the
+relay), and only on the link whose `peerCn` names the joining node; every other
+neighbour gets the link without them. So the visa service's half of the join
+path cannot turn an endpoint into a transit node. The node's half — installing
+them only for the link whose certificate carries that CN, and accepting no
+bootstrap visa from a peer (none in Hello) — is
+[#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
+([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -557,11 +568,13 @@ not read the RFCs as a description of current guarantees.
   [OIDC.md](OIDC.md). Until that closes, an OIDC actor is disconnected when
   its authentication window ends, which is the safe direction to fail but not
   the intended behaviour.
-- **Topology-bound link certificates (Zodes).** `setTopology` now carries
+- **Topology-bound link certificates (Zodes).** `setTopology` carries
   `Link.peerCn`, the CN a peer's link certificate must carry for the node to
-  accept that link ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-  That is schema only: today the responder of a link verifies no certificate
-  at all, and the CN check that makes `peerCn` a security control is
+  accept that link ([#217](https://github.com/org-zpr/zl-zipline/issues/217)),
+  and the visa service fills it from the peer's node join policy
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)). The node does not
+  enforce it yet: today the responder of a link verifies no certificate at all,
+  and the CN check that makes `peerCn` a security control is
   [#220](https://github.com/org-zpr/zl-zipline/issues/220).
 
 ---

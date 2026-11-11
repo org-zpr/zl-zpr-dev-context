@@ -385,16 +385,19 @@ node-to-node link is ever brought up: `LinkType::NodeToNode` is marked
 *currently unsupported* in `link_state.rs`. So although an intermediary node can
 now install and bind a `forwardOnly` visa, no path through one runs end to end.
 
-**`Link.peerCn` (schema only).** Each `Link` in `setTopology` now also carries
-`peerCn`: the CN on the peer's CA-signed link certificate
+**`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
+on the peer's CA-signed link certificate
 ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The contract is
 that the receiving node accepts that link only from a peer whose verified
 certificate carries exactly this CN, and an empty `peerCn` (an older sender)
 means no peer can satisfy the check. Because a deleted Zode disappears from
 every topology, this is also what makes deletion effective without a
-revocation list. None of it runs yet: the visa service does not fill the field
-([#221](https://github.com/org-zpr/zl-zipline/issues/221)), the node does not
-check it ([#220](https://github.com/org-zpr/zl-zipline/issues/220)), and no
+revocation list. The visa service fills it
+([#221](https://github.com/org-zpr/zl-zipline/issues/221)) from the peer's node
+join policy, which pins the peer's `zpr.addr` and names its
+`device.zpr.adapter.cn` (`Policy::node_cn_for_addr`); a peer policy does not
+name is left out of the topology message, with a warning. The node does not
+check it yet ([#220](https://github.com/org-zpr/zl-zipline/issues/220)), and no
 node-to-node link exists to check it on
 ([#222](https://github.com/org-zpr/zl-zipline/issues/222)).
 
@@ -457,21 +460,34 @@ A node that is not yet connected cannot be evaluated by policy — it has no
 actor, and no route until its link is up — but it needs to reach the visa
 service's VSAPI port to connect at all. `visa_bootstrap` resolves the circularity:
 
-- Every `setTopology` message mints, per link, **two** visas for the *peer* (not
-  the recipient): one for the peer's own SYN to VSAPI, one for the visa
-  service's reply. Both are needed — with only the forward visa the reply is
-  dropped, since no dock PEP matches it and no node on the forward path has a
-  route back.
-- The recipient holds them and hands them off when the peer shows up. The peer's
-  own link is not in the router yet, so its first hop is stitched on from the
-  peering rather than routed.
+- A `setTopology` message **to the relay** — the node the visa service docks
+  on — mints, per link, **two** visas for the *peer* (not the recipient): one for
+  the peer's own SYN to VSAPI, one for the visa service's reply. Both are needed
+  — with only the forward visa the reply is dropped, since no dock PEP matches it
+  and no node on the forward path has a route back.
+- They ride only in the `Link.visas` of the link whose `zprAddr` and `peerCn`
+  name the joining peer, so the relay can bind them to the link whose
+  certificate carries that CN (node side:
+  [#222](https://github.com/org-zpr/zl-zipline/issues/222)).
+- The relay holds them and hands them off when the peer shows up. The peer's
+  own link is not in the router yet, so it is stitched on from the peering
+  rather than routed.
+- The relay may also *pull* its own copy when it sees the peer's traffic before
+  its queued copy landed (`visa_for_future_peer_request`). Any other node gets
+  neither: a link from a non-relay node to an unconnected peer carries
+  `peerCn` and no bootstrap visas, so an endpoint never relays a joiner's
+  traffic. Joining across more than one hop is deferred until the visa service
+  runs on its own Zode.
 - Minting deliberately bypasses policy evaluation: **a peering declared in
-  policy is itself the authorization** for that peer to reach VSAPI.
+  policy is itself the authorization** for that peer to reach VSAPI. Only the
+  visa service mints bootstrap visas; a node accepting none from a peer (none
+  in Hello) is [#222](https://github.com/org-zpr/zl-zipline/issues/222).
 - An already-connected peer yields no bootstrap visas — it has a VSAPI session
   and asks for what it needs.
 
-The whole module is labelled a HACK to get initial multi-node working
-(`zl-zpr-visaservice` issue 301) and is meant to be deleted.
+This is the defined join path for a Zode in v1
+([#221](https://github.com/org-zpr/zl-zipline/issues/221)); the earlier plan to
+delete the module (`zl-zpr-visaservice` issue 301) is dropped.
 
 ---
 
@@ -548,6 +564,26 @@ the first `setTopology` arrives over it. Accepting entries for any link policy
 declares for the node means that first report is not dropped; entries for
 anything else are logged and ignored.
 ([org-zpr/zl-zipline#217](https://github.com/org-zpr/zl-zipline/issues/217))
+
+**A peer's CN comes from its node join policy.** Policy has no node-to-CN
+field. The compiler emits one node join policy per node, matching the node's
+provider attributes (which name `device.zpr.adapter.cn`, the attribute
+`authenticate_node` asserts) plus `zpr.addr eq <zpr_address>`, so the visa
+service indexes that pair at policy load. An address pinned under two different
+CNs is treated as unknown rather than letting policy order pick one. Rejected:
+a new per-link CN field in policy (a schema change for a value policy already
+carries), and the connected peer's actor CN (absent exactly when it matters,
+for a joining node). ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
+**Bootstrap visas go only to the relay.** Any connected neighbour of an
+unconnected node used to receive its bootstrap visas, so an endpoint with a
+declared direct link to a laptop that had not joined yet would have carried the
+laptop's VSAPI traffic. Limiting them to the node the visa service docks on
+keeps endpoints non-transit and matches the v1 shape: every Zode is one hop
+from the visa service through the relay. `Policy.transitNodes` was the
+alternative, but it stays empty until the compiler fills it
+([#226](https://github.com/org-zpr/zl-zipline/issues/226)), so nothing could
+join until then. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
 
 **Carrying other nodes' traffic is opt-in per node.** The `forwarding` setting
 (`[node] forwarding`, `ph node --forwarding`) defaults to off, and a node with
