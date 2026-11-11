@@ -382,6 +382,19 @@ services live), and `ts_secrets_dir` (where `<service-id>.token` bearer-token
 files for `api = "zpr-attr/1"` trusted services live). Unknown keys are
 rejected.
 
+`vs_addr` (default `fd5a:5052::1`, see below) is the visa service's own ZPR
+address, and it is used in both directions. The VS-API and admin listeners
+bind it, and every outbound VSS connection to a node binds it as its source
+address before connecting. VSS traffic therefore always leaves from `vs.zpr`,
+even when the interface also carries another address. That is the case on a
+relay Zode that hosts the visa service: one TUN carries the relay's address
+and `vs.zpr`, and the relay grants the visa service's visas only for
+`vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
+never falls back to a source the kernel picks. The HTTP clients for
+`api = "zpr-attr/1"` attribute stores and OIDC JWKS fetches are **not**
+bound: they reach substrate URLs (JWKS sometimes through a proxy), and
+binding a ZPR IPv6 address would break them.
+
 ### Constants that must stay in sync with the compiler
 
 Changing either side alone will break a ZPRnet, because the compiler writes
@@ -673,6 +686,28 @@ ever doing it to itself.
 factor (~6000 years); harmless. `default`'s `cert_path` is written to policy
 but never read by the visa service.
 ([zipline#118](https://github.com/org-zpr/zl-zipline/issues/118))
+
+### Outbound VSS connections bind `vs_addr`
+
+From the Zodes epic ([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216)),
+pd plan p13, [zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228).
+
+**Bind the source address, not `preferred_lft 0`.** With the relay's address
+and `vs.zpr` on one TUN, RFC 6724 source selection has nothing that prefers
+`vs.zpr`, and a connection from the relay's address has no visa. The
+alternative was to mark the relay's own address not-for-automatic-selection
+(Linux `preferred_lft 0`). Binding wins because it works on any platform and
+does not depend on how a separate process (`ph`) configures the TUN.
+`vs_addr` is always local at run time, since the VS-API listener already
+binds it at startup. The fix is on the visa service side because the node's
+VSS listener does not check the peer address; only the relay's visa table
+would drop the traffic.
+([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
+
+**Attribute-store and JWKS clients stay unbound** (operator decision on the
+plan). No attribute service is reached over the ZPRnet today. Bind them only
+when one is, and only for ZPR-address URLs.
+([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
 
 ### Deferred
 
