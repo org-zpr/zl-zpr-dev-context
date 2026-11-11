@@ -449,6 +449,15 @@ Two consequences worth knowing:
    consumers pinning different tags of the same crate as an error, so a set
    cannot be cut while a bump is half-applied.
 
+   **On `feature/zodes`** (the Zodes epic, org-zpr/zl-zipline#216), the
+   consumers pin `zl-zpr-common` at a pre-release tag cut from that branch,
+   `zl-v0.32.0-zodes.N`. The first is `zl-v0.32.0-zodes.1`
+   (org-zpr/zl-zipline#218). All three consumers (`zl-zpr-core`,
+   `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
+   org-zpr/zl-zipline#238, never one by one inside feature issues. The general
+   rule for tags cut from a feature branch is
+   [org-zpr/zl-zpr-dev-context#82](https://github.com/org-zpr/zl-zpr-dev-context/pull/82).
+
 Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
 across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
 `zl-zpr-visaservice`, `zl-zpr-core`), because `zl-zpr-common` publicly

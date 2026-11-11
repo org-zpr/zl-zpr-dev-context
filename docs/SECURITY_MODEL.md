@@ -463,8 +463,9 @@ the above.
 machine whose owner is not trusted with other people's traffic must not relay
 it: payloads are protected only link by link today (A2A confidentiality is not
 implemented, below), so a relay can read what it forwards. The primary check
-belongs in the visa service: path computation never routes through a node that
-policy does not mark as transit-capable. The node's check is its `forwarding`
+belongs in the visa service: path computation must never route through a node
+that policy does not list as transit-capable (`Policy.transitNodes`). That check
+is not built yet (*Implementation status*, below). The node's check is its `forwarding`
 setting (`[node] forwarding`, `ph node --forwarding`, default off). With it off,
 the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
@@ -534,8 +535,9 @@ not read the RFCs as a description of current guarantees.
 - **`over`-clause path constraints.** Link constraints are recorded in policy
   and routability is checked by the topology manager, but route-aware
   evaluation in `libeval` is a scaffold.
-- **Non-transit, visa-service half.** Path computation does not yet know which
-  nodes are transit-capable and may route through any node
+- **Non-transit, visa-service half.** Policy can list the transit-capable
+  nodes (`Policy.transitNodes`), but path computation does not read the list
+  yet and may route through any node
   ([zipline#227](https://github.com/org-zpr/zl-zipline/issues/227)). Until it
   does, keeping traffic off an endpoint rests on that endpoint's `forwarding`
   setting being off, which a subverted endpoint controls.
