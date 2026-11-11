@@ -369,13 +369,18 @@ its PFT. An adapter at either end is refused, because an adapter binds by
 traffic classifier, which a `forwardOnly` visa does not have; an adapter
 requestor is refused before anything is asked of the next hop. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
-**`setTopology` — a stub.** `vss_worker::process_topology` logs each link and
-returns `Ok`:
+**`setTopology` — stored and checked, no links started.**
+`vss_worker::process_topology` logs each link, stores the list as the node's
+current topology (`Assembly.topology`), and closes any live Zode link whose
+peer's certificate CN is no longer in it
+([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)):
 
 ```rust
-fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
-    info!(target: VSS_RPC, "received topology update with {} links (not yet implemented)", links.len());
+fn process_topology(asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyResponse {
     ...
+    *asm.topology.write().unwrap() = links;
+    crate::link_state::close_zode_links_outside_topology(asm);
+    Ok(())
 }
 ```
 
@@ -573,8 +578,11 @@ stream that the previous node asks for by visa ID. ([zipline#219](https://github
 
 Specified or designed, not working:
 
-- **Node-side topology.** `setTopology` is a log-only stub; no node-to-node link
-  is established.
+- **Node-side topology.** `setTopology` is stored, and its `peerCn`s decide which
+  Zode links a node accepts and which it closes
+  ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)), but no
+  node-to-node link is started from it
+  ([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)).
 - **Paths through an intermediary node.** `forwardOnly` visas install and bind
   on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)), but with no node-to-node link no such
   path runs end to end; this is unit-tested in-process only. Two nodes with one
@@ -652,7 +660,8 @@ distributes next hops **per visa** instead. Nodes hold no routing table at all.
 | Node: visa install, next hop → egress link | `zl-zpr-core/adapter/ph/src/visa_mgmt.rs`, `visa_table.rs`, `assembly.rs` |
 | Node: stream binding, incl. `forwardOnly` link to link | `zl-zpr-core/adapter/ph/src/mgmt/node.rs` |
 | Node: `forwarding` setting | `zl-zpr-core/adapter/ph/src/config.rs`, `main_args.rs` |
-| Node: `setTopology` receive (stub) | `zl-zpr-core/adapter/ph/src/vss_worker.rs`, `libnode2/src/vss.rs` |
+| Node: `setTopology` receive and store; Zode-link CN check | `zl-zpr-core/adapter/ph/src/vss_worker.rs`, `link_state.rs`, `assembly.rs`, `libnode2/src/vss.rs` |
+| Node: Zode-link certificate verification (both ends, validity window) | `zl-zpr-core/adapter/ph/src/km_noise.rs`, `km_multiplexor.rs`, `pki.rs` |
 | Two-node deployment | `zl-zpr-demo/multinode-demo/` |
 
 A change to the topology model usually touches all four repositories: the schema

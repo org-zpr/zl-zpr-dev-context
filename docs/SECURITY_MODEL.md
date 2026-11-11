@@ -473,8 +473,9 @@ half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/21
 
 **Zode links are mutually authenticated, and the peer's name must come from the
 topology.** Both ends of a Zode-to-Zode link require the peer to present a
-certificate signed by the network's CA whose key is the peer's Noise static key;
-a certificate-less peer, another CA's certificate, or a key mismatch aborts the
+certificate signed by the network's CA, inside its validity window, whose key is
+the peer's Noise static key; a certificate-less peer, another CA's certificate,
+an expired or not-yet-valid certificate, or a key mismatch aborts the
 handshake. A Zode without a CA certificate starts no Zode links at all rather
 than linking unverified. A CA signature only proves "some registered Zode of
 this network", so the certificate's CN must also equal a `Link.peerCn` in the

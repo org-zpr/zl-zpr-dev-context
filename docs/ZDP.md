@@ -275,7 +275,8 @@ redefining it to run over non-IP substrates. `zl-zpr-core` implements **Noise**
 public keys, signed by a CA (`km_cert_exchange.rs`, `pki.rs`). On a link
 between two Zodes both ends send their certificate and both verify the peer's:
 the handshake aborts on a missing certificate, a certificate not signed by the
-local CA, or a certificate whose key is not the peer's Noise static key, and a
+local CA or outside its validity window, or a certificate whose key is not the
+peer's Noise static key, and a
 Zode without a CA certificate does not start the link. After keying, the
 certificate's CN must be a `peerCn` in the node's current topology, or the link
 is closed before Hello (see [SECURITY_MODEL.md](SECURITY_MODEL.md), *Design
