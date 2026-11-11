@@ -797,9 +797,11 @@ No tracker issues are filed for these unless linked.
 - **Which links a node should have now has a contract**, outside the design
   document: `setTopology` names each peer with its link-certificate CN
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
-  ROUTING.md). Both are schema only on `feature/zodes`
+  ROUTING.md). On `feature/zodes` the node checks `peerCn` on Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)); the visa service
+  does not fill it yet and neither side uses `reportLinkStates`
   ([#217](https://github.com/org-zpr/zl-zipline/issues/217); implemented by
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)).
+  [#221](https://github.com/org-zpr/zl-zipline/issues/221)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)).
 
 ---
 

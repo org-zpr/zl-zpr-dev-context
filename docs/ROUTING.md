@@ -380,23 +380,25 @@ fn process_topology(_asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyRespon
 ```
 
 So a node is told its peers, their substrate addresses, their ZPR addresses, and
-carries bootstrap visas for them — and does nothing with any of it. No
-node-to-node link is ever brought up: `LinkType::NodeToNode` is marked
+carries bootstrap visas for them. It stores that topology and uses its
+`peerCn`s to accept or close Zode links (below), but it brings no link up: no
+node-to-node link is ever started, and `LinkType::NodeToNode` is marked
 *currently unsupported* in `link_state.rs`. So although an intermediary node can
 now install and bind a `forwardOnly` visa, no path through one runs end to end.
 
-**`Link.peerCn` (schema only).** Each `Link` in `setTopology` now also carries
-`peerCn`: the CN on the peer's CA-signed link certificate
-([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The contract is
-that the receiving node accepts that link only from a peer whose verified
-certificate carries exactly this CN, and an empty `peerCn` (an older sender)
-means no peer can satisfy the check. Because a deleted Zode disappears from
-every topology, this is also what makes deletion effective without a
-revocation list. None of it runs yet: the visa service does not fill the field
-([#221](https://github.com/org-zpr/zl-zipline/issues/221)), the node does not
-check it ([#220](https://github.com/org-zpr/zl-zipline/issues/220)), and no
-node-to-node link exists to check it on
-([#222](https://github.com/org-zpr/zl-zipline/issues/222)).
+**`Link.peerCn`.** Each `Link` in `setTopology` now also carries `peerCn`: the
+CN on the peer's CA-signed link certificate
+([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The receiving node
+accepts a Zode link only from a peer whose verified certificate carries exactly
+a `peerCn` in its current topology, and an empty `peerCn` (an older sender)
+matches no peer. It checks when keying finishes, before Hello, and again after
+every topology update, closing links whose CN left
+([#220](https://github.com/org-zpr/zl-zipline/issues/220); see
+SECURITY_MODEL.md). Because a deleted Zode disappears from every topology, this
+is what makes deletion effective without a revocation list. The check has
+nothing to act on yet: the visa service does not fill the field
+([#221](https://github.com/org-zpr/zl-zipline/issues/221)), and no node-to-node
+link is started ([#222](https://github.com/org-zpr/zl-zipline/issues/222)).
 
 The consequence is worth stating plainly: **the control plane computes
 multi-hop routes that the data plane cannot yet use.** Everything above —
@@ -611,11 +613,13 @@ Specified or designed, not working:
   [#238](https://github.com/org-zpr/zl-zipline/issues/238)).
 - **`Link.peerCn`, `reportLinkStates` and `updateSubstrateAddr`** are in
   `vs.capnp` on `feature/zodes`
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217)) and nothing uses
-  them. The visa service answers both calls with the generated default
-  ("unimplemented") and sends `peerCn` empty; the node neither sends the calls
-  nor checks `peerCn`. Implemented by
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)
+  ([#217](https://github.com/org-zpr/zl-zipline/issues/217)), and only
+  `peerCn` is used so far. The node checks `peerCn` on Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)), but no Zode link
+  is started yet. The visa service answers both calls with the generated
+  default ("unimplemented") and sends `peerCn` empty, and the node does not send
+  the calls. Implemented by
+  [#221](https://github.com/org-zpr/zl-zipline/issues/221)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)
   and [#227](https://github.com/org-zpr/zl-zipline/issues/227).
 
 Also note that ZRFC 6.4 assigns route generation to the **Admin Service**, which
