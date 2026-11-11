@@ -557,6 +557,12 @@ not read the RFCs as a description of current guarantees.
   [OIDC.md](OIDC.md). Until that closes, an OIDC actor is disconnected when
   its authentication window ends, which is the safe direction to fail but not
   the intended behaviour.
+- **Topology-bound link certificates (Zodes).** `setTopology` now carries
+  `Link.peerCn`, the CN a peer's link certificate must carry for the node to
+  accept that link ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
+  That is schema only: today the responder of a link verifies no certificate
+  at all, and the CN check that makes `peerCn` a security control is
+  [#220](https://github.com/org-zpr/zl-zipline/issues/220).
 
 ---
 
