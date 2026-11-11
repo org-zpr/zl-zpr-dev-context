@@ -230,9 +230,12 @@ provides").
 **The SS (bootstrap-signature) arm.** `reauthorize` also accepts a
 self-signed blob, so a device authority is re-proved the same way install-driven
 re-authentication demands (zipline#120). One `reauthorize` carries at most one
-blob per namespace, and the namespace set must equal the live actor's
-authorities exactly — an actor that authenticated as RSA+OIDC re-proves both
-or fails. The SS arm requires all of: the target is a live actor admitted
+blob per namespace. For an adapter the namespace set must equal the live
+actor's credential-backed authorities exactly — an actor that authenticated as
+RSA+OIDC re-proves both or fails. A node renewing its **own** actor may also
+change its `user` namespace (see *A Zode's own login* below); the `device`
+blob is mandatory either way and the `device` namespace can never be gained or
+dropped. Any other set mismatch is a `paramError`. The SS arm requires all of: the target is a live actor admitted
 through the calling node; the actor holds a bootstrap `device.zpr.authority`;
 the blob's CN equals its authenticated CN; the signature verifies against the
 **pinned new snapshot's** bootstrap key; and the blob's timestamp is within
@@ -240,6 +243,31 @@ the maximum clock skew (180 s). There is no monotonic-timestamp rule:
 freshness comes from the node-minted, HMAC'd challenge (at most 120 s old),
 and only the docking node could replay — a compromised docking node is
 already Case 2.
+
+**A Zode's own login: the nonce comes from the visa service.** On a Zode the
+machine's actor is the node's own actor, and a user login adds the `user`
+namespace to it through `reauthorize` (logout drops it). The connect path
+binds an OIDC token to a nonce derived from the docking node's link challenge;
+that protects against a replayed `id_token` only because the docking node is a
+separate party. A Zode is its own docking node, so a node-minted nonce would
+let a subverted Zode log in as anyone whose `id_token` (and nonce) it holds,
+until the token expires. So a login must carry a nonce the visa service
+issued through `getLoginNonce`:
+
+| Bound to | Why |
+|---|---|
+| the calling node's actor address | a nonce issued to one node never serves another |
+| its VS-API session generation (`zpr.session`) | a re-authenticated node starts with no usable nonces |
+| one use, spent before any other check | not even a failed attempt can be retried with it |
+| a short lifetime (300 s) and at most 4 outstanding per node session | bounds what the visa service holds; `quotaExceeded` past it |
+
+After the nonce, the token is validated exactly as on the connect path. Only
+the node renewing its own actor may gain or drop the namespace; an adapter
+keeps the exact set. A logout strips every `user.*` attribute — whatever
+store vended it — forgets the login's session anchors, and every login and
+logout re-checks all live visas, so a visa that needed a user attribute is
+revoked. What remains: a subverted Zode can still use a login of its own
+user, as any endpoint can.
 
 **What this hands to an attacker, and why it is not a new threat.** The
 binding is enforced by the visa service against its own session record, and
@@ -471,6 +499,13 @@ the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
 half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
+**The visa service mints a Zode's login nonce.** Every endpoint is a node, so
+"a compromised docking node" now includes every laptop; a nonce the endpoint
+mints itself cannot stop it replaying a stolen `id_token`. The operator chose
+a visa-service nonce (`getLoginNonce`) over accepting that risk for v1. See
+*A Zode's own login* above.
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -518,6 +553,13 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, node half** — a node with `forwarding` off refuses
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
+- **A Zode's own login, visa-service half** — `getLoginNonce` and the
+  `reauthorize` gain/drop for a node's own actor are implemented in the visa
+  service and unit-tested per binding row
+  ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)). The
+  node and `ph-cli` side that requests the nonce and logs in is not built yet
+  ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)), so no
+  end-to-end test covers it.
 
 **Not yet, or verify before relying on it:**
 

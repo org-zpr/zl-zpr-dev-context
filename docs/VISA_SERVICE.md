@@ -78,6 +78,7 @@ background work.
 | `router` | The in-memory node graph and route cache. Knows nothing of adapters — resolve actors to their docking nodes first. |
 | `net_mgr` | Addressing. |
 | `connection_control` | New connections to the ZPRnet, node and adapter: authenticate, then authorize against policy. |
+| `login_nonce` | Visa-service-minted OIDC login nonces for a Zode's own login (`getLoginNonce`): bound to actor and VS-API session, single-use, short-lived. In memory. |
 | `event_mgr` | High-level events with system-wide consequences, such as actor joins and leaves. Fire-and-forget: it cannot report success back to a caller. |
 | `visa_reconciler` | Re-evaluates live visas against a policy snapshot and queues revocations for those that no longer hold. |
 | `visareq_worker` | "The beating heart" — one worker per visa request. |
@@ -120,12 +121,14 @@ docked — nodes cannot authenticate connections by themselves. Each time a new
 trusted service connects, the visa service refreshes attributes for every
 connected actor.
 
-### VS-API calls added for Zodes (schema only)
+### VS-API calls added for Zodes
 
 `vs.capnp` on `feature/zodes` adds three `VSHandle` calls a node makes over its
 existing session ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-The visa service does not implement them yet: capnp gives every unimplemented
-method a default body, so each one currently returns "unimplemented".
+`getLoginNonce` is implemented
+([#232](https://github.com/org-zpr/zl-zipline/issues/232)). The other two are
+not yet: capnp gives every unimplemented method a default body, so each one
+currently returns "unimplemented".
 
 | Call | Contract | Errors | Implemented by |
 |---|---|---|---|
@@ -134,7 +137,37 @@ method a default body, so each one currently returns "unimplemented".
 | `getLoginNonce @10 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
 
 How the nonce is checked on `reauthorize`, and the exception to the exact-set
-rule it serves, are documented with #232.
+rule it serves, are under *A Zode's own login and logout* below.
+
+### A Zode's own login and logout
+
+A Zode's machine actor is the node's own actor (RSA only). A user login adds
+the `user` namespace to it through `reauthorize`; a logout removes it. This is
+the one exception to the exact-set rule, and only for a node renewing its own
+actor (the `reauthorize` target is the calling node's address):
+
+- **Gain (login):** the device blob plus an OIDC blob. The visa service first
+  spends the blob's nonce in its login-nonce store (`vs/src/login_nonce.rs`):
+  it must have been issued by `getLoginNonce` to this actor in its current
+  VS-API session (`zpr.session`) and be unexpired. Then the token is validated
+  exactly as on the connect path, whose nonce check binds it to that nonce.
+  Every nonce failure is a generic `authError`.
+- **Drop (logout):** the device blob only. The renewed actor keeps only
+  attributes the visa service stamped itself (never one in `user.`); the policy
+  re-run re-fetches trusted-service attributes from the device identity. The
+  login's OIDC session anchors are forgotten.
+- **Device blob always.** An OIDC blob without it, or a namespace change on any
+  actor other than the caller's own, is a `paramError`.
+- **Visas follow.** After every gain or drop the visa service re-checks every
+  live visa (the attribute-change sweep), so a visa that needed a user
+  attribute is revoked on logout.
+
+The login-nonce store is in memory. A nonce is 32 random bytes (base64url),
+usable until `expiresAt` (300 s, `LOGIN_NONCE_TTL_SECS`), at most 4 unexpired
+per actor session (`LOGIN_NONCE_MAX_PER_ACTOR`; `getLoginNonce` answers
+`quotaExceeded` past it). Expired entries are swept on every mint and spend,
+and a mint also drops the node's entries from an earlier session. After a
+restart there are none, and the node asks again.
 
 ### Loading policy
 
@@ -675,15 +708,39 @@ only connect and reauthorize run — is the whole tracking state; no new
 per-actor bookkeeping exists.
 ([zipline#123](https://github.com/org-zpr/zl-zipline/issues/123))
 
-**Every authority is re-proved, and the set must match exactly.**
-`reauthorize` takes one blob per namespace, and the namespace set must equal
-the live actor's authorities — all-or-nothing, so an OIDC actor whose agent
-cannot refresh silently is revoked at the deadline and logs in again. The SS
+**Every authority is re-proved, and for an adapter the set must match
+exactly.** `reauthorize` takes one blob per namespace, and for an adapter
+the namespace set must equal the live actor's authorities — all-or-nothing,
+so an OIDC actor whose agent cannot refresh silently is revoked at the deadline and logs in again. The SS
 arm's freshness comes from the node-minted, HMAC'd challenge (at most 120 s
 old) plus the VS skew check; a monotonic-timestamp rule was rejected because
 only the docking node could replay, and a compromised docking node is already
 SECURITY_MODEL Case 2.
 ([zipline#120](https://github.com/org-zpr/zl-zipline/issues/120))
+
+**A node may change only its own `user` namespace.** The exact-set rule has
+one exception, for a Zode: a node renewing its own actor may gain the `user`
+namespace (login) or drop it (logout), with the device blob mandatory. Letting
+a node change a docked adapter's namespaces was rejected — the node would then
+decide who an adapter is. A gain on an actor whose user authority came from
+trusted-service enrichment is refused: one user authority per actor.
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
+**The login nonce is minted and spent by the visa service.** On a Zode the
+endpoint is its own docking node, so a nonce it mints itself would not stop a
+replayed `id_token`. The nonce is bound to actor and VS-API session, single-use
+(spent before any check, so a failed attempt cannot retry it), and short-lived;
+the store is in memory and needs no disconnect hook. Past the per-node limit
+minting is refused rather than evicting the oldest, as the vs.capnp contract
+says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
+**Login and logout re-check every live visa.** Dropping the user namespace
+must revoke visas that needed it, and gaining it can trip a `never allow`. The
+existing attribute-change sweep re-checks every live visa inline, after the
+actor is persisted. This costs one full sweep per login or logout; a
+per-actor sweep was not built because logins are rare. An ordinary renewal
+whose claims change still runs no sweep (unchanged behaviour).
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **A node re-authenticates in place.** It re-runs
 `connect(Reconnect)`/`challenge`/`authenticate` on its existing `vs_service`
@@ -808,7 +865,7 @@ No tracker issues are filed for these unless linked.
 | Policy loading | `libeval/src/pio.rs`, `policy.rs` |
 | Per-request path | `vs/src/visareq_worker.rs` |
 | Policy lifecycle | `vs/src/policy_mgr.rs`, `visa_reconciler.rs` |
-| Connection admission | `vs/src/connection_control.rs`, `auth.rs` |
+| Connection admission | `vs/src/connection_control.rs`, `auth.rs`, `login_nonce.rs` |
 | Routing | `vs/src/topology_mgr.rs`, `router.rs` |
 | Attribute sources | `vs/src/trusted_services/` |
 | State | `vs/src/db/` |

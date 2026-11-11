@@ -242,6 +242,13 @@ three combinations are supported.
 | OIDC only *(new)* | *absent* | `google` | **claimed, unauthenticated** |
 | Both *(new)* | `zpr-bootstrap` | `google` | **authenticated** |
 
+On a Zode the "both" case is reached in two steps, on one actor. The machine
+authenticates as a node with its RSA key (device only). A user login then adds
+the user namespace to that same actor through `reauthorize`, and a logout
+removes it; the device authority and the ZPR address never change. That login
+binds its token to a nonce the visa service issued (`getLoginNonce`), not to a
+link challenge. See *Design decisions*.
+
 Consequences:
 
 - **`connection_control.rs:220` must accept more than one blob.** It currently
@@ -953,9 +960,9 @@ shipped. Full plan text is in git history:
 [zipline#40](https://github.com/org-zpr/zl-zipline/issues/40)). Decisions
 already argued in the sections above are not repeated here.
 
-**The OIDC nonce is bound to the node's link challenge, not to a visa-service
-value.** The design above assumed the visa service supplies the nonce; it
-cannot, because the 48-byte `nonce||ctime||hmac` in
+**For a docked adapter, the OIDC nonce is bound to the node's link challenge,
+not to a visa-service value.** The design above assumed the visa service
+supplies the nonce; on the adapter connect path it cannot, because the 48-byte `nonce||ctime||hmac` in
 `ZdpInitAuthenticationPayload` is the *node's* HMAC challenge and only the node
 holds the link key. So the adapter sends
 `nonce = base64url_nopad(SHA-256(challenge))` (`oidc_nonce_for_challenge`), the
@@ -965,6 +972,28 @@ token's `nonce` to equal it. The token is bound to this link's attempt,
 freshness is enforced by the one party that can check it, and the visa service
 needs no new state. ([zipline#12](https://github.com/org-zpr/zl-zipline/issues/12),
 [zipline#13](https://github.com/org-zpr/zl-zipline/issues/13))
+
+**For a Zode's own login, the nonce comes from the visa service.** The
+link-challenge binding works because the docking node is a separate, honest
+party: a stolen `id_token` carries someone else's nonce and fails. On a Zode
+the endpoint is its own docking node, so it would mint its own nonce, and a
+subverted Zode could replay a stolen `id_token` with its nonce until the
+token expired. So the node calls `getLoginNonce`; the visa service mints a
+random value bound to that node's actor and VS-API session, single-use and
+expiring, and `reauthorize` accepts the login only when the token's `nonce`
+equals such an outstanding nonce, which it spends before checking the token.
+This reverses the decision above for that one path; docked adapters keep the
+link-challenge binding. Accepting the replay risk for v1 and deferring the
+visa-service nonce was considered and rejected by the operator.
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
+**A Zode's login changes only its own actor.** `reauthorize` keeps the
+exact-set rule for every adapter; only a node renewing its own actor may gain
+or drop the `user` namespace, and the device RSA blob is mandatory either way.
+A node cannot log a user into, or out of, an adapter docked to it. Switching
+users in place is refused (the OIDC blob of a logged-in actor goes to the
+renewal arm, which demands the same `sub`); log out, then in.
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **The nonce expectation is an enum, not a "skip" flag.** The reauth path needs
 no nonce check (see *Credential lifetimes*), but connect and reauth share one
@@ -1142,6 +1171,14 @@ what the *Credential lifetimes and re-authentication* section above describes.
   02b730d): a `zpdump` pruning-regression pre-check, connect and visa
   assertions, and refresh legs covering the authority-collision regression
   recorded under `docs/VISA_SERVICE.md`'s *Design decisions*.
+
+**A Zode's own login (Zodes epic):** the visa service implements a node's
+own user login and logout through `reauthorize`, with the `getLoginNonce`
+nonce ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)).
+The node and `ph-cli` side — fetching the nonce, passing it as the
+authorization request's `nonce`, and sending the login — is not built yet
+([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)); until
+then this works only in visa-service unit tests.
 
 **Implemented (silent re-authentication, umbrella zipline#40):**
 
