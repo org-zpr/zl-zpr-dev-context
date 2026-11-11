@@ -383,6 +383,14 @@ intended semantics of re-heralding around a failed link and of the
 `Visa Deaccept` cascade that tears a half-built path back down — the
 implementation currently has one node, so none of it is exercised.
 
+An intermediary node holds a `forwardOnly` visa for the flow: an ID and a next
+hop, no 5-tuple. It answers a `Stream ID Request` from the previous node by
+sending its own `Stream ID Request` for the same `visa_id` to the next hop, then
+maps the upstream Stream ID to the downstream one in the upstream link's PFT. It
+does this only with its `forwarding` setting on, and only between two node
+links: an adapter binds by traffic classifier, which a `forwardOnly` visa lacks.
+See [ROUTING.md](ROUTING.md) ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
+
 ### Forwarding
 
 Forwarding is on **Stream ID alone** (6.4 §5.14): the ingress link plus the
@@ -426,7 +434,9 @@ Specified, not implemented:
 - **Node-to-node links.** `LinkType::NodeToNode` is *currently unsupported*;
   integration tests are `one-node-test.sh` and `one-node-v6-test.sh`. Multi-hop
   forwarding, visa heralding, next-hop selection (6.4 §5.11.2), and route
-  distribution (§5.12) are therefore unexercised.
+  distribution (§5.12) are therefore unexercised. The intermediary node's
+  `forwardOnly` stream binding (Flow setup, above) is implemented but tested
+  in-process only ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
 - **Substrates other than IP/UDP** — raw links, PPP, bare Ethernet.
 - **ZARP** (6.4 §3.3.1) — type 128 reserved, no implementation.
 - **IKEv2** — constant only; Noise is what runs.

@@ -457,6 +457,20 @@ the above.
 
 ---
 
+## Design decisions
+
+**Non-transit has two halves, and the node's half is defence in depth.** A
+machine whose owner is not trusted with other people's traffic must not relay
+it: payloads are protected only link by link today (A2A confidentiality is not
+implemented, below), so a relay can read what it forwards. The primary check
+belongs in the visa service: path computation must never route through a node
+that policy does not list as transit-capable (`Policy.transitNodes`). That check
+is not built yet (*Implementation status*, below). The node's check is its `forwarding`
+setting (`[node] forwarding`, `ph node --forwarding`, default off). With it off,
+the node refuses every `forwardOnly` visa. The setting cannot be the only
+guard, because a subverted node can turn it on; that is why the visa-service
+half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -501,6 +515,9 @@ not read the RFCs as a description of current guarantees.
 - **Caller-scoped disconnect** — `notifyDisconnect` accepts only the calling
   node itself, adapters docked to it, and AAA actors registered to it; see
   *Silent re-authentication* above for the binding (zipline#182).
+- **Non-transit, node half** — a node with `forwarding` off refuses
+  `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
+  bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
 
 **Not yet, or verify before relying on it:**
 
@@ -518,6 +535,12 @@ not read the RFCs as a description of current guarantees.
 - **`over`-clause path constraints.** Link constraints are recorded in policy
   and routability is checked by the topology manager, but route-aware
   evaluation in `libeval` is a scaffold.
+- **Non-transit, visa-service half.** Policy can list the transit-capable
+  nodes (`Policy.transitNodes`), but path computation does not read the list
+  yet and may route through any node
+  ([zipline#227](https://github.com/org-zpr/zl-zipline/issues/227)). Until it
+  does, keeping traffic off an endpoint rests on that endpoint's `forwarding`
+  setting being off, which a subverted endpoint controls.
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa
   service admin API, which authenticates a single API key per request with a
   read or read/write permission.
