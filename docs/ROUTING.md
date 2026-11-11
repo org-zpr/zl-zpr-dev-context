@@ -153,6 +153,20 @@ substrate }`, and emits it as a `Peering` in `Policy.topology`.
 `Policy::describe_link(node_a, node_b)` combines them into the
 `LinkDescription { link_id, attrs, cost }` that the router installs.
 
+Two parts of `policy.capnp` exist for Zodes (see "Design decisions" and
+"Implementation status" for what reads them today):
+
+- **A `Peering` end may have no substrate address.** `nodeASubstrate` or
+  `nodeBSubstrate` is left unset when policy does not know that node's
+  substrate address, as for a laptop endpoint that changes networks. That node
+  reports its own address when it authenticates (zpr-core#1381). Both ends may
+  be unset, for a direct link between two endpoints. `zl-zpr-common` decodes an
+  unset end as `None` (`Peering.substrate_a`/`substrate_b` are
+  `Option<NetAddr>`), and writes `None` by leaving the field unset.
+- **`Policy.transitNodes`** lists the nodes, by ZPR address, that may carry
+  traffic between other nodes. It fails closed: a node that is not listed is
+  not transit-capable, and an unset or empty list means no node is.
+
 A `PolicySnapshot` additionally caches `resolved_peers_by_node`: the same peer
 list with hostnames already resolved to `SocketAddr`. Resolution happens once,
 at policy load — a failing lookup fails the whole policy install, and DNS
@@ -423,6 +437,25 @@ comes from a table lookup rather than from prefix containment.
 
 ---
 
+## Design decisions
+
+**An unset `Peering` substrate address means "the node reports its own".**
+Policy cannot carry the substrate address of an endpoint that changes
+networks, so the end is left unset rather than given a placeholder. Readers
+must check `has_*()`: before `zl-zpr-common` made the field an `Option`, an
+unset `NetAddr` decoded as hostname `""` port 0 and looked like a real address.
+([org-zpr/zl-zipline#225](https://github.com/org-zpr/zl-zipline/issues/225),
+[#218](https://github.com/org-zpr/zl-zipline/issues/218))
+
+**Transit capability is a fail-closed list in policy.** `Policy.transitNodes`
+names the nodes allowed to carry other nodes' traffic, so a subverted endpoint
+cannot become a relay by turning forwarding on. A list was chosen over a
+per-node struct because policy has no per-node entry today; nodes appear only
+as link ends and keys.
+([org-zpr/zl-zipline#225](https://github.com/org-zpr/zl-zipline/issues/225))
+
+---
+
 ## Implementation status
 
 Specified or designed, not working:
@@ -446,6 +479,16 @@ Specified or designed, not working:
   ever sent.
 - **Multi-homed nodes**, and equal-cost multipath (ties are broken arbitrarily).
 - **`FwdPep.symmetric`** — always `OneWay`.
+- **Peerings without a substrate address, and `Policy.transitNodes`**, are in
+  the schema and in `zl-zpr-common` on `feature/zodes`, and nothing produces or
+  reads them yet. The compiler always emits both substrate addresses and never
+  emits `transitNodes`
+  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)). The visa service
+  still pins the previous `zl-zpr-common`, where an unset end decodes as
+  hostname `""` port 0 and fails DNS resolution at policy install, and it does
+  not read `transitNodes`
+  ([#227](https://github.com/org-zpr/zl-zipline/issues/227); the pin moves in
+  [#238](https://github.com/org-zpr/zl-zipline/issues/238)).
 
 Also note that ZRFC 6.4 assigns route generation to the **Admin Service**, which
 distributes `(egress address, next hop)` routes to docks and forwarders as a
