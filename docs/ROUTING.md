@@ -168,7 +168,8 @@ Two parts of `policy.capnp` exist for Zodes (see "Design decisions" and
   not transit-capable, and an unset or empty list means no node is.
 
 In the `.zplc`, a node with no `substrate_addrs` may still be a link peer, and
-the compiler leaves its end of the `Peering` unset. A peer on such a node must
+the compiler leaves its end of the `Peering` unset. Filling that end from the
+address the node reports is not implemented yet (see "Implementation status"). A peer on such a node must
 not name an `interface`. `transit = true` on `[nodes.<ID>]` puts the node in
 `transitNodes`; the compiler writes the list sorted, and leaves it unset when no
 node is marked (`zl-zpr-compiler/README_ZPLC.md`).
