@@ -499,6 +499,20 @@ the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
 half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
+**Zode links are mutually authenticated, and the peer's name must come from the
+topology.** Both ends of a Zode-to-Zode link require the peer to present a
+certificate signed by the network's CA, inside its validity window, whose key is
+the peer's Noise static key; a certificate-less peer, another CA's certificate,
+an expired or not-yet-valid certificate, or a key mismatch aborts the
+handshake. A Zode without a CA certificate starts no Zode links at all rather
+than linking unverified. A CA signature only proves "some registered Zode of
+this network", so the certificate's CN must also equal a `Link.peerCn` in the
+topology the visa service last pushed; an empty `peerCn` matches nothing. The
+check runs when keying finishes, before Hello, and again after every topology
+update, which closes live links whose CN left. That is what makes deleting a
+Zode effective without a revocation list: its still-valid certificate names a
+peer no topology lists. ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220))
+
 **The visa service mints a Zode's login nonce.** Every endpoint is a node, so
 "a compromised docking node" now includes every laptop; a nonce the endpoint
 mints itself cannot stop it replaying a stolen `id_token`. The operator chose
@@ -599,12 +613,13 @@ not read the RFCs as a description of current guarantees.
   [OIDC.md](OIDC.md). Until that closes, an OIDC actor is disconnected when
   its authentication window ends, which is the safe direction to fail but not
   the intended behaviour.
-- **Topology-bound link certificates (Zodes).** `setTopology` now carries
-  `Link.peerCn`, the CN a peer's link certificate must carry for the node to
-  accept that link ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-  That is schema only: today the responder of a link verifies no certificate
-  at all, and the CN check that makes `peerCn` a security control is
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220).
+- **Topology-bound link certificates (Zodes).** The verification and the
+  CN-in-topology rule are implemented for Zode-to-Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
+  decisions*, above), but no code starts such a link yet: link start from the
+  topology, and configured initial links (which also join the allowed CNs),
+  are [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the
+  rule has nothing to act on.
 
 ---
 
