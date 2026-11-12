@@ -618,6 +618,25 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, node half** — a node with `forwarding` off refuses
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
+- **Stream binding restricted to the previous hop (gap 7)** — a node binds a
+  stream for a peer Zode's `Stream ID Request` only when the visa's
+  `Visa.prevHop` equals the ZPR address recorded for that link: the address of
+  the topology entry whose `peerCn` is the peer's verified CN, or, on a joining
+  Zode's initial link before its first topology, the next hop of its handed-off
+  forward visa. Never an address the peer claims (gap 5). A visa without
+  `prevHop` (ingress, or a path of fewer than two nodes) is never bound this
+  way, and neither is a link with no recorded address. A refused request gets
+  an error `Stream ID Response`, is logged, and nothing is requested from the
+  next hop. The check runs whether the visa was already installed or fetched
+  by ID from the visa service (`requested_visa_granted` in `ph`'s
+  `mgmt/node.rs`; [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)).
+  `Visa.prevHop` is in the schema
+  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)) and the
+  visa service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)).
+  Unit tests cover the refusals; the netns Zode tests show requests from the
+  previous hop are bound and none is refused. Reverse binding for symmetric
+  visas stays undefined
+  ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **A Zode's own login, visa-service half** — `getLoginNonce` and the
   `reauthorize` gain/drop for a node's own actor are implemented in the visa
   service and unit-tested per binding row
@@ -648,18 +667,6 @@ not read the RFCs as a description of current guarantees.
   ([zipline#227](https://github.com/org-zpr/zl-zipline/issues/227)). Until it
   does, keeping traffic off an endpoint rests on that endpoint's `forwarding`
   setting being off, which a subverted endpoint controls.
-- **Stream binding restricted to the previous hop (gap 7).** The intended
-  rule: a node accepts a `Stream ID Request` for a visa only on the link whose
-  peer's topology ZPR address equals the visa's `Visa.prevHop`, and a visa
-  without `prevHop` (every ingress visa) never accepts one. Today it is not
-  enforced: any node link can send a `Stream ID Request` for a visa ID it knows
-  and have the stream bound. `Visa.prevHop` is in the schema
-  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
-  service fills it in [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)
-  and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
-  **[t88 pending: replace with the core enforcement before the PR.]**
-  Reverse binding for symmetric visas stays undefined
-  ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa
   service admin API, which authenticates a single API key per request with a
   read or read/write permission.

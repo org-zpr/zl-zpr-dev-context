@@ -156,18 +156,30 @@ actor (the `reauthorize` target is the calling node's address):
   and be unexpired. A nonce the store rejects (not issued, another actor or
   session, expired, already spent) is a generic `authError`. Then the token
   is validated exactly as on the connect path; a token whose `nonce` claim
-  differs from the blob's nonce fails there as `invalidSignature`. Just
-  before the login is persisted, the live policy generation must still be the
-  one it was validated under; if an install landed in between, the login is
-  refused with `temporarilyUnavailable` and the node logs in again (a window
-  up to the write is bounded by the install's re-authentication obligation).
+  differs from the blob's nonce fails there as `invalidSignature`. If the
+  policy generation moved before the login is persisted, it is refused with
+  `temporarilyUnavailable` and the node logs in again with a new nonce (see
+  *One commit-time recheck* below).
 - **Drop (logout):** the device blob only — on any actor that holds a user
   authority, including one whose OIDC provider policy no longer declares (a
   trusted-service-derived authority is re-derived). The renewed actor keeps only
   attributes the visa service stamped itself (never one in `user.`); the policy
   re-run re-fetches trusted-service attributes from the device identity,
   which may legitimately include `user.*` attributes a store vends for that
-  device. The login's OIDC session anchors are forgotten.
+  device. The login's OIDC session anchors are forgotten. A valid logout from
+  the node's current session is not refused because of an enrichment failure
+  or a policy change, since that would leave the login in place. (A malformed
+  request is still a `paramError`, and a logout from a stale handle -- an
+  earlier VS-API session -- is still an `authError`.) If the policy re-run
+  fails (a trusted service is down) or the policy generation moved before the
+  commit, the visa service persists the *reduced* actor instead: the loaded
+  actor with only internal-source attributes and nothing in `user.`, still a
+  node, with the services a node gets under the current policy, and a freshly
+  minted identity token. It then invalidates the actor's trusted-service
+  revisions (each cleared and its generation bumped), so the next request
+  re-fetches every source and is denied (`AttributesIndeterminate`) while one
+  is still down. Dropped data is never treated as known-absent, so a removed
+  `device.blocked` cannot lift a deny.
 - **Device blob always.** An OIDC blob without it, or a namespace change on any
   actor other than the caller's own, is a `paramError`.
 - **Visas follow.** After every gain or drop the visa service re-checks every
@@ -175,32 +187,57 @@ actor (the `reauthorize` target is the calling node's address):
   is revoked when it no longer passes policy: after a logout that is one that
   needed the login's attributes, unless device-keyed re-enrichment restored
   an equivalent attribute.
-- **Serialized.** A node's reauthorizations of its own actor hold one lock
-  from loading the actor to recording the OIDC anchors, so two concurrent
-  logins cannot both classify as a gain. A node's authenticate persists its
-  new `zpr.session` under the same lock (`add_node_serialized`), so a
-  reconnect cannot write between a self-renewal's check and its write. A
-  self-renewal is also bound to the calling handle: once the lock is held, the
-  actor's `zpr.session` must equal the session that handle was minted under,
-  and again just before persisting; otherwise it is refused (`authError`), so
-  a stale handle cannot act on the actor of a newer session.
-  `getLoginNonce` re-checks the session under the same lock before it mints,
-  so a stale handle cannot mint or sweep away the new session's nonces. An
-  attribute refresh of a node writes under that lock too, and is discarded
-  (the request is denied and retried) if the node was re-authorized since the
-  refresh loaded it, so a refresh cannot restore what a logout removed. A
-  disconnect removes the actor record under that lock too, so a self-renewal
-  can never recreate a node that was disconnected while it was in flight.
+- **One commit-time recheck.** Every writer of a node's own actor commits
+  under the node commit lock (`PolicyMgr::node_commit_lock`) and calls one
+  shared helper, `recheck_before_commit`, just before the write. It checks
+  that the stored `zpr.session` is the one expected (else `authError`) and
+  reports whether the policy generation moved since the write was prepared.
+  Two kinds of writer differ in what the lock covers. `reauthorize` of the
+  node's own actor, `open`, `getLoginNonce` and `disconnect` hold it from
+  the read their write is based on until the write, so their preparation is
+  serialized too. The node `authenticate` persist and the attribute refresh
+  prepare *outside* the lock (authentication, the network fetch of trusted
+  attributes) and take it only to commit; there, the recheck -- plus, for a
+  refresh, the identity token -- rejects a preparation that went stale, so
+  their reads and fetches are not serialized with a login or logout, but a
+  stale result is never written:
+
+  | Writer | Session checked | On a moved generation |
+  |---|---|---|
+  | `reauthorize` login or renewal of the node's own actor | the calling handle's, at load and at commit | refused, `temporarilyUnavailable` |
+  | `reauthorize` logout (and its outage fallback) | the calling handle's, at load and at commit | the reduced actor is persisted (above) |
+  | node `authenticate` persist (a `Reset` connect's teardown of the old node state runs only after the recheck, in the same locked commit) | — (it writes the new session) | refused, `temporarilyUnavailable`; the node authenticates again, its old state untouched |
+  | `open` (session resume) | load and write both under the lock | — (no re-authorization) |
+  | `getLoginNonce` mint | the handle's | — |
+  | attribute refresh of a node | the copy's (and its identity token) | discarded, `AttributesIndeterminate` (denied, retried) |
+  | `disconnect` | the actor record is removed under the lock | — |
+  | policy install | — | publication itself takes the lock |
+
+  So two concurrent logins cannot both classify as a gain; a stale handle
+  cannot act on, or mint for, a newer session; a reconnect, refresh or
+  disconnect cannot land between a self-renewal's check and its write; and
+  nothing prepared under a superseded policy is committed. Because policy
+  publication takes the same lock, an install lands either before a commit's
+  recheck (which then sees the new generation) or after its write (which the
+  install's reconciliation and re-authentication obligation then cover). The
+  identity token is minted after the recheck has chosen the actor to persist.
+  If a login's or logout's actor write fails part-way (the attributes may
+  already be committed), the visa service rolls a login back to the pre-login
+  actor (disconnecting the node if even that fails, so no login without
+  session anchors stays active), invalidates a reduced logout's revisions,
+  releases the lock, and queues an attribute-change reconcile before it
+  reports the error.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
   get, which may be none.
 - **Current generation, no lost work.** The visa sweep after a gain or drop
-  runs after the self-renewal lock is released (it needs none of the actor
+  runs after the node commit lock is released (it needs none of the actor
   serialization), under the policy snapshot current when it starts. It
   repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
   with no failed re-check or verdict write under a generation that did not
-  move. If none does, the work goes to the event manager as an
+  move; an actor-store read error during a pass counts as a failure, not as
+  an absent actor. If none does, the work goes to the event manager as an
   attribute-change reconcile instead of being dropped; that reconcile queues
   itself again every 30 s (`RECONCILE_RETRY`) while its own sweep still fails,
   so a visa whose revocation failed does not stay usable until it expires.
@@ -362,11 +399,13 @@ Each node gets its own copy of the visa, cut to its role on the path (the table
 in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
 `Visa.prevHop`, the previous node's ZPR address, so a node can refuse a
 `Stream ID Request` from any other neighbour (gap 7). The ingress copy has none.
-**Schema only** ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)):
-the visa service fills it from
-[zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core enforces
-it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
-**[t88 pending: replace with the core enforcement before the PR.]**
+`actualize_visa_for_target_node` sets it on each copy ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)). This
+includes the bootstrap visas of a joining Zode: the relay's copy of the forward
+visa names the joiner, and the joiner's copy of the reverse visa names the relay.
+A visa whose path has fewer than two nodes has no `prevHop`, so no node binds
+it on a peer's request. Core enforces the rule
+([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222); see
+SECURITY_MODEL.md, *Implementation status*).
 
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
@@ -787,11 +826,29 @@ it), and short-lived; the store is in memory and needs no disconnect hook. Past 
 minting is refused rather than evicting the oldest, as the vs.capnp contract
 says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
+**One commit-time recheck, and a valid logout is not refused for an outage or
+a policy change.** Each round of
+review on the Zode login found another path that read a node's actor or a
+policy snapshot, awaited (enrichment, persistence), and then wrote state the
+read no longer justified. Rather than a check per path, every writer of a
+node's own actor commits under the same lock and calls one helper just before
+the write; the helper checks the session and the policy generation. A login,
+renewal or node authentication under a moved generation is refused and
+retried. A valid logout from the current session instead commits a reduced
+actor, because refusing it would leave the user's login in place; a stale
+handle's logout is still refused by the session check. Policy publication takes the same lock, so
+an install can never land between a commit's recheck and its write. The
+trade-off is that an install waits behind any in-flight login or logout,
+including its attribute fetch from a possibly slow, networked attribute
+service ([org-zpr/zl-zipline#247](https://github.com/org-zpr/zl-zipline/issues/247)).
+([visaservice#63](https://github.com/org-zpr/zl-zpr-visaservice/pull/63),
+[zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
 **Login and logout re-check every live visa.** Dropping the user namespace
 must revoke visas that needed it (unless device-keyed re-enrichment restores
 an equivalent attribute), and gaining it can trip a `never allow`. The
 existing attribute-change sweep re-checks every live visa inline, after the
-actor is persisted and the self-renewal lock released, and an incomplete
+actor is persisted and the node commit lock released, and an incomplete
 sweep is retried and then handed to the event manager. This costs one full sweep per login or logout; a
 per-actor sweep was not built because logins are rare. An ordinary renewal
 whose claims change still runs no sweep (unchanged behaviour).
@@ -910,10 +967,17 @@ No tracker issues are filed for these unless linked.
   re-authentication covers removal from policy; a dedicated administrative
   revocation of an authentication root is future work.
   [zipline#136](https://github.com/org-zpr/zl-zipline/issues/136)
+- **A visa granted from a pre-logout actor copy.** A visa request holds the
+  endpoint actors across awaits; if it inserts its visa after a logout's sweep
+  has taken its snapshot, that visa escapes the logout's revocation and lives
+  until it expires or the next sweep re-checks it. Closing this needs the
+  grant checked atomically against concurrent revocation.
+  ([org-zpr/zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248))
 - **Refresh vs reauthorize for adapters.** For a node, an attribute refresh
-  takes the self-renewal lock and discards its write if the node was
-  re-authorized since its copy was loaded (the `zpr.vs.bootstrap.ident` token
-  differs), so a refresh cannot undo a Zode's logout. Adapters keep the older
+  fetches outside `PolicyMgr::node_commit_lock` and takes it only to commit,
+  discarding its write if the node was re-authorized since its copy was
+  loaded (the `zpr.vs.bootstrap.ident` token differs) or the session or
+  policy generation moved, so a refresh cannot undo a Zode's logout. Adapters keep the older
   race: `refresh_and_persist_actor` can write back an adapter copy loaded
   before a concurrent renewal. The fix is a shared per-actor lock or a
   revision-checked update.
@@ -941,11 +1005,6 @@ No tracker issues are filed for these unless linked.
   zipline#78 (see ATTRIBUTE_SERVICE.md). The RFC's network trusted-service API
   was never implemented, and the compiler rejects any `api` other than `file`,
   `oidc` and `zpr-attr/1`.
-- **`Visa.prevHop` is not filled yet.** The schema field exists
-  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
-  service starts setting it in
-  [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245).
-  **[t88 pending: replace with the core enforcement before the PR.]**
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root

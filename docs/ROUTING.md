@@ -272,28 +272,66 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   link if another usable path exists — the relay path, for a direct endpoint
   link — and is denied `NoRoute` otherwise. A visa whose route was chosen just
   before the link went down, but stored just after that pass ran, is caught as
-  it is stored: `create_visa` re-checks every link of the route once the visa
-  is committed, revokes it if one is down, and fails the issuance, so no
-  `Allow` is ever answered with a visa on a downed route. If a visa's
+  it is stored: `create_visa` re-checks the route once the visa is committed —
+  every link must still exist, be up and join a hop of the visa's recorded node
+  path, and that path must end at the destination's docking node (a policy
+  change can move a link id to another edge) — and on any mismatch revokes the
+  visa and fails the issuance, so no `Allow` is ever answered with a visa on a
+  downed or changed route. If a visa's
   revocation write fails — when a link goes down or at commit — the visa is
   quarantined: it is never handed to a node, and every pending-visa read retries
   its revocation, independent of the link (which policy may remove meanwhile)
   and of further reports. A link is installed with its flag, and every report
   is applied through its last router update, under the link-state lock, so
-  reports arriving at the same moment are never lost or applied out of order. A link coming back up affects new visas
+  reports arriving at the same moment are never lost or applied out of order.
+  A report is evaluated against one snapshot of the policy current when it is
+  applied, read under that lock, so one link never mixes two policies' CNs.
+  Reports are ordered by VS-API session: each session id carries a generation
+  that only goes up, and a report from an older generation than the node's
+  latest is refused, so a late report from a session the node has replaced
+  (a soft reconnect keeps its router node) never overwrites the new session's.
+  The old snapshot stands until the new session's first report, which a node
+  sends after every reconnect. A link coming back up affects new visas
   only; existing flows stay where they are until their visas expire or a later
   policy sweep moves them. The admin network view shows a declared link that
   reports put down as DOWN, although it stays in the graph.
 - **Policy changes.** CNs come from policy, so a new policy can change which
   reports match a link even when the link itself is unchanged. Policy
-  revalidation re-evaluates every link's flag and rebuilds any link whose flag
-  changes in the same atomic batch. The links it takes from up to down, or
+  revalidation re-evaluates every link's flag against the current policy and
+  rebuilds any link whose flag changes in the same atomic batch. A pass whose
+  policy was superseded while it ran applies nothing — no removals, no flag
+  changes, no revocations — and leaves the topology to the pass for the current
+  policy. The links it takes from up to down, or
   removes while up, have their visas revoked the same way as a reported link
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
+- **One topology operation at a time.** The visa service runs its topology
+  operations one at a time under a single lock, each held from the operation's
+  first read to its last local write, including the visa revocations that write
+  calls for. Those operations are: authentication and connect (from the policy
+  recheck to the link install), `open` (actor lookup to session persist), a
+  link-state report (from the call's arrival to the last revocation, so reports
+  a node pipelines on one handle apply in the order sent), a policy pass
+  (policy, live-node set and node validity through disconnecting invalid nodes,
+  link reconciliation and revocations), a disconnect (actor lookup to the last
+  state removal), and the startup restore. Policy installs commit under the same
+  lock, so the policy an operation reads stays current until it finishes.
+  Authentication can query trusted services, so it reads policy before taking
+  the lock. Under the lock it checks that the policy it was approved under is
+  still current, and refuses with `temporarilyUnavailable` if not; the node
+  retries. A call a node makes on its VS-API handle (connecting a newcomer,
+  `notifyDisconnect`, `registerVss`, a link-state report) rechecks under the lock
+  that the handle's session is still current, and is refused with `authRequired`
+  if a reconnect replaced it. A policy pass whose policy was replaced while it
+  refreshed actor attributes applies nothing: the newer policy's own pass does
+  the work. Node RPCs and event-queue sends run after the lock is released:
+  stopping a disconnected node's VSS worker, `setTopology`, and `ActorJoins`.
+  Visa issuance is the one path outside the lock. It is not a topology write,
+  and the commit-time route check above covers it.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
-  when it disconnects or is reset. After a visa-service restart every node
+  when it disconnects or is reset; after a reconnect, the new session's first
+  report replaces them. After a visa-service restart every node
   follows the legacy rule until it re-sends its snapshot, which it does after
   every reconnect.
 
@@ -387,10 +425,14 @@ is the **previous node's ZPR address** on the path, `path[pos-1]`. A node
 accepts a `Stream ID Request` for a visa only on the link whose peer's topology
 ZPR address equals `prevHop`; the ingress visa has none and never accepts one
 (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
-`Stream ID Request` matters most — carries no `FwdPep`. **Schema only:** the visa
-service does not fill it until [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245),
-and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
-**[t88 pending: replace with the core enforcement before the PR.]**
+`Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
+each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
+whose path has fewer than two nodes has none. Core enforces it
+([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)): a refused
+request gets an error `Stream ID Response` and nothing is asked of the next hop.
+The link's peer address is the one the topology gives the peer's verified CN,
+or, on a joining Zode's initial link before its first topology, the next hop of
+its handed-off forward visa. A link with no recorded address binds nothing.
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
@@ -701,6 +743,51 @@ its snapshot, a node takes the link down even while its peer still reports it
 `up`. A faulty or subverted endpoint can therefore take down its own links and
 divert their traffic to the relay path — which it could also do by dropping
 packets on the link — but it cannot keep a link alive that its peer denies.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**Topology operations are serialized under one lock.** Every operation that
+reads policy, link, actor or session state to decide a topology, link-state or
+session write holds one lock (`TopoOps` in `topology_mgr.rs`) from its first read
+to its last write, revocations included. Every mutating `TopologyMgr` method takes
+the guard as an argument, so an unlocked topology mutation does not compile.
+Policy installs commit under the same lock (`PolicyMgr::bind_topology_lock`).
+They take it only around the local commit, after the network-bound build, so a
+guard holder's policy cannot change underneath it.
+
+The alternative was a generation or session recheck before each write. That has
+to be repeated correctly after every await on every path, and nine review rounds
+on #224 each found one more path that missed it. With the lock, a reviewer
+checks one rule, and the compiler covers the mutations. The cost is one global
+lock over operations that are rare: node connects and disconnects, link-state
+reports and policy installs.
+
+Rules that come with it:
+- Read policy, actor and session state only after taking the lock.
+- The lock is not re-entrant: a caller that holds it passes the guard down
+  (`disconnect_locked`, the authentication undo).
+- An operation holding it waits only on local state writes. It never waits on
+  the visa request queue, a trusted service, an event-queue send or a node RPC:
+  those can be slow, and can wait on another operation that wants the lock.
+- An actor attribute refresh queries trusted services outside the lock and
+  commits under it. The commit applies only the attributes it changed onto the
+  actor as stored then, and only if that is still the same actor (identity, CN
+  and role), so it never rolls back a session or claim written meanwhile, nor
+  hands one actor's claims to another at a recycled address. Services are
+  recomputed at commit under the current policy.
+- Work that must read policy before the lock because it waits on the network
+  rechecks under the lock that the policy is still current. Today that is
+  authenticating a node against trusted services.
+
+Visa issuance stays outside the lock and is closed by ordering: a link going
+down sets its flag before its revocation pass lists visas. A visa stored before
+the listing is revoked by the pass, and one stored after it fails its
+commit-time route check, which also refuses a visa revoked while it was being
+issued even if a down-and-up cycle made its route valid again. Such a revocation clears the visa's policy stamp, and
+a later policy deny leaves it unstamped, so no later policy allow can cancel it.
+The grant itself is not yet atomic against revocation: the final check is a
+read taken before the reply, and a revoke sent over VSS can overtake its grant
+in the VS-API reply. Deferred to
+[zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248).
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **A down link stays in the graph.** Removing it from the router would make
