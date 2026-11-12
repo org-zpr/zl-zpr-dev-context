@@ -365,7 +365,7 @@ risk. Everything is a release build. The table is in claim order:
 | Tier | What runs | Prerequisites | Default |
 |---|---|---|---|
 | `unit` | `make test` in each built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | run |
-| `netns` | the ten `zl-zpr-core/integration-test/` scripts | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
+| `netns` | the `zl-zpr-core/integration-test/` scripts in its run list (`NETNS_SCRIPTS`) | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
 | `docker` | `dns-demo` deploy, `test-dns.sh`, `docker compose down -v` | `docker`, `docker compose` | `--test docker` |
 
 - A tier that was asked for and cannot run is an error under `--test all`; a
@@ -389,7 +389,7 @@ risk. Everything is a release build. The table is in claim order:
   `python3` — all hold. The scripts need no sudo: each re-execs itself
   under `unshare -nr` and runs as that namespace's mapped root
   (zipline#189). Otherwise, when a Docker daemon is reachable (`docker info`
-  succeeds), the same eleven scripts run as root inside the privileged
+  succeeds), the same scripts run as root inside the privileged
   container of `zl-zpr-core/integration-test/`'s `make docker-test`, one
   `make` invocation per script with `WORKSPACE=<build-dir>`. Either route
   runs up to four scripts at once (`--jobs N` overrides the width on both).
