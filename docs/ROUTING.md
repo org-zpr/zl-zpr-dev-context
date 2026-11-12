@@ -274,13 +274,13 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   before the link went down, but stored just after that pass ran, is caught as
   it is stored: `create_visa` re-checks every link of the route once the visa
   is committed, revokes it if one is down, and fails the issuance, so no
-  `Allow` is ever answered with a visa on a downed route. If a revocation's
-  state write fails, it is retried: for a link, by the next report from either
-  end (the report that hit the failure is answered `internal`, so the node
-  re-sends); for a visa caught at commit, by quarantining it — it is never
-  handed to a node, and every pending-visa read retries its revocation. A link
-  is installed with its flag under the link-state lock, so a report arriving
-  at the same moment is never lost. A link coming back up affects new visas
+  `Allow` is ever answered with a visa on a downed route. If a visa's
+  revocation write fails — when a link goes down or at commit — the visa is
+  quarantined: it is never handed to a node, and every pending-visa read retries
+  its revocation, independent of the link (which policy may remove meanwhile)
+  and of further reports. A link is installed with its flag, and every report
+  is applied through its last router update, under the link-state lock, so
+  reports arriving at the same moment are never lost or applied out of order. A link coming back up affects new visas
   only; existing flows stay where they are until their visas expire or a later
   policy sweep moves them. The admin network view shows a declared link that
   reports put down as DOWN, although it stays in the graph.
