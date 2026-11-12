@@ -330,9 +330,20 @@ each node's role straight off its position in that path:
 
 | Role | Position | What it gets |
 |---|---|---|
-| **Ingress** | first | Full visa (dock PEP, session keys) **plus** `FwdPep { next_hop }` |
-| **Intermediary** | middle | `forwardOnly` visa: id and `FwdPep` only |
-| **Egress** | last | Full visa, no `FwdPep` — the flow terminates here |
+| **Ingress** | first | Full visa (dock PEP, session keys) **plus** `FwdPep { next_hop }`; no `prevHop` |
+| **Intermediary** | middle | `forwardOnly` visa: id, `FwdPep`, and `prevHop` |
+| **Egress** | last | Full visa, no `FwdPep` — the flow terminates here — and `prevHop` |
+
+`Visa.prevHop` (schema `@6`, [zipline#243](https://github.com/org-zpr/zl-zipline/issues/243))
+is the **previous node's ZPR address** on the path, `path[pos-1]`. A node
+accepts a `Stream ID Request` for a visa only on the link whose peer's topology
+ZPR address equals `prevHop`; the ingress visa has none and never accepts one
+(gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
+`Stream ID Request` matters most — carries no `FwdPep`. **Schema only:** the visa
+service does not fill it until [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245),
+and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+Reverse-direction binding for symmetric visas is undefined and refused
+([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
 `FwdPep.next_hop` is the **next node's ZPR address**, not a link id and not an
 interface. `FwdPep.symmetric` exists in the schema; the code always sets

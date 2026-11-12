@@ -282,6 +282,15 @@ ingress or egress adapter, and propagates to the nodes along the path. Nodes
 attached to the ingress and egress adapters establish the visa association
 (stream ID) with the adapter.
 
+Each node gets its own copy of the visa, cut to its role on the path (the table
+in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
+`Visa.prevHop`, the previous node's ZPR address, so a node can refuse a
+`Stream ID Request` from any other neighbour (gap 7). The ingress copy has none.
+**Schema only** ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)):
+the visa service fills it from
+[zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core enforces
+it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
 
@@ -792,6 +801,10 @@ No tracker issues are filed for these unless linked.
   zipline#78 (see ATTRIBUTE_SERVICE.md). The RFC's network trusted-service API
   was never implemented, and the compiler rejects any `api` other than `file`,
   `oidc` and `zpr-attr/1`.
+- **`Visa.prevHop` is not filled yet.** The schema field exists
+  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
+  service starts setting it in
+  [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root
