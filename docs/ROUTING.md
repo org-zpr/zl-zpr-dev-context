@@ -306,6 +306,14 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
+- **One topology operation at a time.** Authentication, connect, a link-state
+  report, a policy revalidation, a disconnect and the startup restore each hold
+  the visa service's topology operation lock from their first read of policy,
+  link or session state to their last write, including the visa revocations that
+  write calls for. None of them can act on state another is about to change,
+  whatever it waits on in between. Visa issuance is the one path outside the
+  lock: it is not a topology write, and its commit-time route check above covers
+  it.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
   when it disconnects or is reset; after a reconnect, the new session's first
   report replaces them. After a visa-service restart every node
@@ -691,6 +699,25 @@ its snapshot, a node takes the link down even while its peer still reports it
 `up`. A faulty or subverted endpoint can therefore take down its own links and
 divert their traffic to the relay path — which it could also do by dropping
 packets on the link — but it cannot keep a link alive that its peer denies.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+
+**Topology operations are serialized under one lock.** Every operation that
+reads policy, link or session state to decide a topology or link-state write
+holds one lock (`TopoOps` in `topology_mgr.rs`) from its first read to its last
+write, revocations included. Every mutating `TopologyMgr` method takes the guard
+as an argument, so an unlocked mutation does not compile. The alternative, a
+generation or session recheck before each write, has to be repeated correctly
+after every await on every path. Eight review rounds on #224 each found one more
+path that missed it, so the lock replaced the rechecks: the compiler finds every
+path, and a reviewer checks one rule. The cost is one global lock over
+operations that are rare (node connects and disconnects, link-state reports,
+policy installs). Rules that come with it: read policy and session state only
+after taking the lock; it is not re-entrant; and an operation holding it waits
+only on local state writes, never on an event-queue send or a node RPC, which
+could wait on another operation that wants the lock. Visa issuance stays outside
+the lock and is closed by ordering: a link going down sets its flag before its
+revocation pass lists visas, so a visa stored before the listing is revoked by
+the pass, and one stored after it fails its commit-time route check.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **A down link stays in the graph.** Removing it from the router would make
