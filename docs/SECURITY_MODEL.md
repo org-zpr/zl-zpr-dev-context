@@ -485,6 +485,17 @@ update, which closes live links whose CN left. That is what makes deleting a
 Zode effective without a revocation list: its still-valid certificate names a
 peer no topology lists. ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220))
 
+**A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
+a node that has no actor yet reach VSAPI, so whoever carries them relays that
+node's traffic. The visa service mints them only for the node it docks on (the
+relay), and only on the link whose `peerCn` names the joining node; every other
+neighbour gets the link without them. So the visa service's half of the join
+path cannot turn an endpoint into a transit node. The node's half — installing
+them only for the link whose certificate carries that CN, and accepting no
+bootstrap visa from a peer (none in Hello) — is
+[#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
+([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -574,10 +585,12 @@ not read the RFCs as a description of current guarantees.
 - **Topology-bound link certificates (Zodes).** The verification and the
   CN-in-topology rule are implemented for Zode-to-Zode links
   ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
-  decisions*, above), but no code starts such a link yet: link start from the
-  topology, and configured initial links (which also join the allowed CNs),
-  are [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the
-  rule has nothing to act on.
+  decisions*, above), and the visa service fills `Link.peerCn` from the peer's
+  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)), but
+  no code starts such a link yet: link start from the topology, and configured
+  initial links (which also join the allowed CNs), are
+  [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the rule has
+  nothing to act on.
 
 ---
 
