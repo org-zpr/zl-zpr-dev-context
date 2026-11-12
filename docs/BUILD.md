@@ -122,6 +122,16 @@ the containerized jobs pull the private `ghcr.io/org-zpr/dev-env` image; see
 `skills/zpr/SKILL.md` ("Git / PR conventions") for what each needs
 (`org-zpr/zl-zipline#208`).
 
+**On `feature/zodes`, core CI takes the visa service from a feature
+pre-release**, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
+(`make release`, then `gh release create v0.22.0-zodes.N --prerelease --target
+<full sha> release-linux-x86_64.tar.gz`: core's integration jobs download that
+asset, so a release without it fails every job at **Download Asset**). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
+org-zpr/zl-zipline#250, because `v0.21.2` sends no `Link.peerCn`. **Re-cut
+rule** (org-zpr/zl-zipline#254): when the visa service changes in a way core CI
+needs, cut the next `-zodes.N` and move `VISA_SERVICE_RELEASE` in
+`zl-zpr-core/.github/workflows/adapter.yml` to it.
+
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
 every caller of the shared `rust-build-test.yml` / `rust-test.yml` /
@@ -454,7 +464,9 @@ Two consequences worth knowing:
    `zl-v0.32.0-zodes.N`. The first is `zl-v0.32.0-zodes.1`
    (org-zpr/zl-zipline#218). The second is `zl-v0.32.0-zodes.2`
    (org-zpr/zl-zipline#244, the visa `prevHop` field); the consumers moved to
-   it together in org-zpr/zl-zipline#245. All three consumers (`zl-zpr-core`,
+   it together in org-zpr/zl-zipline#245. The third is `zl-v0.32.0-zodes.3`
+   (org-zpr/zl-zipline#250, `Link.peerCn` required); core, visaservice and
+   compiler move to it together in #250. All three consumers (`zl-zpr-core`,
    `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
@@ -745,6 +757,8 @@ Other entry points, each a standalone script:
 | `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy |
 | `one-node-oidc-renewal-test.sh` | silent OIDC renewal and disconnect-on-revocation. Takes several minutes: the renewal cadence is a real wall clock. It was the acceptance criterion for the node-to-adapter credential request, which landed as zipline#66; its CI job is no longer gated off, but the test has not yet been observed passing (see `docs/OIDC.md`, *Not yet*) |
 | `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
+| `node-restart-test.sh` | a node restarting (killed and graceful) under a running visa service brings every link back to Active (zipline#167) |
+| `zode-link-test.sh` | the Zode link lifecycle (zl-zipline#250, `docs/ZODE_LINKS.md`): a relay Zode docking the visa service, a Zode with an initial link to it, and a Zode outside the relay's topology. Covers join, restart (rule 5), refusal of an unknown CN (rule 3), substrate loss and redial (rules 9-11), a policy that removes the link (rule 12) and link-state reports |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
 Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,

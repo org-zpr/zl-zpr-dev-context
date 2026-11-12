@@ -521,12 +521,22 @@ the peer's Noise static key; a certificate-less peer, another CA's certificate,
 an expired or not-yet-valid certificate, or a key mismatch aborts the
 handshake. A Zode without a CA certificate starts no Zode links at all rather
 than linking unverified. A CA signature only proves "some registered Zode of
-this network", so the certificate's CN must also equal a `Link.peerCn` in the
-topology the visa service last pushed; an empty `peerCn` matches nothing. The
-check runs when keying finishes, before Hello, and again after every topology
-update, which closes live links whose CN left. That is what makes deleting a
-Zode effective without a revocation list: its still-valid certificate names a
-peer no topology lists. ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220))
+this network", so the CN is checked too, when keying finishes and before
+Hello, and the check depends on the direction. The answering end keeps an
+inbound link only if the CN equals a `Link.peerCn` in the topology the visa
+service last pushed and that peer owns the link; a relay owns no link, so it
+accepts any peer in its topology. The dialing end keeps a link only if the CN
+is the one it dialed for: the peer's `peerCn`, or for the initial link the
+relay CN in its own config. A `Link` with an empty `peerCn` is rejected. Every
+topology update closes the links whose peer left it, except the Zode's
+configured initial link, which its config, not the topology, authorizes. That
+is what makes deleting a Zode effective without a revocation list: its
+still-valid certificate names a peer no topology lists, so no relay or peer
+accepts it. Deleting a relay takes reconfiguring the Zodes that name it as
+their initial link.
+([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220),
+[#250](https://github.com/org-zpr/zl-zipline/issues/250); see
+[ZODE_LINKS.md](ZODE_LINKS.md) rules 3 and 12)
 
 **A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
 a node that has no actor yet reach VSAPI, so whoever carries them relays that
@@ -653,11 +663,10 @@ not read the RFCs as a description of current guarantees.
   CN-in-topology rule are implemented for Zode-to-Zode links
   ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
   decisions*, above), and the visa service fills `Link.peerCn` from the peer's
-  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)), but
-  no code starts such a link yet: link start from the topology, and configured
-  initial links (which also join the allowed CNs), are
-  [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the rule has
-  nothing to act on.
+  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)).
+  Zodes start links from the topology and from their configured initial link
+  ([#250](https://github.com/org-zpr/zl-zipline/issues/250)). No traffic crosses
+  a Zode link yet ([#251](https://github.com/org-zpr/zl-zipline/issues/251)).
 
 ---
 

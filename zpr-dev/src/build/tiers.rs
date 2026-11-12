@@ -746,7 +746,7 @@ pub fn run_unit(plans: &[RepoPlan], logs: &Path, quiet: bool) -> TierOutcome {
 // The netns tier (issue62 step 3)
 // ---------------------------------------------------------------------------
 
-/// The eleven integration scripts the netns tier runs, in order. An explicit
+/// The twelve integration scripts the netns tier runs, in order. An explicit
 /// list, never a glob: `integration-test/unused_or_outdated/` stays out, and
 /// adding a script to the set's gate is a reviewed change (zipline#62).
 /// The list is guarded against drift by [`netns_script_drift`] (zipline#103):
@@ -765,6 +765,19 @@ const NETNS_SCRIPTS: &[&str] = &[
     "one-node-oidc-renewal-test.sh",
     "one-node-policy-reauth-test.sh",
     "node-restart-test.sh",
+    // The Zode link lifecycle: a relay, a Zode with an initial link to it,
+    // and a Zode outside the relay's topology (zl-zipline#250).
+    "zode-link-test.sh",
+];
+
+/// Scripts in [`NETNS_SCRIPTS`] that only some `zl-zpr-core` revisions carry:
+/// a feature branch added them, and a build set may pin a core from before
+/// that (the default build set pins `zipline`). Planned only when the
+/// worktree has them; otherwise recorded as skipped with a reason, never
+/// silently dropped. Every other listed script must exist.
+const NETNS_SCRIPTS_IF_PRESENT: &[&str] = &[
+    // feature/zodes only, until it merges into zipline (zl-zipline#250).
+    "zode-link-test.sh",
 ];
 
 /// Top-level `integration-test/*-test.sh` scripts the netns tier
@@ -897,6 +910,10 @@ pub struct NetnsPlan {
     /// unless `--jobs` overrides it.
     pub jobs: usize,
     pub scripts: Vec<NetnsScript>,
+    /// Listed scripts this worktree does not carry
+    /// ([`NETNS_SCRIPTS_IF_PRESENT`]), with the reason; recorded in the
+    /// tier's outcome as skipped.
+    pub skipped: Vec<(&'static str, String)>,
 }
 
 /// Concurrent netns scripts, on either route. On the host route each script
@@ -911,7 +928,7 @@ pub struct NetnsPlan {
 pub const NETNS_JOBS: usize = 4;
 
 /// Builds the netns plan against the `zl-zpr-core` worktree and `dist/`:
-/// the eleven blessed scripts in order, each with the `*_BIN` overrides the
+/// the twelve blessed scripts in order, each with the `*_BIN` overrides the
 /// scripts already honour pointed at `dist/` — nothing is copied into
 /// `integration-test/`. `a2a-pubkey-test.sh` alone runs the worktree-local
 /// `enable-security-testing` `ph` (a debug build that must never reach
@@ -949,8 +966,27 @@ pub fn netns_plan(
     // planning anything — an unlisted top-level script is a plan error,
     // never a silently smaller tier.
     netns_script_drift(&integration, NETNS_SCRIPTS, NETNS_EXCLUDED)?;
+    // A feature-branch script the worktree lacks is skipped, not run. A
+    // missing integration-test/ judges nothing, as in the drift guard.
+    let lacks = |script: &str| {
+        NETNS_SCRIPTS_IF_PRESENT.contains(&script)
+            && integration.is_dir()
+            && !integration.join(script).exists()
+    };
+    let skipped: Vec<(&'static str, String)> = NETNS_SCRIPTS
+        .iter()
+        .copied()
+        .filter(|script| lacks(script))
+        .map(|script| {
+            (
+                script,
+                "not in this zl-zpr-core revision (a feature-branch script)".to_string(),
+            )
+        })
+        .collect();
     let scripts = NETNS_SCRIPTS
         .iter()
+        .filter(|script| !lacks(script))
         .map(|script| {
             let a2a = *script == "a2a-pubkey-test.sh";
             // The security-testing ph is a debug-profile build in the
@@ -1031,6 +1067,7 @@ pub fn netns_plan(
         },
         jobs: jobs.map(std::num::NonZeroUsize::get).unwrap_or(NETNS_JOBS),
         scripts,
+        skipped,
     })
 }
 
@@ -1049,6 +1086,14 @@ pub fn run_netns(plan: &NetnsPlan, logs: &Path, quiet: bool) -> TierOutcome {
         passed: true,
         repos: BTreeMap::new(),
     };
+    for (script, reason) in &plan.skipped {
+        if !quiet {
+            println!("{script}: skipped ({reason})");
+        }
+        outcome
+            .repos
+            .insert(script.to_string(), format!("skipped: {reason}"));
+    }
 
     // Phase 1, serial: the prep builds. Their failure fails that script
     // alone; the rest of the tier still runs. Running them before any
@@ -2289,7 +2334,7 @@ mod tests {
         }
     }
 
-    /// The plan runs exactly the eleven blessed scripts, in order — an
+    /// The plan runs exactly the twelve blessed scripts, in order — an
     /// explicit list, not a glob: `unused_or_outdated/` and any new script
     /// stay out until reviewed in (zipline#62, zipline#103). The order is
     /// the documented one: `attr-query-test.sh` after `a2a-pubkey-test.sh`,
@@ -2297,10 +2342,11 @@ mod tests {
     /// zipline#103), `one-node-policy-reauth-test.sh` — the
     /// policy-install re-authentication e2e (zipline#124) — after that
     /// (zipline#125), and `node-restart-test.sh` — the node-restart
-    /// regression e2e (zipline#167/#170/#171) — last, newest last
-    /// (zipline#178).
+    /// regression e2e (zipline#167/#170/#171) — after that (zipline#178),
+    /// and `zode-link-test.sh` — the Zode link lifecycle e2e — last, newest
+    /// last (zl-zipline#250).
     #[test]
-    fn netns_plan_lists_the_eleven_scripts_in_order() {
+    fn netns_plan_lists_the_twelve_scripts_in_order() {
         let plan = netns_plan(
             Path::new("/wt/zl-zpr-core"),
             Path::new("/b/dist"),
@@ -2329,6 +2375,7 @@ mod tests {
                 "one-node-oidc-renewal-test.sh",
                 "one-node-policy-reauth-test.sh",
                 "node-restart-test.sh",
+                "zode-link-test.sh",
             ]
         );
         assert_eq!(plan.dir, Path::new("/wt/zl-zpr-core/integration-test"));
@@ -2353,6 +2400,47 @@ mod tests {
         // Non-matching top-level names are not scripts to the guard.
         std::fs::write(dir.join("Makefile"), "docker-test:\n\ttrue\n").unwrap();
         tmp
+    }
+
+    /// A feature-branch script (zl-zipline#250) runs only where the core
+    /// worktree carries it: a core revision without `zode-link-test.sh`
+    /// plans the other eleven and records the twelfth as skipped with a
+    /// reason, so the tier neither fails on a missing file nor overstates
+    /// what ran. With the script present it runs, last.
+    #[test]
+    fn netns_plan_skips_a_feature_script_the_worktree_lacks() {
+        let older: Vec<&str> = NETNS_SCRIPTS
+            .iter()
+            .copied()
+            .filter(|script| *script != "zode-link-test.sh")
+            .collect();
+        for (present, expect_run) in [(older.clone(), false), (NETNS_SCRIPTS.to_vec(), true)] {
+            let tmp = drift_fixture(&present);
+            let plan = netns_plan(
+                tmp.path(),
+                Path::new("/b/dist"),
+                Path::new("/usr/bin/valkey-server"),
+                false,
+                &host_runner(),
+                Path::new("/b"),
+                None,
+            )
+            .expect("both worktrees plan cleanly");
+            let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
+            if expect_run {
+                assert_eq!(names, NETNS_SCRIPTS);
+                assert!(plan.skipped.is_empty());
+            } else {
+                assert_eq!(names, older);
+                assert_eq!(plan.skipped.len(), 1);
+                assert_eq!(plan.skipped[0].0, "zode-link-test.sh");
+                assert!(
+                    plan.skipped[0]
+                        .1
+                        .contains("not in this zl-zpr-core revision")
+                );
+            }
+        }
     }
 
     /// The drift guard (zipline#103): a top-level `*-test.sh` in the
@@ -2748,6 +2836,46 @@ mod tests {
     /// The netns runner: continues after a failing script, records each
     /// script by name, and a prep-build failure fails that one script while
     /// the rest of the tier still runs.
+    /// A planned skip (a feature-branch script the worktree lacks) lands
+    /// in the outcome as `skipped: <reason>` and does not fail a tier whose
+    /// scripts passed (dev-context#99 review).
+    #[test]
+    fn run_netns_records_planned_skips_without_failing() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("integration-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let ok = dir.join("ok.sh");
+        std::fs::write(&ok, "#!/bin/sh\necho fine\n").unwrap();
+        std::fs::set_permissions(&ok, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let plan = NetnsPlan {
+            skipped: vec![(
+                "feature-test.sh",
+                "not in this zl-zpr-core revision".to_string(),
+            )],
+            dir: dir.clone(),
+            jobs: 1,
+            scripts: vec![NetnsScript {
+                script: "ok.sh",
+                program: ok.display().to_string(),
+                args: vec![],
+                env: vec![],
+                env_remove: vec![],
+                prep: None,
+            }],
+        };
+        let outcome = run_netns(&plan, &logs, true);
+        assert!(outcome.passed, "a skip must not fail the tier");
+        assert_eq!(outcome.repos["ok.sh"], "passed");
+        assert_eq!(
+            outcome.repos["feature-test.sh"],
+            "skipped: not in this zl-zpr-core revision"
+        );
+    }
+
     #[test]
     fn run_netns_continues_after_failure_and_prep_failure_hits_one_script() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2769,6 +2897,7 @@ mod tests {
         }
 
         let plan = NetnsPlan {
+            skipped: Vec::new(),
             dir: dir.clone(),
             jobs: 1,
             scripts: vec![
@@ -2863,6 +2992,7 @@ mod tests {
             dir: tmp.path().to_path_buf(),
         });
         let plan = NetnsPlan {
+            skipped: Vec::new(),
             dir: dir.clone(),
             jobs: 3,
             scripts: vec![script("a.sh"), never_runs, script("b.sh"), script("c.sh")],

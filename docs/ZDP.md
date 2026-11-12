@@ -59,7 +59,7 @@ Internal RFC 6.4 §1 names five protocols. ZDP is the transport under the others
 |---|---|---|
 | **ZDP** — data protocol | any two ZPR entities | implemented |
 | **ZIP** — ZPR Interface Protocol | adapter ↔ dock | implemented as ZDP management messages |
-| **ZPR Link Management** | forwarder ↔ forwarder | messages implemented; node-to-node links are not |
+| **ZPR Link Management** | forwarder ↔ forwarder | implemented: Zode links come up, are kept and recover ([ZODE_LINKS.md](ZODE_LINKS.md)); forwarding over them is [#251](https://github.com/org-zpr/zl-zipline/issues/251) |
 | **ZPR Keying** | adapter ↔ dock, forwarder ↔ forwarder | implemented with **Noise**, not IKEv2 |
 | **ZARP** — address resolution | multipoint substrates | not implemented (type reserved) |
 
@@ -277,10 +277,13 @@ between two Zodes both ends send their certificate and both verify the peer's:
 the handshake aborts on a missing certificate, a certificate not signed by the
 local CA or outside its validity window, or a certificate whose key is not the
 peer's Noise static key, and a
-Zode without a CA certificate does not start the link. After keying, the
-certificate's CN must be a `peerCn` in the node's current topology, or the link
-is closed before Hello (see [SECURITY_MODEL.md](SECURITY_MODEL.md), *Design
-decisions*; [zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)).
+Zode without a CA certificate does not start the link. After keying, before
+Hello, the CN decides whether the link stays: the dialer keeps it only if the
+CN is the one it dialed for, and the answerer only if the CN is a `peerCn` in
+its current topology and that peer owns the link. Anything else is closed and
+logged (see "Zode links" below, [ZODE_LINKS.md](ZODE_LINKS.md) rules 3 and 4,
+and [SECURITY_MODEL.md](SECURITY_MODEL.md), *Design decisions*;
+[zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)).
 `KM_ID_IKEV2 = 1` exists as a constant and a predicate; there is no IKEv2
 implementation.
 RFC 8019 anti-DDoS measures for the responder are not implemented.
@@ -319,8 +322,9 @@ peer — the caller may reset the link on those.
 
 Docking sessions are **always initiated by the adapter** (6.4 §5.6): the dock
 platform serves many adapters, adapters often have no fixed substrate address,
-and probing would be wasteful and noisy. For node-to-node links, whichever node
-has the numerically smaller node number initiates.
+and probing would be wasteful and noisy. A link between two Zodes is dialed
+only by its owner: the Zode whose initial link it is, or else the end with the
+lower ZPR address, and a relay never dials (see "Zode links" below).
 
 The sequence is: keying (Noise) → `Hello` Request/Response → link Active with
 `Echo` keep-alives → actor authorization. A Hello Response may accept, reject, or
@@ -334,8 +338,8 @@ tears the link down.
 
 - **Link** (`link_state.rs`). States: `Inactive`, `Keying`, `Helloing`, `Active`,
   `Closing`, `Resetting`, `Disconnecting`, `Error`. Link types: `Internal`,
-  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` — the last marked
-  *currently unsupported*.
+  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` (a Zode link; each end
+  records whether it is the dialer or the answerer, `ZodeEnd`).
 - **Actor** (`actor_auth.rs`, `ActorAuthorization`). One transaction carries
   `Start Authentication` → `Init Authentication` (the node's challenge) →
   `Acquire ZPR Address` (the adapter's evidence) → `Grant ZPR Address`, or
@@ -355,8 +359,36 @@ not used: zipline removed it with the BAS client (zipline#15).
 Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 3-second timeout; a link is torn down after `KEEP_ALIVE_MAX_MISSES = 3`
 consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
-5 s, and a node drops a link whose keying does not finish within
-`NODE_KEYING_TIMEOUT = 60 s` (zipline#173).
+5 s, and a node drops an adapter dock whose keying does not finish within
+`NODE_KEYING_TIMEOUT = 60 s` (zipline#173). A Zode link is bounded tighter,
+on both ends, so an attempt ends inside the owner's 5-second link-up window:
+`ZODE_KEYING_TIMEOUT = 2 s` and `ZODE_HELLO_TIMEOUT = 2 s`.
+
+### Zode links
+
+A link between two Zodes (`LinkType::NodeToNode`) uses the same keying, Hello
+and keep-alive as a docking session, with these differences. Who dials, what
+is accepted, and what happens on loss are in [ZODE_LINKS.md](ZODE_LINKS.md)
+([#250](https://github.com/org-zpr/zl-zipline/issues/250)).
+
+- **Handshake marker.** The dialing Zode puts the five bytes `ZODE1`
+  (`km_noise.rs`, `ZODE_HANDSHAKE_MARKER`) in the plaintext payload of the
+  first Noise XX message. A node that receives a Key Management packet from an
+  unknown substrate address reads that payload before any link exists
+  (`mgmt/dispatch.rs`): with the marker it starts a Zode link as the answerer,
+  without it an adapter dock. Noise mixes the payload into the handshake hash,
+  so a marker changed in transit breaks the handshake. Adding the marker gains
+  an attacker nothing: a Zode link demands a CA-signed certificate whose CN
+  passes the acceptance rules.
+- **Both ends present certificates**, as above, and the CN is checked once
+  keying finishes, before Hello.
+- **The dialer sends the HelloRequest**, as an adapter does. The answerer
+  waits for it, bounded by `ZODE_HELLO_TIMEOUT`.
+- **The answer carries no adapter-dock TLVs.** A Zode's HelloResponse has no
+  `AAA` address, no `OIDC_IDP` and no `VS_BOOTSTRAP_LINK`. A dialer that
+  receives any of them on a Zode link closes the link.
+- **No special-peer names.** A certificate on a Zode link that claims a
+  special-peer name (the visa service's) is logged and ignored.
 
 ### Flow setup
 
@@ -447,8 +479,11 @@ dropped.
 
 Specified, not implemented:
 
-- **Node-to-node links.** `LinkType::NodeToNode` is *currently unsupported*;
-  integration tests are `one-node-test.sh` and `one-node-v6-test.sh`. Multi-hop
+- **Forwarding over node-to-node links.** Zode links come up, are kept and
+  recover ([#250](https://github.com/org-zpr/zl-zipline/issues/250),
+  `zode-link-test.sh`), but no flow crosses one yet: `Stream ID Withdrawal` and
+  `Unbind Egress Stream` on a Zode link are refused
+  ([#251](https://github.com/org-zpr/zl-zipline/issues/251)). Multi-hop
   forwarding, visa heralding, next-hop selection (6.4 §5.11.2), and route
   distribution (§5.12) are therefore unexercised. The intermediary node's
   `forwardOnly` stream binding (Flow setup, above) is implemented but tested
@@ -498,6 +533,7 @@ All paths under `zl-zpr-core/adapter/ph/src/` unless noted.
 | Management plane: dispatch, handlers, senders | `mgmt/`, `mgmt_dispatch_worker.rs`, `mgmt_processor_worker.rs` |
 | Transaction IDs | `mgmt/txn_mgr.rs` |
 | Link/docking-session FSM | `link_state.rs`, `peer_table.rs` |
+| Zode links: owner, acceptance, per-link record and lifecycle, link-state reports | `zode_links.rs`, `zode_link_record.rs` |
 | Keying | `km.rs`, `km_noise.rs`, `km_cert_exchange.rs`, `km_multiplexor.rs`, `pki.rs` |
 | Visa and forwarding tables | `visa_table.rs`, `forwarding_tables.rs`, `adapter_tables.rs` |
 | Visa service connection | `visa_mgmt.rs`, `libnode2/src/vsconn.rs` |
