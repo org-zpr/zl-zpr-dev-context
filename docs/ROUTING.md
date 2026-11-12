@@ -537,12 +537,15 @@ as previous hop: the relay chose it, so it routes and binds nothing else.
 on the peer's CA-signed link certificate
 ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The receiving node
 accepts a Zode link only from a peer whose verified certificate carries exactly
-a `peerCn` in its current topology, and an empty `peerCn` (an older sender)
-matches no peer. It checks when keying finishes, before Hello, and again after
-every topology update, closing links whose CN left
+a `peerCn` in its current topology or a configured initial link's CN, and an
+empty `peerCn` (an older sender) matches no peer. It checks when keying
+finishes, before Hello, and again after every topology update, closing links
+whose CN left
 ([#220](https://github.com/org-zpr/zl-zipline/issues/220); see
 SECURITY_MODEL.md). Because a deleted Zode disappears from every topology, this
-is what makes deletion effective without a revocation list. The visa service
+is what makes deletion effective without a revocation list -- except toward a
+Zode that names it as an initial link, whose configuration entry must be
+removed as well. The visa service
 fills it ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) from the peer's
 node join policy, which pins the peer's `zpr.addr` and names its
 `device.zpr.adapter.cn` (`Policy::node_cn_for_addr`). A peer whose address has
