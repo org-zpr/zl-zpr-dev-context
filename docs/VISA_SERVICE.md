@@ -131,7 +131,7 @@ returns "unimplemented".
 
 | Call | Contract | Errors | Implemented by |
 |---|---|---|---|
-| `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states, replacing its previous report; the router uses a link only while both ends report it up, and a link going down revokes the visas crossing it. See [ROUTING.md](ROUTING.md), "Link-state reports" | `authRequired` on a dead handle; `paramError` for more entries than the node's policy-declared links, an empty `peerCn`, or a `peerCn` listed twice. An entry whose CN matches no declared peer is kept, not an error, and can never make a link usable | implemented, [#224](https://github.com/org-zpr/zl-zipline/issues/224); node side [#223](https://github.com/org-zpr/zl-zipline/issues/223) |
+| `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states, replacing its previous report; the router uses a link only while both ends agree it is up — a reporting end must list the peer `up`, and a node that has never reported counts as agreeing until it does (transitional, removal [#242](https://github.com/org-zpr/zl-zipline/issues/242)). A link going down revokes the visas crossing it. See [ROUTING.md](ROUTING.md), "Link-state reports" | `authRequired` on a dead handle; `paramError` for more entries than the node's policy-declared links, an empty `peerCn`, or a `peerCn` listed twice; `internal` when the snapshot was stored but revoking visas over a downed link failed (re-send to retry). An entry whose CN matches no declared peer is kept, not an error, and cannot make a link usable under the current policy | implemented, [#224](https://github.com/org-zpr/zl-zipline/issues/224); node side [#223](https://github.com/org-zpr/zl-zipline/issues/223) |
 | `updateSubstrateAddr @9 (addr :SockAddr) -> (res :OkOrError)` | The node's substrate address changed; no re-authentication; the visa service re-sends `setTopology` to the node's peers | `paramError`: unspecified IP or port 0 | [#227](https://github.com/org-zpr/zl-zipline/issues/227) |
 | `getLoginNonce @10 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
 
@@ -410,14 +410,14 @@ and `vs.zpr`, and the relay grants the visa service's visas only for
 `vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
 never falls back to a source the kernel picks.
 
-The HTTP clients for `api = "zpr-attr/1"` attribute stores and OIDC JWKS
-fetches are **not** bound. An attribute store at a substrate URL would break
-if its client bound a ZPR IPv6 address. **Known limitation:** the OIDC JWKS
-leg goes over the ZPRnet to an on-net `CONNECT` proxy (see
-[OIDC.md](OIDC.md)), so on a relay Zode a JWKS fetch can leave from the relay's
-address instead of `vs.zpr`, and the proxy visa does not cover it. The fix is
-to bind the JWKS client to `vs_addr` when its proxy is on-net,
-[zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240).
+An OIDC JWKS fetch that goes through the policy's `jwks_proxy_service` binds
+`vs_addr` too. That `CONNECT` proxy is always an actor on the ZPRnet (see
+[OIDC.md](OIDC.md)): the visa service resolves it to the providing actor's ZPR
+address. So on a relay Zode the fetch leaves from `vs.zpr`, which the proxy
+visa covers, not from the relay's address. A direct, unproxied JWKS fetch and
+the HTTP clients for `api = "zpr-attr/1"` attribute stores are **not** bound:
+they reach substrate URLs, and binding a ZPR IPv6 address would break them.
+([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
 
 ### Constants that must stay in sync with the compiler
 
@@ -734,13 +734,29 @@ would break a store at a substrate URL. Bind them only when one is on-net, and
 only for ZPR-address URLs.
 ([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
 
-**The JWKS client was left unbound too, and that is a known gap.** Its leg to
-the on-net `CONNECT` proxy is on the ZPRnet, so on a relay Zode it has the same
-source-selection problem as VSS had. Review of the docs found it; the
-operator chose to document it now and fix it in
-[zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240), which
-blocks the relay Zode work (zl-zipline#229).
-([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
+**A JWKS fetch binds `vs_addr` only when it goes through the proxy.** The
+`jwks_proxy_service` proxy is on the ZPRnet by construction (the visa service
+resolves it to an actor's ZPR address), so that leg has the same
+source-selection problem VSS had on a relay Zode, and binding fixes it. No
+address-range check is needed. A direct fetch goes to a substrate URL and stays
+unbound, like the attribute-store clients. Review of the #228 docs found the
+gap.
+([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
+
+### Bootstrap visas: relay-only, next to the peer's CN
+
+A node that has not connected reaches VSAPI on bootstrap visas the visa service
+mints from the policy-declared peering (`vs/src/visa_bootstrap.rs`; ROUTING.md,
+"Bootstrap routing"). For Zodes this is the defined v1 join path, under three
+rules: only the visa service mints them; only the relay — the node the visa
+service docks on — receives them, pushed in `Link.visas` or pulled when it sees
+the peer's traffic first; and they ride only on the link whose `zprAddr` and
+`peerCn` name the joining peer. A non-relay neighbour of an unconnected node
+gets the link and no visas, so an endpoint never relays a joiner's traffic.
+`peerCn` itself comes from the peer's node join policy
+(`Policy::node_cn_for_addr`). A peer whose address has no CN in policy — no node
+join policy pins that address together with a `device.zpr.adapter.cn`, or two
+pin it with different CNs — is left out of the topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
 
 ### Deferred
 
@@ -768,11 +784,6 @@ No tracker issues are filed for these unless linked.
 
 ## Where the implementation diverges from the design document
 
-- **JWKS fetches on a relay Zode may leave from the relay's address.** VSS
-  connections bind `vs_addr`, but the OIDC JWKS client does not. With the
-  visa service on a relay Zode and an on-net `CONNECT` proxy, a JWKS fetch can
-  take the relay's address as its source, which the proxy visa does not
-  cover, until [zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240).
 - **Cap'n Proto, not Thrift.** The design document specifies Thrift for the
   binary policy and the node APIs. The implementation uses Cap'n Proto
   throughout (see `zl-zpr-policy/policy.capnp`, `zl-zpr-vsapi/vs.capnp`); there is no
@@ -799,11 +810,13 @@ No tracker issues are filed for these unless linked.
 - **Which links a node should have now has a contract**, outside the design
   document: `setTopology` names each peer with its link-certificate CN
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
-  ROUTING.md). The visa service acts on `reportLinkStates`
-  ([#224](https://github.com/org-zpr/zl-zipline/issues/224)); filling
-  `Link.peerCn` and the node side are
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220)–[#223](https://github.com/org-zpr/zl-zipline/issues/223)
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217) for the schema).
+  ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). On
+  `feature/zodes` the visa service fills `peerCn` from policy
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and acts on
+  `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224));
+  the node checks `peerCn` on Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)) but does not send
+  `reportLinkStates` yet ([#223](https://github.com/org-zpr/zl-zipline/issues/223)).
 
 ---
 

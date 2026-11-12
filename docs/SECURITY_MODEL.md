@@ -471,6 +471,31 @@ the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
 half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
+**Zode links are mutually authenticated, and the peer's name must come from the
+topology.** Both ends of a Zode-to-Zode link require the peer to present a
+certificate signed by the network's CA, inside its validity window, whose key is
+the peer's Noise static key; a certificate-less peer, another CA's certificate,
+an expired or not-yet-valid certificate, or a key mismatch aborts the
+handshake. A Zode without a CA certificate starts no Zode links at all rather
+than linking unverified. A CA signature only proves "some registered Zode of
+this network", so the certificate's CN must also equal a `Link.peerCn` in the
+topology the visa service last pushed; an empty `peerCn` matches nothing. The
+check runs when keying finishes, before Hello, and again after every topology
+update, which closes live links whose CN left. That is what makes deleting a
+Zode effective without a revocation list: its still-valid certificate names a
+peer no topology lists. ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220))
+
+**A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
+a node that has no actor yet reach VSAPI, so whoever carries them relays that
+node's traffic. The visa service mints them only for the node it docks on (the
+relay), and only on the link whose `peerCn` names the joining node; every other
+neighbour gets the link without them. So the visa service's half of the join
+path cannot turn an endpoint into a transit node. The node's half — installing
+them only for the link whose certificate carries that CN, and accepting no
+bootstrap visa from a peer (none in Hello) — is
+[#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
+([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -557,12 +582,15 @@ not read the RFCs as a description of current guarantees.
   [OIDC.md](OIDC.md). Until that closes, an OIDC actor is disconnected when
   its authentication window ends, which is the safe direction to fail but not
   the intended behaviour.
-- **Topology-bound link certificates (Zodes).** `setTopology` now carries
-  `Link.peerCn`, the CN a peer's link certificate must carry for the node to
-  accept that link ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-  That is schema only: today the responder of a link verifies no certificate
-  at all, and the CN check that makes `peerCn` a security control is
-  [#220](https://github.com/org-zpr/zl-zipline/issues/220).
+- **Topology-bound link certificates (Zodes).** The verification and the
+  CN-in-topology rule are implemented for Zode-to-Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
+  decisions*, above), and the visa service fills `Link.peerCn` from the peer's
+  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)), but
+  no code starts such a link yet: link start from the topology, and configured
+  initial links (which also join the allowed CNs), are
+  [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the rule has
+  nothing to act on.
 
 ---
 
