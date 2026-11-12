@@ -238,7 +238,9 @@ F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is 
     from the Hello or anything else the peer claims about itself (gap 5).
     `find_egress_link` matches these links just as it matches local and adapter
     addresses. A next hop with no up link is `DestNotFound`, and the bind is
-    refused.
+    refused. **An endpoint's initial link to its relay is always also an entry in
+    the endpoint's `setTopology`**, carrying the relay's `zprAddr` and `peerCn`, so
+    F1 can always find the relay. That is the path F6's recovery depends on. *(Coordinator call, builder check.)*
 F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
     `visa_id` walks down the path, and each Zode fills its forwarding (PFT) entry
     when the answer comes back. Keep the loop guard (egress == ingress is
@@ -248,7 +250,9 @@ F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
 F3. **Both sides of a binding are recorded.** Each binding remembers its ingress
     link and its egress link. Then rule 9 (a lost link clears everything tied to
     it) clears entries on **both** sides, so no forwarding entry points at a dead
-    or reused link ID.
+    or reused link ID. Losing either side **revokes the visa locally**, not just
+    its binding. So at the Zode where a flow starts, the next packet finds no visa
+    and F6 applies. *(Coordinator call, builder check.)*
 F4. **Teardown has exactly three causes.**
     - The visa **expires**.
     - The visa service **revokes** it. Only the visa service tears a binding down
@@ -266,8 +270,12 @@ F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
     avoids the dead link, usually through the relay. No other recovery signal
     exists. The race where the request beats the `down` report can't happen for
     the Zode that saw the link drop, because its report and its request are
-    ordered on one VS-API session. Other Zodes lose their visa only after the
-    visa service already knows the link is down.
+    ordered on one VS-API session. A `down` or `failed` transition is reported
+    **at once**, skipping the reporter's coalescing window, and any `visaRequest`
+    made after a link loss goes out only after that report has been sent. Other
+    Zodes lose their visa only after the visa service already knows the link is
+    down. *(Coordinator call, builder check: the 100 ms coalescing would
+    otherwise let the request overtake the report.)*
 F7. **An unknown Stream ID on a Zode link is dropped silently** and counted.
     This deliberately departs from the RFC's `Destination Unreachable`, for the
     reason the RFC's own editorial note gives: answering would let a compromised
@@ -284,6 +292,12 @@ F8. **One-address endpoint.** A Zode's own traffic, sent from the address it als
 - Netns, modelled on the sj branch's `two-node-test.sh`: two Zodes on a direct
   link ping across it under their own identities, the link is dropped, and the
   flow re-routes through the relay after the revoke and re-request.
+
+### Order
+#251's code and unit tests can land before #252. Its netns acceptance needs
+Zodes with their own VS-API sessions, which only #252's relay join provides. So
+that scenario moves to #254, after #252, the same way #250 deferred its two-Zode
+scenarios. *(Coordinator call, builder check.)*
 
 ### Prior art
 `org-zpr/zpr-core` branch `sj/link-state-inter-node` routed between nodes the
