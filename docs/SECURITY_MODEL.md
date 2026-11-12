@@ -552,11 +552,13 @@ the relay has never seen. The operator chose the hand-off instead (pd gate g60,
 already mints the joiner's own copies of both VSAPI bootstrap visas into the
 relay's topology `Link.visas`, next to the relay's copies. The relay sends the
 joiner exactly the entries for that link's verified CN, in a ZDP
-`BootstrapVisas` management message (type 146) sent after Hello completes, and
-again on each topology update. The visas are never in Hello (gap 6). The joiner
-installs them only if all of these hold, and refuses and logs them otherwise:
+`BootstrapVisas` management message (type 146) sent once the relay's side of
+the link is Active, and again on each topology update. The visas are never in
+Hello (gap 6). The joiner installs them only if all of these hold, and refuses
+and logs them otherwise (a refusal leaves the link up):
 
-- the message arrived on a Zode link that has finished Hello;
+- the message arrived on a keyed Zode link (Helloing or Active), whose peer CN
+  was verified at keying;
 - the peer's verified certificate CN is one of the joiner's configured initial
   links;
 - the joiner has no VS-API session at the moment (none yet, or the last one

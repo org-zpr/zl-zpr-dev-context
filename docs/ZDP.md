@@ -378,14 +378,18 @@ topology names that it has no link to yet
   adapter (`mgmt/dispatch.rs` `inbound_link_type`).
 - **After keying**, both ends check the peer's certificate CN against the
   topology and the configured initial links, and close a link to any other CN
-  before Hello. The peer's ZPR address comes from its topology entry, never
-  from Hello (gap 5).
+  before Hello. On a link it dialed, a Zode also requires the CN it dialed:
+  the one the initial link or topology entry gives that address, not just any
+  allowed Zode. The peer's ZPR address comes from its topology entry, never
+  from Hello (gap 5). Only a live (Helloing or Active) Zode link is a next
+  hop.
 - **Hello.** The dialer sends the Hello Request and the answerer replies.
   There is no actor authorization on a Zode link. The dialer ignores, with a
   warning, any AAA address or bootstrap flag in the Hello Response. A dialer
   redials after a close while the address still belongs to an initial link or
-  a topology entry, and otherwise drops the link; an answerer drops the link,
-  since the dialer reconnects.
+  a topology entry, and otherwise drops the link and dials any topology peer
+  it has no link to (a peer whose topology address moved); an answerer drops
+  the link, since the dialer reconnects.
 - **Crossed dials.** One substrate address pair carries one link. So when two
   Zodes dial each other at the same moment, each receives the other's first
   message on its own dialing link, and neither handshake could finish. The
@@ -397,14 +401,18 @@ topology names that it has no link to yet
   answers. The peer's real CN is still checked after keying. A Zode that
   answered on an initial link's address dials it again when that link
   closes. Two links to one Zode over *different* address pairs are settled
-  after keying by the same lower-CN rule.
+  after keying by the same lower-CN rule; a losing link this Zode dialed is
+  retired, dropped on close rather than redialed.
 
 ### Joining through a relay
 
 A joining Zode has no visa service of its own. It reaches the visa service
 only through its initial link to the relay, on two bootstrap visas the relay
-hands it in a `Bootstrap Visas` message (type 146), sent after Hello and again
-on each topology update. They are never in Hello (gap 6). The body is a
+hands it in a `Bootstrap Visas` message (type 146), sent once the relay's side
+is Active and again on each topology update. ZDP-R may deliver it before the
+joiner has the Hello Response, so the joiner accepts it on a keyed link
+(Helloing or Active). A refused hand-off installs nothing and is logged; it
+never closes the link. They are never in Hello (gap 6). The body is a
 one-byte count, then each visa as a two-byte length and a packed Cap'n Proto
 `Visa` (`bootstrap_handoff.rs`). The joiner checks the message before
 installing anything. The checks, and why the relay hands visas at all (a

@@ -513,9 +513,11 @@ topology arrives over that link. So a Zode is configured with initial links:
 `[[node.initial_link]]` entries (`addr`, `cn`) in the `ph node` config file, or
 `ph node --initial-link CN@IP:PORT`, repeatable, which replaces the file's
 list. The Zode dials each at startup, and the configured CN is allowed as a
-peer as well as the topology's `peerCn`s. A dialed link redials after a close,
-unless a topology update has removed its address (and it is no initial link):
-then it is dropped.
+peer as well as the topology's `peerCn`s. A dialed link must reach the CN it
+dialed, and redials after a close unless a topology update has removed its
+address (and it is no initial link) or it lost a crossed-dial election: then
+it is dropped, and the node dials any topology peer it has no link to, such as
+one whose address moved.
 A Zode that answered on an initial link's address, having lost a crossed dial
 (see [ZDP.md](ZDP.md), *Zode links*), dials it again when that link closes.
 
