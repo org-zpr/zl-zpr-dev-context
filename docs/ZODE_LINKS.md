@@ -201,6 +201,23 @@ layer from scratch:
   Until #252 lands, #250 is tested with Zodes whose initial link is the visa
   service's own node, the way `node_addr` works today.
 
+## Reporting contract (snapshot semantics)
+
+`reportLinkStates` is a snapshot. A topology link that isn't listed counts as not up.
+
+- The owner lists a link as `failed` **only while that link's attempt has ended
+  without the link coming up** (the 5 s window ran out). Once a retry starts after a
+  new `setTopology`, the entry is **no longer listed**. If the retry fails too, it is
+  listed as `failed` again.
+- Every change to the set of listed entries sends a new snapshot. That includes
+  `failed` → not listed → `failed`.
+- The visa service marks a pair as failed (rule 13a) only on a **new** failure,
+  meaning an entry that has moved into `failed` since that reporter last listed it.
+  A snapshot that repeats an old `failed`, because it was sent for some other change
+  before the new topology arrived, does not mark the pair again. That prevents a
+  re-proposed link from being dropped before it is ever tried. *(Agreed between core
+  and the visa service while implementing #250, from a Copilot review finding on visaservice#66.)*
+
 ## Left to the builder
 
 - The link-up timeout: 5 s is the default (my call). It is a constant with a comment.
