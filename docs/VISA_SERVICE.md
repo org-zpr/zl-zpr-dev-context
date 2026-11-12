@@ -179,6 +179,11 @@ actor (the `reauthorize` target is the calling node's address):
   actor's `zpr.session` must equal the session that handle was minted under,
   and again just before persisting; otherwise it is refused (`authError`), so
   a stale handle cannot act on the actor of a newer session.
+  `getLoginNonce` re-checks the session under the same lock before it mints,
+  so a stale handle cannot mint or sweep away the new session's nonces. An
+  attribute refresh of a node writes under that lock too, and is discarded
+  (the request is denied and retried) if the node was re-authorized since the
+  refresh loaded it, so a refresh cannot restore what a logout removed.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
@@ -852,13 +857,13 @@ No tracker issues are filed for these unless linked.
   re-authentication covers removal from policy; a dedicated administrative
   revocation of an authentication root is future work.
   [zipline#136](https://github.com/org-zpr/zl-zipline/issues/136)
-- **Per-actor serialization across refresh, reconnect and reauthorize.** A
-  node's self-renewals are serialized and re-check `zpr.session` before they
-  persist, but the attribute-refresh path (`refresh_and_persist_actor`) still
-  writes back an actor it loaded earlier, so a refresh racing a logout could
-  restore the pre-logout attributes until the next refresh or sweep. This race
-  predates Zodes and applies to every actor; the fix is a shared per-actor
-  lock or a revision-checked update.
+- **Refresh vs reauthorize for adapters.** For a node, an attribute refresh
+  takes the self-renewal lock and discards its write if the node was
+  re-authorized since its copy was loaded (the `zpr.vs.bootstrap.ident` token
+  differs), so a refresh cannot undo a Zode's logout. Adapters keep the older
+  race: `refresh_and_persist_actor` can write back an adapter copy loaded
+  before a concurrent renewal. The fix is a shared per-actor lock or a
+  revision-checked update.
   ([#63 review](https://github.com/org-zpr/zl-zpr-visaservice/pull/63))
 - **VS-side clock-skew check on `ssb.timestamp` on the adapter connect path.**
   Signed but unchecked there; the reauthorize SS arm and node authentication
