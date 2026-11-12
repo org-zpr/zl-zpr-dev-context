@@ -562,7 +562,9 @@ and logs them otherwise (a refusal leaves the link up):
 - the peer's verified certificate CN is one of the joiner's configured initial
   links;
 - the joiner has no VS-API session at the moment (none yet, or the last one
-  ended when its VSConn run loop exited);
+  ended when its VSConn run loop exited). A hand-off refused only for this is
+  held and checked again when that session ends, since the session may
+  merely not have noticed its loss yet;
 - there are at most two visas;
 - each visa is exactly the joiner's own VSAPI flow (TCP from the joiner's ZPR
   address to `vs.zpr` port 5002) or that flow's reply;
@@ -636,7 +638,8 @@ not read the RFCs as a description of current guarantees.
   the topology entry whose `peerCn` is the peer's verified CN, or, on a joining
   Zode's initial link before its first topology, the next hop of its handed-off
   forward visa, which the relay chose and so stands only until that first
-  topology replaces or clears it. Never an address the peer claims (gap 5). A visa without
+  topology replaces or clears it; after a topology has arrived, a hand-off
+  gives no address. Never an address the peer claims (gap 5). A visa without
   `prevHop` (ingress, or a path of fewer than two nodes) is never bound this
   way, and neither is a link with no recorded address. A refused request gets
   an error `Stream ID Response`, is logged, and nothing is requested from the
