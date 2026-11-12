@@ -125,7 +125,8 @@ the containerized jobs pull the private `ghcr.io/org-zpr/dev-env` image; see
 **On `feature/zodes`, core CI takes the visa service from a feature
 pre-release**, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
 (`make release`, then `gh release create v0.22.0-zodes.N --prerelease --target
-<full sha>`). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
+<full sha> release-linux-x86_64.tar.gz`: core's integration jobs download that
+asset, so a release without it fails every job at **Download Asset**). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
 org-zpr/zl-zipline#250, because `v0.21.2` sends no `Link.peerCn`. **Re-cut
 rule** (org-zpr/zl-zipline#254): when the visa service changes in a way core CI
 needs, cut the next `-zodes.N` and move `VISA_SERVICE_RELEASE` in
