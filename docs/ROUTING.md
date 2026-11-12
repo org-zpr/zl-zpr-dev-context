@@ -523,8 +523,9 @@ A Zode that answered on an initial link's address, having lost a crossed dial
 
 **The peer's ZPR address.** A Zode link's peer ZPR address comes from the
 topology entry for its verified CN, never from Hello (gap 5).
-`find_egress_link` matches it, so a visa naming a peer Zode as next hop finds
-that link. A joiner that has no topology entry for its relay yet takes the
+`find_egress_link` matches it on a live (Helloing or Active) link, so a visa
+naming a peer Zode as next hop finds that link and never a closed one waiting
+to redial. A joiner that has no topology entry for its relay yet takes the
 relay's address from the next hop of the forward bootstrap visa the relay
 handed it.
 
