@@ -483,7 +483,9 @@ absent or original, never fresh — so no comparison against a fresh challenge
 can succeed. The path therefore performs no nonce check at all, accepting
 both branches, and binds to the live session instead: same `sub`, strictly
 increasing `iat`, unchanged `auth_time`, and a `zprAddr` that is a live actor
-on the calling node. The connect path's nonce check is untouched.
+on the calling node. The connect path's nonce check is untouched, and so is
+a Zode's own login on `reauthorize`: that is a new login, not a renewal, and
+its token must carry a visa-service nonce (see *Design decisions*).
 `docs/SECURITY_MODEL.md` records the delta.
 
 **No new attribute and no new DB column.** The effective `min` is stamped onto
@@ -814,10 +816,13 @@ Non-negotiable, in addition to the above:
 - Use a vetted JWT library. Do not hand-roll JWS parsing. Algorithm confusion
   and unverified `aud` are the classic failure modes here, and this is the code
   option A adds in exchange for keeping the visa service off the internet.
-- The OIDC `nonce` is derived from the node's challenge in
-  `ZdpInitAuthenticationPayload`, binding the token to this ZPR authentication
-  attempt (see *Design decisions* for why it is the node's, not the visa
-  service's).
+- On a docked adapter's connect, the OIDC `nonce` is derived from the node's
+  challenge in `ZdpInitAuthenticationPayload`, binding the token to this ZPR
+  authentication attempt (see *Design decisions* for why it is the node's,
+  not the visa service's, there). A Zode's own login is the exception: its
+  `nonce` is one the visa service issued through `getLoginNonce`, bound to
+  that node's actor and VS-API session, single-use and expiring (see
+  *Design decisions*). An ordinary renewal carries no fresh nonce.
 - PKCE S256 mandatory. The verifier never leaves `ph-cli`.
 - Loopback redirect only, on `127.0.0.1`, single use, `state` verified.
 - **Ordinary TLS verification against system roots for all Google traffic.**
@@ -981,7 +986,11 @@ subverted Zode could replay a stolen `id_token` with its nonce until the
 token expired. So the node calls `getLoginNonce`; the visa service mints a
 random value bound to that node's actor and VS-API session, single-use and
 expiring, and `reauthorize` accepts the login only when the token's `nonce`
-equals such an outstanding nonce, which it spends before checking the token.
+equals such an outstanding nonce, which it spends as soon as the request is
+classified as a login, before the device proof and the token are checked. A node's device-only self-renewal drops any user
+authority it holds, including one whose provider policy no longer declares,
+and a node's reauthorizations of its own actor are serialized so two
+concurrent logins cannot both succeed.
 This reverses the decision above for that one path; docked adapters keep the
 link-challenge binding. Accepting the replay risk for v1 and deferring the
 visa-service nonce was considered and rejected by the operator.
@@ -995,9 +1004,11 @@ users in place is refused (the OIDC blob of a logged-in actor goes to the
 renewal arm, which demands the same `sub`); log out, then in.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
-**The nonce expectation is an enum, not a "skip" flag.** The reauth path needs
-no nonce check (see *Credential lifetimes*), but connect and reauth share one
-validator. It takes `NonceExpectation::{Required, SessionBound}` rather than a
+**The nonce expectation is an enum, not a "skip" flag.** An ordinary renewal
+on the reauth path needs no nonce check (see *Credential lifetimes*), but
+connect and reauth share one validator. A Zode's own login on that path is not
+a renewal: it uses `Required` against the visa-service nonce, like a
+connect. It takes `NonceExpectation::{Required, SessionBound}` rather than a
 boolean so the connect arm cannot be built with checking off by accident.
 ([zipline#43](https://github.com/org-zpr/zl-zipline/issues/43))
 

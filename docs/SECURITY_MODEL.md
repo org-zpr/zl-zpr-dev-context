@@ -211,7 +211,9 @@ So the visa service's `reauthorize` entry point binds the credential to the
 | the **same trusted service** that admitted the actor | one provider cannot renew another's session |
 | everything else — signature, `iss`, `aud`, `exp`, `kid`, `alg`, `hd`, `email_verified` | unchanged from the connect path |
 
-**Scope.** The relaxation applies to `reauthorize` and to nothing else. The
+**Scope.** The relaxation applies to renewals on `reauthorize` and to nothing
+else. A Zode's own login on `reauthorize` is not a renewal and keeps a nonce
+check, against a visa-service nonce (*A Zode's own login* below). The
 connect path is untouched, and the two paths deliberately do not share a
 validation function taking a "skip the nonce" boolean — the nonce expectation
 is an enum, so the connect arm cannot be constructed with checking off by
@@ -258,12 +260,18 @@ issued through `getLoginNonce`:
 |---|---|
 | the calling node's actor address | a nonce issued to one node never serves another |
 | its VS-API session generation (`zpr.session`) | a re-authenticated node starts with no usable nonces |
-| one use, spent before any other check | not even a failed attempt can be retried with it |
+| one use, spent as soon as the request is classified as a login — before its own binding and expiry checks, the device proof and the token | a login that fails on any of them cannot be retried with it |
 | a short lifetime (300 s) and at most 4 outstanding per node session | bounds what the visa service holds; `quotaExceeded` past it |
 
-After the nonce, the token is validated exactly as on the connect path. Only
-the node renewing its own actor may gain or drop the namespace; an adapter
-keeps the exact set. A logout strips every `user.*` attribute — whatever
+Only the namespace-set check runs before the nonce is spent; a request with
+the wrong blob set leaves it unspent. After the nonce, the device proof and
+the token are checked, the token exactly as on the connect path. Only the node renewing its own actor may gain
+or drop the namespace; an adapter keeps the exact set. A device-only
+self-renewal drops any user authority the actor holds, including one whose
+OIDC provider policy no longer declares, and a node's reauthorizations of its
+own actor are serialized, so two concurrent logins cannot both succeed. A
+self-renewal is refused if the node re-authenticated (new `zpr.session`)
+while it was in flight. A logout strips every `user.*` attribute — whatever
 store vended it — forgets the login's session anchors, and every login and
 logout re-checks all live visas, so a visa that needed a user attribute is
 revoked. What remains: a subverted Zode can still use a login of its own
