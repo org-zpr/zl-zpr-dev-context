@@ -119,6 +119,7 @@ comments saying "may be unset (older senders)" go away.
 13. **Every `setTopology` retries** each `failed` or `down` link it still contains:
     the owner makes one more attempt under rule 6. Links that are up are untouched,
     and the Zode keeps no other retry logic.
+13b. **The visa service proposes a direct link only when it can work.** It needs a known substrate address for the peer the owner must dial, from policy or reported by that peer. No address means no direct link, and traffic goes through the relay. The visa service never asks a Zode to make a connection it can't possibly make. *(Operator, 2026-11-12; #255 drops visaservice#65's `[::]:0` fallback.)*
 13a. **The visa service owns the retry policy.** It remembers links reported
     `failed` and leaves them out of the topology it proposes until something about
     that pair changes: a peer's substrate address changes (#227
