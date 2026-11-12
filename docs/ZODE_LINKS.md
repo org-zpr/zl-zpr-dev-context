@@ -220,6 +220,77 @@ layer from scratch:
   re-proposed link from being dropped before it is ever tried. *(Agreed between core
   and the visa service while implementing #250, from a Copilot review finding on visaservice#66.)*
 
+## Forwarding over Zode links (#251, design approved 2026-11-12)
+
+The link layer above decides **which links exist**. This section covers how traffic
+**crosses** them.
+
+**The visa service drives all forwarding.** It plans each path and seeds every
+Zode on it with that hop's visa: the forward-only visa and its next hop, plus
+`prev_hop` since #245. A Zode never picks a route and never agrees teardown with
+a neighbour. It does what its visas say.
+
+### Rules
+
+F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is the
+    **up** Zode link whose peer has that ZPR address. The address is the topology
+    `Link.zprAddr` of the entry matched by the peer's verified CN. It never comes
+    from the Hello or anything else the peer claims about itself (gap 5).
+    `find_egress_link` matches these links just as it matches local and adapter
+    addresses. A next hop with no up link is `DestNotFound`, and the bind is
+    refused.
+F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
+    `visa_id` walks down the path, and each Zode fills its forwarding (PFT) entry
+    when the answer comes back. Keep the loop guard (egress == ingress is
+    refused) and refuse when transaction IDs run out, instead of panicking. #253
+    adds the `prev_hop` check: a request is accepted only from the visa's
+    previous hop.
+F3. **Both sides of a binding are recorded.** Each binding remembers its ingress
+    link and its egress link. Then rule 9 (a lost link clears everything tied to
+    it) clears entries on **both** sides, so no forwarding entry points at a dead
+    or reused link ID.
+F4. **Teardown has exactly three causes.**
+    - The visa **expires**.
+    - The visa service **revokes** it. Only the visa service tears a binding down
+      administratively, and it tells every Zode on the path directly with a VSS
+      revoke. A link going down causes this too (#224).
+    - A **link drops**: local cleanup under rule 9, a `down` report, then the
+      revocation above.
+F5. **No Zode-to-Zode teardown messages.** On Zode links, `Stream ID Withdrawal`
+    (ZDP type 5) and `Unbind Egress Stream Indication` (type 13) are neither sent
+    nor accepted. Zodes don't use them with each other: the existing NodeToNode
+    handlers and the `node::unbind_stream` send path are **removed**, not fixed.
+    The message types stay for docking sessions.
+F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
+    finds no visa and sends a `visaRequest`. The visa service plans a route that
+    avoids the dead link, usually through the relay. No other recovery signal
+    exists. The race where the request beats the `down` report can't happen for
+    the Zode that saw the link drop, because its report and its request are
+    ordered on one VS-API session. Other Zodes lose their visa only after the
+    visa service already knows the link is down.
+F7. **An unknown Stream ID on a Zode link is dropped silently** and counted.
+    This deliberately departs from the RFC's `Destination Unreachable`, for the
+    reason the RFC's own editorial note gives: answering would let a compromised
+    upstream probe which stream IDs are live. A stale stream ID only shows up
+    after a link loss or restart, and F4 and F6 already recover from that.
+F8. **One-address endpoint.** A Zode's own traffic, sent from the address it also
+    authenticates with, leaves through a Zode link under F1. Expected to need
+    tests only.
+
+### Acceptance (#251)
+- Unit tests for F1 (egress by topology address, up links only, Hello addresses
+  ignored), F2's guards, and F3 on both sides of a link loss. Also a test that
+  a withdrawal or unbind arriving on a Zode link is refused and logged.
+- Netns, modelled on the sj branch's `two-node-test.sh`: two Zodes on a direct
+  link ping across it under their own identities, the link is dropped, and the
+  flow re-routes through the relay after the revoke and re-request.
+
+### Prior art
+`org-zpr/zpr-core` branch `sj/link-state-inter-node` routed between nodes the
+same way: it filled the peer's actor addresses so `find_egress_link` matched, and
+it relied on visa-service revocation for teardown. It took the peer address from
+the Hello, which F1 forbids. #250 replaces its link-layer rework.
+
 ## Left to the builder
 
 - The link-up timeout: 5 s is the default (my call). It is a constant with a comment.
