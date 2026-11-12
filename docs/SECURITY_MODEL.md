@@ -635,7 +635,8 @@ not read the RFCs as a description of current guarantees.
   `Visa.prevHop` equals the ZPR address recorded for that link: the address of
   the topology entry whose `peerCn` is the peer's verified CN, or, on a joining
   Zode's initial link before its first topology, the next hop of its handed-off
-  forward visa. Never an address the peer claims (gap 5). A visa without
+  forward visa, which counts only for the handed-off visas, since the relay
+  chose it. Never an address the peer claims (gap 5). A visa without
   `prevHop` (ingress, or a path of fewer than two nodes) is never bound this
   way, and neither is a link with no recorded address. A refused request gets
   an error `Stream ID Response`, is logged, and nothing is requested from the

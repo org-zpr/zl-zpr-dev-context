@@ -419,7 +419,7 @@ installing anything. The checks, and why the relay hands visas at all (a
 departure from the Zodes plan, decided on pd gate g60), are in
 [SECURITY_MODEL.md](SECURITY_MODEL.md) (*Design decisions*). Until it has a
 topology entry for the relay, the joiner takes the relay's ZPR address from
-the forward visa's next hop.
+the forward visa's next hop, for the handed-off visas only.
 
 ### Flow setup
 
@@ -467,7 +467,7 @@ A `Stream ID Request` is accepted only from the visa's **previous hop**:
 `Visa.prevHop`, compared against the ZPR address the node learned for the
 arriving link's peer from topology, never from Hello. (On a joining Zode's
 initial link, before its first topology, that address is the next hop of its
-handed-off forward visa.) A visa without `prevHop` (every ingress visa, and any
+handed-off forward visa, and only for the handed-off visas.) A visa without `prevHop` (every ingress visa, and any
 visa from a visa service that predates the field) never accepts one, so it
 cannot be bound for forwarding, and a link with no learned address binds
 nothing. A refused request gets an error `Stream ID Response`, is logged, and

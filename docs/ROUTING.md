@@ -432,7 +432,8 @@ whose path has fewer than two nodes has none. Core enforces it
 request gets an error `Stream ID Response` and nothing is asked of the next hop.
 The link's peer address is the one the topology gives the peer's verified CN,
 or, on a joining Zode's initial link before its first topology, the next hop of
-its handed-off forward visa. A link with no recorded address binds nothing.
+its handed-off forward visa -- for the handed-off visas only. A link with no
+recorded address binds nothing.
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
@@ -529,7 +530,8 @@ topology entry for its verified CN, never from Hello (gap 5).
 naming a peer Zode as next hop finds that link and never a closed one waiting
 to redial. A joiner that has no topology entry for its relay yet takes the
 relay's address from the next hop of the forward bootstrap visa the relay
-handed it.
+handed it. That address applies only to the handed-off visas, as next hop and
+as previous hop: the relay chose it, so it routes and binds nothing else.
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -873,8 +875,9 @@ test found that stall. ZBOLT is meant to replace this rule later (Zodes plan
 could otherwise claim any address in Hello and attract visas meant for another
 node (gap 5). The one exception has to exist: a joiner has no topology until it
 has authenticated through its relay, so it takes the relay's address from the
-next hop of the bootstrap visa the relay handed it, which was minted by the
-visa service, and replaces it once topology arrives.
+next hop of the bootstrap visa the relay handed it, for those visas alone,
+and replaces it once topology arrives. The relay could put any address there:
+the joiner checks the visas' flows, not their next hop.
 ([#222](https://github.com/org-zpr/zl-zipline/issues/222))
 
 ---
