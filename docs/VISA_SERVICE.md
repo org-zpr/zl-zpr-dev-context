@@ -188,9 +188,14 @@ actor (the `reauthorize` target is the calling node's address):
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
   get, which may be none.
-- **Current generation.** The visa sweep after a gain or drop uses the policy
-  snapshot current after the actor is persisted, and repeats if the generation
-  moves during it.
+- **Current generation, no lost work.** The visa sweep after a gain or drop
+  runs after the self-renewal lock is released (it needs none of the actor
+  serialization), under the policy snapshot current when it starts. It
+  repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
+  with no failed re-check or verdict write under a generation that did not
+  move. If none does, the work goes to the event manager as an
+  attribute-change reconcile instead of being dropped, so a visa whose
+  revocation failed does not stay usable until it expires.
 
 The login-nonce store is in memory. A nonce is 32 random bytes (base64url),
 usable until `expiresAt` (300 s, `LOGIN_NONCE_TTL_SECS`), at most 4 unexpired
@@ -768,7 +773,8 @@ says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 must revoke visas that needed it (unless device-keyed re-enrichment restores
 an equivalent attribute), and gaining it can trip a `never allow`. The
 existing attribute-change sweep re-checks every live visa inline, after the
-actor is persisted. This costs one full sweep per login or logout; a
+actor is persisted and the self-renewal lock released, and an incomplete
+sweep is retried and then handed to the event manager. This costs one full sweep per login or logout; a
 per-actor sweep was not built because logins are rare. An ordinary renewal
 whose claims change still runs no sweep (unchanged behaviour).
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))

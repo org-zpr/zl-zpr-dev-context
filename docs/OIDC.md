@@ -1208,9 +1208,12 @@ then this works only in visa-service unit tests.
 - **`reauthorize` with session-bound validation** — `vs.capnp`'s
   `reauthorize` is implemented against a pinned `PolicySnapshot` with
   `authorize_connection` re-run, so a policy change since connect applies.
-  The nonce is ignored on this path *only*; same `sub`, strictly increasing
-  `iat`, unchanged `auth_time` and a live actor on the calling node bind it
-  instead (zipline#43).
+  For an ordinary renewal the nonce is ignored (on this path only); same
+  `sub`, strictly increasing `iat`, unchanged `auth_time` and a live actor on
+  the calling node bind it instead (zipline#43). A Zode's own login on
+  `reauthorize` is not a renewal: its token must carry an unexpired, unused
+  visa-service nonce from `getLoginNonce`
+  ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)).
 - **Authentication-expiry sweep and real `revokeAuthentication`** —
   `vs/src/auth_sweep.rs`, one batched revoke per docking node, removal only on
   a positive ack, and a concurrent renewal wins (zipline#44). The node's
