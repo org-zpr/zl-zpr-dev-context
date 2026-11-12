@@ -156,7 +156,11 @@ actor (the `reauthorize` target is the calling node's address):
   and be unexpired. A nonce the store rejects (not issued, another actor or
   session, expired, already spent) is a generic `authError`. Then the token
   is validated exactly as on the connect path; a token whose `nonce` claim
-  differs from the blob's nonce fails there as `invalidSignature`.
+  differs from the blob's nonce fails there as `invalidSignature`. Just
+  before the login is persisted, the live policy generation must still be the
+  one it was validated under; if an install landed in between, the login is
+  refused with `temporarilyUnavailable` and the node logs in again (a window
+  up to the write is bounded by the install's re-authentication obligation).
 - **Drop (logout):** the device blob only — on any actor that holds a user
   authority, including one whose OIDC provider policy no longer declares (a
   trusted-service-derived authority is re-derived). The renewed actor keeps only
