@@ -156,18 +156,27 @@ actor (the `reauthorize` target is the calling node's address):
   and be unexpired. A nonce the store rejects (not issued, another actor or
   session, expired, already spent) is a generic `authError`. Then the token
   is validated exactly as on the connect path; a token whose `nonce` claim
-  differs from the blob's nonce fails there as `invalidSignature`. Just
-  before the login is persisted, the live policy generation must still be the
-  one it was validated under; if an install landed in between, the login is
-  refused with `temporarilyUnavailable` and the node logs in again (a window
-  up to the write is bounded by the install's re-authentication obligation).
+  differs from the blob's nonce fails there as `invalidSignature`. If the
+  policy generation moved before the login is persisted, it is refused with
+  `temporarilyUnavailable` and the node logs in again with a new nonce (see
+  *One commit-time recheck* below).
 - **Drop (logout):** the device blob only — on any actor that holds a user
   authority, including one whose OIDC provider policy no longer declares (a
   trusted-service-derived authority is re-derived). The renewed actor keeps only
   attributes the visa service stamped itself (never one in `user.`); the policy
   re-run re-fetches trusted-service attributes from the device identity,
   which may legitimately include `user.*` attributes a store vends for that
-  device. The login's OIDC session anchors are forgotten.
+  device. The login's OIDC session anchors are forgotten. A logout is never
+  refused, because that would leave the login in place. If the policy re-run
+  fails (a trusted service is down) or the policy generation moved before the
+  commit, the visa service persists the *reduced* actor instead: the loaded
+  actor with only internal-source attributes and nothing in `user.`, still a
+  node, with the services a node gets under the current policy, and a freshly
+  minted identity token. It then invalidates the actor's trusted-service
+  revisions (each cleared and its generation bumped), so the next request
+  re-fetches every source and is denied (`AttributesIndeterminate`) while one
+  is still down. Dropped data is never treated as known-absent, so a removed
+  `device.blocked` cannot lift a deny.
 - **Device blob always.** An OIDC blob without it, or a namespace change on any
   actor other than the caller's own, is a `paramError`.
 - **Visas follow.** After every gain or drop the visa service re-checks every
@@ -175,22 +184,28 @@ actor (the `reauthorize` target is the calling node's address):
   is revoked when it no longer passes policy: after a logout that is one that
   needed the login's attributes, unless device-keyed re-enrichment restored
   an equivalent attribute.
-- **Serialized.** A node's reauthorizations of its own actor hold one lock
-  from loading the actor to recording the OIDC anchors, so two concurrent
-  logins cannot both classify as a gain. A node's authenticate persists its
-  new `zpr.session` under the same lock (`add_node_serialized`), so a
-  reconnect cannot write between a self-renewal's check and its write. A
-  self-renewal is also bound to the calling handle: once the lock is held, the
-  actor's `zpr.session` must equal the session that handle was minted under,
-  and again just before persisting; otherwise it is refused (`authError`), so
-  a stale handle cannot act on the actor of a newer session.
-  `getLoginNonce` re-checks the session under the same lock before it mints,
-  so a stale handle cannot mint or sweep away the new session's nonces. An
-  attribute refresh of a node writes under that lock too, and is discarded
-  (the request is denied and retried) if the node was re-authorized since the
-  refresh loaded it, so a refresh cannot restore what a logout removed. A
-  disconnect removes the actor record under that lock too, so a self-renewal
-  can never recreate a node that was disconnected while it was in flight.
+- **One commit-time recheck.** Every writer of a node's own actor takes the
+  self-renewal lock (`ConnectionControl::self_reauth_lock`) from the read
+  its write is based on until the write, and calls one shared helper,
+  `recheck_before_commit`, just before committing. It checks that the stored
+  `zpr.session` is the one expected (else `authError`) and reports whether
+  the policy generation moved since the write was prepared:
+
+  | Writer | Session checked | On a moved generation |
+  |---|---|---|
+  | `reauthorize` login or renewal of the node's own actor | the calling handle's, at load and at commit | refused, `temporarilyUnavailable` |
+  | `reauthorize` logout (and its outage fallback) | the calling handle's, at load and at commit | the reduced actor is persisted (above) |
+  | node `authenticate` persist | — (it writes the new session) | refused, `temporarilyUnavailable`; the node authenticates again |
+  | `open` (session resume) | load and write both under the lock | — (no re-authorization) |
+  | `getLoginNonce` mint | the handle's | — |
+  | attribute refresh of a node | the copy's (and its identity token) | discarded, `AttributesIndeterminate` (denied, retried) |
+  | `disconnect` | the actor record is removed under the lock | — |
+
+  So two concurrent logins cannot both classify as a gain; a stale handle
+  cannot act on, or mint for, a newer session; a reconnect, refresh or
+  disconnect cannot land between a self-renewal's check and its write; and
+  nothing prepared under a superseded policy is committed. The identity token
+  is minted after the recheck has chosen the actor to persist.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
@@ -200,7 +215,8 @@ actor (the `reauthorize` target is the calling node's address):
   serialization), under the policy snapshot current when it starts. It
   repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
   with no failed re-check or verdict write under a generation that did not
-  move. If none does, the work goes to the event manager as an
+  move; an actor-store read error during a pass counts as a failure, not as
+  an absent actor. If none does, the work goes to the event manager as an
   attribute-change reconcile instead of being dropped; that reconcile queues
   itself again every 30 s (`RECONCILE_RETRY`) while its own sweep still fails,
   so a visa whose revocation failed does not stay usable until it expires.
@@ -785,6 +801,18 @@ replayed `id_token`. The nonce is bound to actor and VS-API session, single-use
 it), and short-lived; the store is in memory and needs no disconnect hook. Past the per-node limit
 minting is refused rather than evicting the oldest, as the vs.capnp contract
 says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
+**One commit-time recheck, and a logout is never refused.** Each round of
+review on the Zode login found another path that read a node's actor or a
+policy snapshot, awaited (enrichment, persistence), and then wrote state the
+read no longer justified. Rather than a check per path, every writer of a
+node's own actor takes the same lock and calls one helper just before it
+commits; the helper checks the session and the policy generation. A login,
+renewal or node authentication under a moved generation is refused and
+retried. A logout instead commits a reduced actor, because refusing it would
+leave the user's login in place.
+([visaservice#63](https://github.com/org-zpr/zl-zpr-visaservice/pull/63),
+[zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **Login and logout re-check every live visa.** Dropping the user namespace
 must revoke visas that needed it (unless device-keyed re-enrichment restores
