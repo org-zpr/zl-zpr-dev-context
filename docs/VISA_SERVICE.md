@@ -195,7 +195,7 @@ actor (the `reauthorize` target is the calling node's address):
   |---|---|---|
   | `reauthorize` login or renewal of the node's own actor | the calling handle's, at load and at commit | refused, `temporarilyUnavailable` |
   | `reauthorize` logout (and its outage fallback) | the calling handle's, at load and at commit | the reduced actor is persisted (above) |
-  | node `authenticate` persist | — (it writes the new session) | refused, `temporarilyUnavailable`; the node authenticates again |
+  | node `authenticate` persist (a `Reset` connect's teardown of the old node state runs only after the recheck, in the same locked commit) | — (it writes the new session) | refused, `temporarilyUnavailable`; the node authenticates again, its old state untouched |
   | `open` (session resume) | load and write both under the lock | — (no re-authorization) |
   | `getLoginNonce` mint | the handle's | — |
   | attribute refresh of a node | the copy's (and its identity token) | discarded, `AttributesIndeterminate` (denied, retried) |
@@ -210,6 +210,10 @@ actor (the `reauthorize` target is the calling node's address):
   recheck (which then sees the new generation) or after its write (which the
   install's reconciliation and re-authentication obligation then cover). The
   identity token is minted after the recheck has chosen the actor to persist.
+  If a login's or logout's actor write fails part-way (the attributes may
+  already be committed), the visa service still invalidates a reduced
+  logout's revisions and queues an attribute-change reconcile before it
+  reports the error.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
