@@ -482,7 +482,9 @@ requestor is refused before anything is asked of the next hop. ([zipline#219](ht
 **`setTopology` — starts links.** `vss_worker::process_topology` logs each
 link, stores the list as the node's current topology (`Assembly.topology`),
 closes any live Zode link whose peer's certificate CN is no longer in it
-([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)), then brings
+([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)) -- except a
+CN of one of the node's configured initial links, which stays allowed without
+the topology (see SECURITY_MODEL.md) -- then brings
 the node's links in line with it
 ([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)):
 
