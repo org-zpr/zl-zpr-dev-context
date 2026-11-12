@@ -272,28 +272,39 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   link if another usable path exists — the relay path, for a direct endpoint
   link — and is denied `NoRoute` otherwise. A visa whose route was chosen just
   before the link went down, but stored just after that pass ran, is caught as
-  it is stored: `create_visa` re-checks every link of the route once the visa
-  is committed, revokes it if one is down, and fails the issuance, so no
-  `Allow` is ever answered with a visa on a downed route. If a visa's
+  it is stored: `create_visa` re-checks the route once the visa is committed —
+  every link must still exist, be up and join a hop of the visa's recorded node
+  path, and that path must end at the destination's docking node (a policy
+  change can move a link id to another edge) — and on any mismatch revokes the
+  visa and fails the issuance, so no `Allow` is ever answered with a visa on a
+  downed or changed route. If a visa's
   revocation write fails — when a link goes down or at commit — the visa is
   quarantined: it is never handed to a node, and every pending-visa read retries
   its revocation, independent of the link (which policy may remove meanwhile)
   and of further reports. A link is installed with its flag, and every report
   is applied through its last router update, under the link-state lock, so
-  reports arriving at the same moment are never lost or applied out of order. A link coming back up affects new visas
+  reports arriving at the same moment are never lost or applied out of order.
+  A report is evaluated against one snapshot of the policy current when it is
+  applied, read under that lock, so one link never mixes two policies' CNs. A
+  report is accepted only from the node's current VS-API session: a reconnect
+  starts a new session and drops the old snapshot, and a late report from the
+  replaced session is ignored. A link coming back up affects new visas
   only; existing flows stay where they are until their visas expire or a later
   policy sweep moves them. The admin network view shows a declared link that
   reports put down as DOWN, although it stays in the graph.
 - **Policy changes.** CNs come from policy, so a new policy can change which
   reports match a link even when the link itself is unchanged. Policy
-  revalidation re-evaluates every link's flag and rebuilds any link whose flag
-  changes in the same atomic batch. The links it takes from up to down, or
+  revalidation re-evaluates every link's flag against the current policy and
+  rebuilds any link whose flag changes in the same atomic batch. A pass whose
+  policy was superseded while it ran applies nothing — no removals, no flag
+  changes, no revocations — and leaves the topology to the pass for the current
+  policy. The links it takes from up to down, or
   removes while up, have their visas revoked the same way as a reported link
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
-  when it disconnects or is reset. After a visa-service restart every node
+  when it disconnects, is reset, or reconnects with a new session. After a visa-service restart every node
   follows the legacy rule until it re-sends its snapshot, which it does after
   every reconnect.
 
