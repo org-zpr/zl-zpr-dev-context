@@ -747,6 +747,8 @@ Other entry points, each a standalone script:
 | `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy |
 | `one-node-oidc-renewal-test.sh` | silent OIDC renewal and disconnect-on-revocation. Takes several minutes: the renewal cadence is a real wall clock. It was the acceptance criterion for the node-to-adapter credential request, which landed as zipline#66; its CI job is no longer gated off, but the test has not yet been observed passing (see `docs/OIDC.md`, *Not yet*) |
 | `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
+| `node-restart-test.sh` | a node restarting (killed and graceful) under a running visa service brings every link back to Active (zipline#167) |
+| `zode-link-test.sh` | the Zode link lifecycle (zl-zipline#250, `docs/ZODE_LINKS.md`): a relay Zode docking the visa service, a Zode with an initial link to it, and a Zode outside the relay's topology. Covers join, restart (rule 5), refusal of an unknown CN (rule 3), substrate loss and redial (rules 9-11), a policy that removes the link (rule 12) and link-state reports |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
 Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,

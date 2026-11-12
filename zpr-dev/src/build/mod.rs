@@ -1764,7 +1764,7 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         tier_results.insert("unit".to_string(), Tier::from_outcome(&outcome));
     }
 
-    // The netns tier: the eleven integration scripts in the zl-zpr-core
+    // The netns tier: the twelve integration scripts in the zl-zpr-core
     // worktree, against dist/. The stored runner decides the route
     // (zipline#92): Host runs the scripts directly, each in its own
     // unprivileged user namespace; Container runs them through `make

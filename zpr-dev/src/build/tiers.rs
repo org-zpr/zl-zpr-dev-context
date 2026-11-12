@@ -746,7 +746,7 @@ pub fn run_unit(plans: &[RepoPlan], logs: &Path, quiet: bool) -> TierOutcome {
 // The netns tier (issue62 step 3)
 // ---------------------------------------------------------------------------
 
-/// The eleven integration scripts the netns tier runs, in order. An explicit
+/// The twelve integration scripts the netns tier runs, in order. An explicit
 /// list, never a glob: `integration-test/unused_or_outdated/` stays out, and
 /// adding a script to the set's gate is a reviewed change (zipline#62).
 /// The list is guarded against drift by [`netns_script_drift`] (zipline#103):
@@ -765,6 +765,9 @@ const NETNS_SCRIPTS: &[&str] = &[
     "one-node-oidc-renewal-test.sh",
     "one-node-policy-reauth-test.sh",
     "node-restart-test.sh",
+    // The Zode link lifecycle: a relay, a Zode with an initial link to it,
+    // and a Zode outside the relay's topology (zl-zipline#250).
+    "zode-link-test.sh",
 ];
 
 /// Top-level `integration-test/*-test.sh` scripts the netns tier
@@ -911,7 +914,7 @@ pub struct NetnsPlan {
 pub const NETNS_JOBS: usize = 4;
 
 /// Builds the netns plan against the `zl-zpr-core` worktree and `dist/`:
-/// the eleven blessed scripts in order, each with the `*_BIN` overrides the
+/// the twelve blessed scripts in order, each with the `*_BIN` overrides the
 /// scripts already honour pointed at `dist/` — nothing is copied into
 /// `integration-test/`. `a2a-pubkey-test.sh` alone runs the worktree-local
 /// `enable-security-testing` `ph` (a debug build that must never reach
@@ -2289,7 +2292,7 @@ mod tests {
         }
     }
 
-    /// The plan runs exactly the eleven blessed scripts, in order — an
+    /// The plan runs exactly the twelve blessed scripts, in order — an
     /// explicit list, not a glob: `unused_or_outdated/` and any new script
     /// stay out until reviewed in (zipline#62, zipline#103). The order is
     /// the documented one: `attr-query-test.sh` after `a2a-pubkey-test.sh`,
@@ -2297,10 +2300,11 @@ mod tests {
     /// zipline#103), `one-node-policy-reauth-test.sh` — the
     /// policy-install re-authentication e2e (zipline#124) — after that
     /// (zipline#125), and `node-restart-test.sh` — the node-restart
-    /// regression e2e (zipline#167/#170/#171) — last, newest last
-    /// (zipline#178).
+    /// regression e2e (zipline#167/#170/#171) — after that (zipline#178),
+    /// and `zode-link-test.sh` — the Zode link lifecycle e2e — last, newest
+    /// last (zl-zipline#250).
     #[test]
-    fn netns_plan_lists_the_eleven_scripts_in_order() {
+    fn netns_plan_lists_the_twelve_scripts_in_order() {
         let plan = netns_plan(
             Path::new("/wt/zl-zpr-core"),
             Path::new("/b/dist"),
@@ -2329,6 +2333,7 @@ mod tests {
                 "one-node-oidc-renewal-test.sh",
                 "one-node-policy-reauth-test.sh",
                 "node-restart-test.sh",
+                "zode-link-test.sh",
             ]
         );
         assert_eq!(plan.dir, Path::new("/wt/zl-zpr-core/integration-test"));

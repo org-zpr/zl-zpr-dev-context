@@ -389,7 +389,7 @@ risk. Everything is a release build. The table is in claim order:
   `python3` — all hold. The scripts need no sudo: each re-execs itself
   under `unshare -nr` and runs as that namespace's mapped root
   (zipline#189). Otherwise, when a Docker daemon is reachable (`docker info`
-  succeeds), the same eleven scripts run as root inside the privileged
+  succeeds), the same twelve scripts run as root inside the privileged
   container of `zl-zpr-core/integration-test/`'s `make docker-test`, one
   `make` invocation per script with `WORKSPACE=<build-dir>`. Either route
   runs up to four scripts at once (`--jobs N` overrides the width on both).
