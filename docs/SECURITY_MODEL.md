@@ -211,7 +211,9 @@ So the visa service's `reauthorize` entry point binds the credential to the
 | the **same trusted service** that admitted the actor | one provider cannot renew another's session |
 | everything else — signature, `iss`, `aud`, `exp`, `kid`, `alg`, `hd`, `email_verified` | unchanged from the connect path |
 
-**Scope.** The relaxation applies to `reauthorize` and to nothing else. The
+**Scope.** The relaxation applies to renewals on `reauthorize` and to nothing
+else. A Zode's own login on `reauthorize` is not a renewal and keeps a nonce
+check, against a visa-service nonce (*A Zode's own login* below). The
 connect path is untouched, and the two paths deliberately do not share a
 validation function taking a "skip the nonce" boolean — the nonce expectation
 is an enum, so the connect arm cannot be constructed with checking off by
@@ -230,9 +232,12 @@ provides").
 **The SS (bootstrap-signature) arm.** `reauthorize` also accepts a
 self-signed blob, so a device authority is re-proved the same way install-driven
 re-authentication demands (zipline#120). One `reauthorize` carries at most one
-blob per namespace, and the namespace set must equal the live actor's
-authorities exactly — an actor that authenticated as RSA+OIDC re-proves both
-or fails. The SS arm requires all of: the target is a live actor admitted
+blob per namespace. For an adapter the namespace set must equal the live
+actor's credential-backed authorities exactly — an actor that authenticated as
+RSA+OIDC re-proves both or fails. A node renewing its **own** actor may also
+change its `user` namespace (see *A Zode's own login* below); the `device`
+blob is mandatory either way and the `device` namespace can never be gained or
+dropped. Any other set mismatch is a `paramError`. The SS arm requires all of: the target is a live actor admitted
 through the calling node; the actor holds a bootstrap `device.zpr.authority`;
 the blob's CN equals its authenticated CN; the signature verifies against the
 **pinned new snapshot's** bootstrap key; and the blob's timestamp is within
@@ -240,6 +245,44 @@ the maximum clock skew (180 s). There is no monotonic-timestamp rule:
 freshness comes from the node-minted, HMAC'd challenge (at most 120 s old),
 and only the docking node could replay — a compromised docking node is
 already Case 2.
+
+**A Zode's own login: the nonce comes from the visa service.** On a Zode the
+machine's actor is the node's own actor, and a user login adds the `user`
+namespace to it through `reauthorize` (logout drops what the login added;
+device-keyed enrichment may restore an equivalent user namespace, below). The connect path
+binds an OIDC token to a nonce derived from the docking node's link challenge;
+that protects against a replayed `id_token` only because the docking node is a
+separate party. A Zode is its own docking node, so a node-minted nonce would
+let a subverted Zode log in as anyone whose `id_token` (and nonce) it holds,
+until the token expires. So a login must carry a nonce the visa service
+issued through `getLoginNonce`:
+
+| Bound to | Why |
+|---|---|
+| the calling node's actor address | a nonce issued to one node never serves another |
+| its VS-API session generation (`zpr.session`) | a re-authenticated node starts with no usable nonces |
+| one use, spent as soon as the request is classified as a login — before its own binding and expiry checks, the device proof and the token | a login that fails on any of them cannot be retried with it |
+| a short lifetime (300 s) and at most 4 outstanding per node session | bounds what the visa service holds; `quotaExceeded` past it |
+
+Only the namespace-set check runs before the nonce is spent; a request with
+the wrong blob set leaves it unspent. After the nonce, the device proof and
+the token are checked, the token exactly as on the connect path. Only the
+node renewing its own actor may gain or drop the namespace; an adapter keeps
+the exact set. A device-only
+self-renewal drops any user authority the actor holds, including one whose
+OIDC provider policy no longer declares, and a node's reauthorizations of its
+own actor are serialized, so two concurrent logins cannot both succeed; a
+node's re-authentication persists its new `zpr.session` under the same lock,
+and a self-renewal is refused if that session changed while it was in flight.
+A logout clears the previous login's state: every `user.*` attribute —
+whatever store vended it — and the login's session anchors. The policy re-run
+then re-enriches the actor from its device identity, which can legitimately
+restore `user.*` attributes (and a trusted-service-derived user authority)
+that a store vends for that device. Every login and logout re-checks all live
+visas against the resulting actor, so a visa is revoked when it no longer
+passes policy — in particular one that needed the logged-out user's
+attributes. What remains: a subverted Zode can still use a login of its own
+user, as any endpoint can.
 
 **What this hands to an attacker, and why it is not a new threat.** The
 binding is enforced by the visa service against its own session record, and
@@ -496,6 +539,13 @@ bootstrap visa from a peer (none in Hello) — is
 [#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
 ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
 
+**The visa service mints a Zode's login nonce.** Every endpoint is a node, so
+"a compromised docking node" now includes every laptop; a nonce the endpoint
+mints itself cannot stop it replaying a stolen `id_token`. The operator chose
+a visa-service nonce (`getLoginNonce`) over accepting that risk for v1. See
+*A Zode's own login* above.
+([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -543,6 +593,13 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, node half** — a node with `forwarding` off refuses
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
+- **A Zode's own login, visa-service half** — `getLoginNonce` and the
+  `reauthorize` gain/drop for a node's own actor are implemented in the visa
+  service and unit-tested per binding row
+  ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)). The
+  node and `ph-cli` side that requests the nonce and logs in is not built yet
+  ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)), so no
+  end-to-end test covers it.
 
 **Not yet, or verify before relying on it:**
 
