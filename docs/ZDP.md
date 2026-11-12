@@ -388,8 +388,10 @@ topology names that it has no link to yet
   warning, any AAA address or bootstrap flag in the Hello Response. A dialer
   redials after a close while the address still belongs to an initial link or
   a topology entry, and otherwise drops the link and dials any topology peer
-  it has no link to (a peer whose topology address moved); an answerer drops
-  the link, since the dialer reconnects.
+  it has no link to (a peer whose topology address moved). An answerer drops
+  the link, since the dialer reconnects, and likewise dials any initial link
+  or topology peer it has no link to; a dial that crosses the peer's redial
+  is settled as a crossed dial.
 - **Crossed dials.** One substrate address pair carries one link. So when two
   Zodes dial each other at the same moment, each receives the other's first
   message on its own dialing link, and neither handshake could finish. The
