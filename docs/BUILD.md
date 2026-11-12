@@ -637,7 +637,7 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the ten `zl-zpr-core/integration-test/` scripts, against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts in zpr-dev's run list (`NETNS_SCRIPTS`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
@@ -746,9 +746,22 @@ Other entry points, each a standalone script:
 | `one-node-oidc-renewal-test.sh` | silent OIDC renewal and disconnect-on-revocation. Takes several minutes: the renewal cadence is a real wall clock. It was the acceptance criterion for the node-to-adapter credential request, which landed as zipline#66; its CI job is no longer gated off, but the test has not yet been observed passing (see `docs/OIDC.md`, *Not yet*) |
 | `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
+| `zode-join-test.sh` | Zodes join through a relay (zl-zipline#222): two Zodes with only an initial link to the relay each receive exactly their own two bootstrap visas, authenticate with the visa service through the relay, and reach each other across it under their own identities |
+| `zode-line-test.sh` | three Zodes in a line (zl-zipline#222): with the relay's `forwarding` on it carries the outer Zodes' traffic on `forwardOnly` visas; with it off it refuses and logs them and the traffic stops |
+| `zode-wrong-ca-test.sh` | refused Zode links (zl-zipline#222): a Zode whose certificate another CA signed never links, and one whose CN is in neither the relay's topology nor its initial links is closed after keying |
 
 Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,
 `NETEM_PARAMS` for link impairment.
+
+The `zode-*` scripts share `lib/zode_funcs.sh` and the `pregen/zodes.zplc`
+policy: a relay docking the visa service, and Zodes on one bridged substrate
+segment. Their link certificates, and the second CA, are made at run time with
+`lib/zpr-pki`. Only the RSA authentication keys and the compiled `zodes.bin2`
+are checked in; `make -C integration-test/pregen zodes.bin2` recompiles it,
+which needs a `zplc` from the `feature/zodes` compiler: an older one silently
+ignores the relay's `transit = true`. A new
+`*-test.sh` must also be added to `NETNS_SCRIPTS` in zpr-dev, or `zpr-dev build`
+refuses to plan the netns tier.
 
 The OIDC tests need a `vs` built from a `zl-zpr-visaservice` that carries the
 feature under test; a stale binary left in `integration-test/` from an earlier

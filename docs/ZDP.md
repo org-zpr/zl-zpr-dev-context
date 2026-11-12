@@ -59,7 +59,7 @@ Internal RFC 6.4 §1 names five protocols. ZDP is the transport under the others
 |---|---|---|
 | **ZDP** — data protocol | any two ZPR entities | implemented |
 | **ZIP** — ZPR Interface Protocol | adapter ↔ dock | implemented as ZDP management messages |
-| **ZPR Link Management** | forwarder ↔ forwarder | messages implemented; node-to-node links are not |
+| **ZPR Link Management** | forwarder ↔ forwarder | implemented, including Zode-to-Zode links ([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)) |
 | **ZPR Keying** | adapter ↔ dock, forwarder ↔ forwarder | implemented with **Noise**, not IKEv2 |
 | **ZARP** — address resolution | multipoint substrates | not implemented (type reserved) |
 
@@ -210,6 +210,7 @@ Never infer a type value from 6.4.
 | 141 | Init Authentication Request † | no |
 | 142 / 143 | Start Authentication / Abandon Authentication Attempt † | no |
 | 144 / 145 | Renew Authentication Request / Response ‡ | no |
+| 146 | Bootstrap Visas ‡ | no |
 | 252 / 253 | Canceled / Cancel † | no |
 | 254 | Acknowledgement | no |
 | 255 | Reserved — silently discard | — |
@@ -218,9 +219,11 @@ Never infer a type value from 6.4.
 the spec. 142/143 are upstream zpr-core #1410's experimental actor-authorization
 assignments (`diagrams/actor_authorization.md` in zl-zpr-core).
 
-‡ zipline-only (zipline#66): node-to-adapter credential renewal. They were 142/143
+‡ zipline-only. 144/145 (zipline#66): node-to-adapter credential renewal. They were 142/143
 until zl-zpr-core#96 merged #1410, which claimed those numbers; zipline's moved,
 so zipline nodes and adapters from before and after that merge do not interoperate.
+146 ([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)): a relay
+hands a joining Zode its bootstrap visas (*Joining through a relay*, below).
 
 Note the shape of the divergence: the RFC has separate Echo Request/Response
 and Terminate Request/Response/Indication types; the implementation has one
@@ -319,8 +322,8 @@ peer — the caller may reset the link on those.
 
 Docking sessions are **always initiated by the adapter** (6.4 §5.6): the dock
 platform serves many adapters, adapters often have no fixed substrate address,
-and probing would be wasteful and noisy. For node-to-node links, whichever node
-has the numerically smaller node number initiates.
+and probing would be wasteful and noisy. Zode-to-Zode links are different:
+either Zode may dial (*Zode links*, below).
 
 The sequence is: keying (Noise) → `Hello` Request/Response → link Active with
 `Echo` keep-alives → actor authorization. A Hello Response may accept, reject, or
@@ -334,8 +337,8 @@ tears the link down.
 
 - **Link** (`link_state.rs`). States: `Inactive`, `Keying`, `Helloing`, `Active`,
   `Closing`, `Resetting`, `Disconnecting`, `Error`. Link types: `Internal`,
-  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` — the last marked
-  *currently unsupported*.
+  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` — the last is a
+  Zode-to-Zode link.
 - **Actor** (`actor_auth.rs`, `ActorAuthorization`). One transaction carries
   `Start Authentication` → `Init Authentication` (the node's challenge) →
   `Acquire ZPR Address` (the adapter's evidence) → `Grant ZPR Address`, or
@@ -357,6 +360,57 @@ Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
 5 s, and a node drops a link whose keying does not finish within
 `NODE_KEYING_TIMEOUT = 60 s` (zipline#173).
+
+### Zode links
+
+A Zode dials its configured initial links at startup and every peer the
+topology names that it has no link to yet
+([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222); see
+[ROUTING.md](ROUTING.md)). Keying is Noise XX with mutual certificates
+([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220)).
+
+- **Telling a Zode from an adapter.** A responder must choose the link type
+  before keying, from the first message alone. A dialing Zode puts the
+  five-byte marker `ZODE1` in the cleartext payload of Noise message 0
+  (`km_noise.rs` `ZODE_HANDSHAKE_MARKER`). Noise hashes that payload into the
+  handshake, so it cannot be altered without keying failing. A first message
+  with the marker starts a `NodeToNode` link; anything else docks as an
+  adapter (`mgmt/dispatch.rs` `inbound_link_type`).
+- **After keying**, both ends check the peer's certificate CN against the
+  topology and the configured initial links, and close a link to any other CN
+  before Hello. The peer's ZPR address comes from its topology entry, never
+  from Hello (gap 5).
+- **Hello.** The dialer sends the Hello Request and the answerer replies.
+  There is no actor authorization on a Zode link. The dialer ignores, with a
+  warning, any AAA address or bootstrap flag in the Hello Response. A dialer
+  redials after a close; an answerer drops the link, since the dialer
+  reconnects.
+- **Crossed dials.** One substrate address pair carries one link. So when two
+  Zodes dial each other at the same moment, each receives the other's first
+  message on its own dialing link, and neither handshake could finish. The
+  node settles this before keying (`mgmt/dispatch.rs` `crossed_dial`). The
+  dial of the Zode whose CN sorts lower survives, the rule pd gate g56 chose
+  for crossed dials. A Zode compares against the CN it expects at that
+  address, from the initial link or topology entry it dialed. The other Zode
+  drops its dial and answers. A dial that is idle, waiting to redial, always
+  answers. The peer's real CN is still checked after keying. A Zode that
+  answered on an initial link's address dials it again when that link
+  closes. Two links to one Zode over *different* address pairs are settled
+  after keying by the same lower-CN rule.
+
+### Joining through a relay
+
+A joining Zode has no visa service of its own. It reaches the visa service
+only through its initial link to the relay, on two bootstrap visas the relay
+hands it in a `Bootstrap Visas` message (type 146), sent after Hello and again
+on each topology update. They are never in Hello (gap 6). The body is a
+one-byte count, then each visa as a two-byte length and a packed Cap'n Proto
+`Visa` (`bootstrap_handoff.rs`). The joiner checks the message before
+installing anything. The checks, and why the relay hands visas at all (a
+departure from the Zodes plan, decided on pd gate g60), are in
+[SECURITY_MODEL.md](SECURITY_MODEL.md) (*Design decisions*). Until it has a
+topology entry for the relay, the joiner takes the relay's ZPR address from
+the forward visa's next hop.
 
 ### Flow setup
 
@@ -447,12 +501,12 @@ dropped.
 
 Specified, not implemented:
 
-- **Node-to-node links.** `LinkType::NodeToNode` is *currently unsupported*;
-  integration tests are `one-node-test.sh` and `one-node-v6-test.sh`. Multi-hop
-  forwarding, visa heralding, next-hop selection (6.4 §5.11.2), and route
-  distribution (§5.12) are therefore unexercised. The intermediary node's
-  `forwardOnly` stream binding (Flow setup, above) is implemented but tested
-  in-process only ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
+- **Visa heralding and route distribution** (6.4 §5.11.2, §5.12). Zode links
+  exist ([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)) and
+  multi-hop forwarding runs: the netns test `zode-line-test.sh` sends traffic
+  across a relay holding only `forwardOnly` visas, and `zode-join-test.sh`
+  joins a Zode through the relay. Next hops come from the visa service's
+  visas, not from a routing protocol between nodes.
 - **Substrates other than IP/UDP** — raw links, PPP, bare Ethernet.
 - **ZARP** (6.4 §3.3.1) — type 128 reserved, no implementation.
 - **IKEv2** — constant only; Noise is what runs.
@@ -466,6 +520,7 @@ Specified, not implemented:
   [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core
   enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
   Today a node accepts a `Stream ID Request` from any node link.
+  **[t88 pending: replace with the core enforcement before the PR.]**
   Reverse binding for symmetric visas is undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
@@ -500,6 +555,7 @@ All paths under `zl-zpr-core/adapter/ph/src/` unless noted.
 | Management plane: dispatch, handlers, senders | `mgmt/`, `mgmt_dispatch_worker.rs`, `mgmt_processor_worker.rs` |
 | Transaction IDs | `mgmt/txn_mgr.rs` |
 | Link/docking-session FSM | `link_state.rs`, `peer_table.rs` |
+| Zode links: dialing, crossed dials, the relay's bootstrap-visa hand-off | `assembly.rs` (`dial_zode`, `start_topology_links`), `mgmt/dispatch.rs`, `bootstrap_handoff.rs` |
 | Keying | `km.rs`, `km_noise.rs`, `km_cert_exchange.rs`, `km_multiplexor.rs`, `pki.rs` |
 | Visa and forwarding tables | `visa_table.rs`, `forwarding_tables.rs`, `adapter_tables.rs` |
 | Visa service connection | `visa_mgmt.rs`, `libnode2/src/vsconn.rs` |

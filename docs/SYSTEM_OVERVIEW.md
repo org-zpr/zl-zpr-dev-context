@@ -675,7 +675,10 @@ RFCs as design intent, not as a description of current behavior.
 Working today: nodes and adapters over Noise-secured links, adapter-to-adapter
 integrity, bootstrap authentication, visa issuance and distribution with route
 selection, revocation and reconciliation on policy change, the ZPL compiler,
-and file-backed attribute sources.
+and file-backed attribute sources. On `feature/zodes`, Zodes link to each other
+from topology and from configured initial links, join through a relay, and
+forward across it ([zl-zipline#222](https://github.com/org-zpr/zl-zipline/issues/222);
+see [ROUTING.md](ROUTING.md)).
 
 Designed but not yet implemented:
 

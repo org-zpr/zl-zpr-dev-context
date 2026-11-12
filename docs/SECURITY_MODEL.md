@@ -533,11 +533,36 @@ a node that has no actor yet reach VSAPI, so whoever carries them relays that
 node's traffic. The visa service mints them only for the node it docks on (the
 relay), and only on the link whose `peerCn` names the joining node; every other
 neighbour gets the link without them. So the visa service's half of the join
-path cannot turn an endpoint into a transit node. The node's half — installing
-them only for the link whose certificate carries that CN, and accepting no
-bootstrap visa from a peer (none in Hello) — is
-[#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
+path cannot turn an endpoint into a transit node.
 ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
+**The relay hands a joining Zode its own two bootstrap visas, under strict
+checks.** This departs from the Zodes plan (§5.6), which says "the relay never
+hands visas to the endpoint" and has the joiner grant its own outbound side.
+That cannot work: a node binds a stream by matching the visa ID the visa
+service issued at every hop, and a visa the joiner granted itself carries an ID
+the relay has never seen. The operator chose the hand-off instead (pd gate g60,
+[#222](https://github.com/org-zpr/zl-zipline/issues/222)). The visa service
+already mints the joiner's own copies of both VSAPI bootstrap visas into the
+relay's topology `Link.visas`, next to the relay's copies. The relay sends the
+joiner exactly the entries for that link's verified CN, in a ZDP
+`BootstrapVisas` management message (type 146) sent after Hello completes, and
+again on each topology update. The visas are never in Hello (gap 6). The joiner
+installs them only if all of these hold, and refuses and logs them otherwise:
+
+- the message arrived on a Zode link that has finished Hello;
+- the peer's verified certificate CN is one of the joiner's configured initial
+  links;
+- the joiner has no VS-API session yet;
+- there are at most two visas;
+- each visa is exactly the joiner's own VSAPI flow (TCP from the joiner's ZPR
+  address to `vs.zpr` port 5002) or that flow's reply.
+
+So a peer can at most give a joining Zode a route to the visa service through
+that peer, and only before the joiner has authenticated; it cannot open any
+other flow. A joiner also starts with no self-granted VS-API visas, unlike a
+node that hosts the visa service: a self-granted visa would carry an ID no
+other hop knows, and it would shadow the handed-off ones.
 
 **The visa service mints a Zode's login nonce.** Every endpoint is a node, so
 "a compromised docking node" now includes every laptop; a nonce the endpoint
@@ -632,6 +657,7 @@ not read the RFCs as a description of current guarantees.
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
   service fills it in [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)
   and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  **[t88 pending: replace with the core enforcement before the PR.]**
   Reverse binding for symmetric visas stays undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa
@@ -653,12 +679,13 @@ not read the RFCs as a description of current guarantees.
 - **Topology-bound link certificates (Zodes).** The verification and the
   CN-in-topology rule are implemented for Zode-to-Zode links
   ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
-  decisions*, above), and the visa service fills `Link.peerCn` from the peer's
-  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)), but
-  no code starts such a link yet: link start from the topology, and configured
-  initial links (which also join the allowed CNs), are
-  [#222](https://github.com/org-zpr/zl-zipline/issues/222). Until then the rule has
-  nothing to act on.
+  decisions*, above). The visa service fills `Link.peerCn` from the peer's
+  node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)).
+  Zodes start links from the topology and from their configured initial links,
+  whose CNs are also allowed
+  ([#222](https://github.com/org-zpr/zl-zipline/issues/222)). The netns tests
+  `zode-wrong-ca-test.sh` (another CA's certificate never links; a CN in
+  neither list is closed after keying) and `zode-join-test.sh` exercise this.
 
 ---
 

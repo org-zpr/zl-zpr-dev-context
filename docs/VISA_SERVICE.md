@@ -366,6 +366,7 @@ in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
 the visa service fills it from
 [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core enforces
 it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+**[t88 pending: replace with the core enforcement before the PR.]**
 
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
@@ -867,6 +868,35 @@ gets the link and no visas, so an endpoint never relays a joiner's traffic.
 join policy pins that address together with a `device.zpr.adapter.cn`, or two
 pin it with different CNs — is left out of the topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
 
+### How a Zode joins through the relay
+
+The node side of the join ([#222](https://github.com/org-zpr/zl-zipline/issues/222)),
+end to end:
+
+1. The joining Zode starts with an initial link to the relay
+   (`--initial-link relay@IP:PORT`) and no visa service of its own. Its visa
+   table starts empty: unlike a node hosting the visa service, it grants itself
+   no VS-API visas.
+2. It dials the relay. The relay accepts the link once the joiner's CN is in
+   the relay's topology; until the visa service has pushed that topology, the
+   relay closes the link after keying and dials the joiner itself when the
+   topology arrives.
+3. After Hello, the relay hands the joiner the two bootstrap visas the visa
+   service minted for it into that link's `Link.visas`, in a ZDP
+   `Bootstrap Visas` message. The joiner installs them only under the checks in
+   [SECURITY_MODEL.md](SECURITY_MODEL.md) (*Design decisions*); the hand-off
+   itself departs from the Zodes plan (§5.6) and was decided by the operator on
+   pd gate g60. The relay installs its own copies from the visa service's push,
+   as before.
+4. The joiner's VS-API connection to `vs.zpr` now runs over the relay, and it
+   authenticates as a node (`authenticate_node`). The visa service then
+   reaches its VSS server, pushes it a topology, and the joiner dials the
+   other peers in it.
+
+The netns test `zode-join-test.sh` runs this with two joiners, and checks that
+each installs exactly its own two visas and that the two can then reach each
+other across the relay.
+
 ### Deferred
 
 No tracker issues are filed for these unless linked.
@@ -915,6 +945,7 @@ No tracker issues are filed for these unless linked.
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
   service starts setting it in
   [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245).
+  **[t88 pending: replace with the core enforcement before the PR.]**
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root
@@ -935,8 +966,9 @@ No tracker issues are filed for these unless linked.
   `feature/zodes` the visa service fills `peerCn` from policy
   ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and acts on
   `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224));
-  the node checks `peerCn` on Zode links
-  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)) but does not send
+  the node checks `peerCn` on the Zode links it starts from topology
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220),
+  [#222](https://github.com/org-zpr/zl-zipline/issues/222)) but does not send
   `reportLinkStates` yet ([#223](https://github.com/org-zpr/zl-zipline/issues/223)).
 
 ---
