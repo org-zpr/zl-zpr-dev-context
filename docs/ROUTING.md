@@ -755,6 +755,10 @@ the listing is revoked by the pass, and one stored after it fails its
 commit-time route check, which also refuses a visa revoked while it was being
 issued even if a down-and-up cycle made its route valid again. Such a revocation clears the visa's policy stamp, and
 a later policy deny leaves it unstamped, so no later policy allow can cancel it.
+The grant itself is not yet atomic against revocation: the final check is a
+read taken before the reply, and a revoke sent over VSS can overtake its grant
+in the VS-API reply. Deferred to
+[zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248).
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **A down link stays in the graph.** Removing it from the router would make
