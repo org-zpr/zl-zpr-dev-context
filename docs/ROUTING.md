@@ -741,8 +741,10 @@ Rules that come with it:
   those can be slow, and can wait on another operation that wants the lock.
 - An actor attribute refresh queries trusted services outside the lock and
   commits under it. The commit applies only the attributes it changed onto the
-  actor as stored then, so it never rolls back a session or claim written
-  meanwhile.
+  actor as stored then, and only if that is still the same actor (identity, CN
+  and role), so it never rolls back a session or claim written meanwhile, nor
+  hands one actor's claims to another at a recycled address. Services are
+  recomputed at commit under the current policy.
 - Work that must read policy before the lock because it waits on the network
   rechecks under the lock that the policy is still current. Today that is
   authenticating a node against trusted services.
@@ -750,7 +752,8 @@ Rules that come with it:
 Visa issuance stays outside the lock and is closed by ordering: a link going
 down sets its flag before its revocation pass lists visas. A visa stored before
 the listing is revoked by the pass, and one stored after it fails its
-commit-time route check. Such a revocation clears the visa's policy stamp, and
+commit-time route check, which also refuses a visa revoked while it was being
+issued even if a down-and-up cycle made its route valid again. Such a revocation clears the visa's policy stamp, and
 a later policy deny leaves it unstamped, so no later policy allow can cancel it.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
