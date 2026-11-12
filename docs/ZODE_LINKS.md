@@ -1,6 +1,8 @@
 # Zode links: lifecycle (v1)
 
-**Status:** DESIGN DRAFT for zl-zipline#250 (2026-11-12). Not yet implemented.
+**Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a, on
+`feature/zodes`). Rules 11a and 16 come with #252. See "Implementation status"
+for where the code lives and what it does differently.
 
 This document says how two Zodes bring up, keep, lose and recover a link between
 them. It replaces the link handling built in core#104 (closed), which grew
@@ -228,6 +230,100 @@ layer from scratch:
   Every transition gets a unit test, and the rules above are the acceptance criteria.
 - How rules 9 and 12 find "state tied to a link". Recommended: hang everything
   link-scoped off one per-link object, so dropping it clears everything.
+
+## Implementation status
+
+Built on `feature/zodes` in three core PRs (zl-zpr-core#105 keying and
+acceptance, #106 lifecycle, and the reporting PR), with the visa-service half in
+zl-zpr-visaservice#66 and the schema in zl-zpr-vsapi#5 and zl-zpr-common#14
+(tag `zl-v0.32.0-zodes.3`).
+
+### Where the code lives
+
+| Concern | Location |
+|---|---|
+| Who owns a link (`link_owner`), acceptance after keying (`check_keyed_peer`, rules 3 and 4), replacing an established link (rule 5) | `zl-zpr-core/adapter/ph/src/zode_links.rs` |
+| The per-peer link record and its state machine (rules 6–8, 10, 11, 13): kind, owner, dial address, current connection, state, timers | `zl-zpr-core/adapter/ph/src/zode_link_record.rs` |
+| Driving the records: connection events, `setTopology` (rules 12, 13), dials, closes and timers; the link-state snapshot builder (`ZodeLinkTable::snapshot`) and reporter (`run_link_state_reporter`) | `zl-zpr-core/adapter/ph/src/zode_links.rs` |
+| The per-connection state machine (`LinkType::NodeToNode`, `ZodeEnd::Dialer`/`Answerer`) | `zl-zpr-core/adapter/ph/src/link_state.rs` |
+| Recognising an inbound Zode handshake | `zl-zpr-core/adapter/ph/src/mgmt/dispatch.rs`, `km_noise.rs` (`ZODE_HANDSHAKE_MARKER`) |
+| `reportLinkStates` RPC; per-link `setTopology` decoding | `zl-zpr-core/libnode2/src/vsconn.rs`, `libnode2/src/vss.rs` (`decode_topology_links`) |
+| Rule 14 (`end_agrees`), rule 13a (failed pairs, `record_failures`, `clear_failed_pairs_for`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
+| netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
+
+Everything scoped to one connection hangs off that connection's peer-table
+entry, so dropping the entry clears it (rule 9). A record holds only the
+connection's id. #251 and #252 hang their state (stream bindings, bootstrap
+visas) off the same entry.
+
+### Constants
+
+All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
+
+- `LINK_UP_WINDOW` = 5 s, the owner's link-up window (rule 6), `zode_link_record.rs`.
+- `OWNER_REDIAL_INTERVAL` = 1 s, the owner's redial inside the window (rule 6).
+- `INITIAL_LINK_BACKOFF_MIN` = 1 s, doubling to `INITIAL_LINK_BACKOFF_MAX` = 30 s,
+  each delay jittered to between half and all of it (rule 11).
+- `ZODE_KEYING_TIMEOUT` = 2 s and `ZODE_HELLO_TIMEOUT` = 2 s, `config.rs`. Together
+  they fit inside the window, which a compile-time assertion checks, so an
+  attempt ends on its own before the window does. When the window ends, the
+  owner also closes any attempt still in flight.
+- `REPORT_COALESCE` = 100 ms: report requests that close together go out as one
+  snapshot, `zode_links.rs`.
+
+### Configuration
+
+- **Initial link.** `[node.initial_link]` with `addr = "IP:port"` (the relay's
+  substrate address) and `cn = "<relay CN>"`, or `ph node --initial-link
+  CN@IP:PORT`, which overrides the file. At most one. Validation rejects an empty
+  CN, an unspecified IP and port 0. Node only.
+- **Relay.** `relay = true` in `[node]`, or `ph node --relay true`. Default off.
+  A relay has no initial link: setting both is a config error.
+- A Zode's own address, the one ownership compares, is `zpr_addr[0]`.
+
+### Wire
+
+- **Handshake marker.** A dialing Zode puts `ZODE1` in the plaintext payload of
+  the first Noise XX message. The node it reaches reads the marker before any
+  link exists, so it creates a Zode link instead of an adapter dock. Noise mixes
+  the payload into the handshake hash, so a marker changed in transit breaks the
+  handshake. See [ZDP.md](ZDP.md), "Zode links".
+- **Hello.** The dialer sends the HelloRequest. The answerer replies with none
+  of the adapter-dock TLVs (`AAA`, `OIDC_IDP`, `VS_BOOTSTRAP_LINK`), and a Zode
+  HelloResponse that carries any of them closes the link.
+- **`setTopology`.** A `Link` without `zprAddr` or with an empty `peerCn` is
+  logged and skipped, and the rest are applied. The call still answers `ok`.
+- **`reportLinkStates`.** Snapshots follow "Reporting summary" and "Reporting
+  contract". A snapshot goes out after every change to the listed set, after
+  every VS-API registration (`registerVss`), and never while there is no VS-API
+  session: VSConn refuses the call locally and nothing goes on the wire. The
+  next registration asks for a fresh one.
+
+### Deviations from the rules as written
+
+- **Rule 5 (replace).** The new inbound link keys alongside the established one.
+  The old link is closed only once the new link's CN has passed rule 3, so a
+  stray or refused dial cannot take down a working link. A redial from the
+  same substrate address takes over that address only then (gate g78 q5).
+- **Rule 13b** holds today for addresses from policy: the visa service
+  proposes a link only to a peer whose substrate address policy gives and
+  skips the rest. Using an address the peer reported itself is #227 and #255.
+
+### What waits for which issue
+
+- **#251** node-to-node forwarding: traffic over Zode links. Today a
+  `Stream ID Withdrawal` or `Unbind Egress Stream` on a Zode link is refused
+  (`MessageNotPermitted`), and no flow has run across a Zode link end to end.
+- **#252** relay join: rule 11a (the bootstrap hand-off on every join) and rule 16
+  (the VS-API session over the initial link). Until then only the Zode that
+  hosts the visa service has a VS-API session. Other Zodes link to it but cannot
+  receive `setTopology` or report, so the netns test reports from the relay's
+  side only.
+- **#227** `updateSubstrateAddr`: once implemented, it calls
+  `TopologyMgr::clear_failed_pairs_for` as a second rule-13a trigger. Today only
+  a VS-API (re)connect (`authenticate`, `open`) clears a node's failed pairs.
+- **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), background
+  retries of direct links.
 
 ## Related
 

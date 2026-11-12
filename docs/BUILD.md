@@ -122,6 +122,15 @@ the containerized jobs pull the private `ghcr.io/org-zpr/dev-env` image; see
 `skills/zpr/SKILL.md` ("Git / PR conventions") for what each needs
 (`org-zpr/zl-zipline#208`).
 
+**On `feature/zodes`, core CI takes the visa service from a feature
+pre-release**, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
+(`make release`, then `gh release create v0.22.0-zodes.N --prerelease --target
+<full sha>`). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
+org-zpr/zl-zipline#250, because `v0.21.2` sends no `Link.peerCn`. **Re-cut
+rule** (org-zpr/zl-zipline#254): when the visa service changes in a way core CI
+needs, cut the next `-zodes.N` and move `VISA_SERVICE_RELEASE` in
+`zl-zpr-core/.github/workflows/adapter.yml` to it.
+
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
 every caller of the shared `rust-build-test.yml` / `rust-test.yml` /

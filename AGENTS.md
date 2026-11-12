@@ -56,6 +56,7 @@ paths, so they can be opened directly.
 | Changing visa issuance, revocation, or the evaluator | `docs/VISA_SERVICE.md`, `docs/SECURITY_MODEL.md` |
 | Changing authentication, identity, attributes, or trusted services | `docs/SECURITY_MODEL.md`, `docs/VISA_SERVICE.md` |
 | Changing packet formats, links, docking sessions, forwarding, or compression | `docs/ZDP.md` |
+| Changing Zode links: who dials, acceptance, link lifecycle, link-state reports | `docs/ZODE_LINKS.md`, `docs/ZDP.md`, `docs/ROUTING.md` |
 | Changing routing, topology, or address assignment | `docs/ROUTING.md`, `docs/SYSTEM_OVERVIEW.md`, `docs/ZDP.md` |
 | Changing DNS resolution, the CoreDNS `zpr` plugin, machine hostnames, or a demo's `Corefile` | `docs/DNS.md` |
 | Changing anything cryptographic, or touching the enforcement path | `docs/SECURITY_MODEL.md` |
