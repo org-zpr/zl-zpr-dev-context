@@ -425,9 +425,9 @@ is the **previous node's ZPR address** on the path, `path[pos-1]`. A node
 accepts a `Stream ID Request` for a visa only on the link whose peer's topology
 ZPR address equals `prevHop`; the ingress visa has none and never accepts one
 (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
-`Stream ID Request` matters most — carries no `FwdPep`. **Schema only:** the visa
-service does not fill it until [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245),
-and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+`Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
+each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
+whose path has fewer than two nodes has none. Core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 

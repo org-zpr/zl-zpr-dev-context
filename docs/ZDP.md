@@ -461,10 +461,8 @@ Specified, not implemented:
 - **ZPR Configurations.** Only the Baseline Configuration exists; field widths
   are Rust struct definitions, not runtime-configurable.
 - **A2A SAIDs other than 0**, and MAC sizes other than 8 bytes.
-- **`Stream ID Request` previous-hop rule.** `Visa.prevHop` is in the schema
-  only: the visa service fills it in
-  [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core
-  enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+- **`Stream ID Request` previous-hop rule.** The visa service sets
+  `Visa.prevHop` ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
   Today a node accepts a `Stream ID Request` from any node link.
   Reverse binding for symmetric visas is undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
