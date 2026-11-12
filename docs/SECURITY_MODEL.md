@@ -527,6 +527,12 @@ check runs when keying finishes, before Hello, and again after every topology
 update, which closes live links whose CN left. That is what makes deleting a
 Zode effective without a revocation list: its still-valid certificate names a
 peer no topology lists. ([zipline#220](https://github.com/org-zpr/zl-zipline/issues/220))
+The one exception is a Zode's configured initial links (`[[node.initial_link]]`,
+`--initial-link`): a joining Zode has no topology yet, so their CNs are allowed
+without one, and a topology update never closes them
+([zipline#222](https://github.com/org-zpr/zl-zipline/issues/222)). Deleting a
+relay from the topology therefore does not cut it off from a Zode that names it
+as an initial link; remove that entry from the Zode's configuration as well.
 
 **A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
 a node that has no actor yet reach VSAPI, so whoever carries them relays that
