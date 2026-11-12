@@ -306,14 +306,23 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
-- **One topology operation at a time.** Authentication, connect, a link-state
-  report, a policy revalidation, a disconnect and the startup restore each hold
-  the visa service's topology operation lock from their first read of policy,
-  link or session state to their last write, including the visa revocations that
-  write calls for. None of them can act on state another is about to change,
-  whatever it waits on in between. Visa issuance is the one path outside the
-  lock: it is not a topology write, and its commit-time route check above covers
-  it.
+- **One topology operation at a time.** The visa service runs its topology
+  operations one at a time under a single lock, each held from the operation's
+  first read to its last local write, including the visa revocations that write
+  calls for. Those operations are: authentication and connect (from the policy
+  recheck to the link install), `open` (actor lookup to session persist), a
+  link-state report (liveness check to the last revocation), a policy pass
+  (policy, live-node set and node validity through disconnecting invalid nodes,
+  link reconciliation and revocations), a disconnect (actor lookup to the last
+  state removal), and the startup restore. Policy installs commit under the same
+  lock, so the policy an operation reads stays current until it finishes.
+  Authentication can query trusted services, so it reads policy before taking
+  the lock. Under the lock it checks that the policy it was approved under is
+  still current, and refuses with `temporarilyUnavailable` if not; the node
+  retries. Node RPCs and event-queue sends run after the lock is released:
+  stopping a disconnected node's VSS worker, `setTopology`, and `ActorJoins`.
+  Visa issuance is the one path outside the lock. It is not a topology write,
+  and the commit-time route check above covers it.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
   when it disconnects or is reset; after a reconnect, the new session's first
   report replaces them. After a visa-service restart every node
@@ -702,22 +711,37 @@ packets on the link — but it cannot keep a link alive that its peer denies.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **Topology operations are serialized under one lock.** Every operation that
-reads policy, link or session state to decide a topology or link-state write
-holds one lock (`TopoOps` in `topology_mgr.rs`) from its first read to its last
-write, revocations included. Every mutating `TopologyMgr` method takes the guard
-as an argument, so an unlocked mutation does not compile. The alternative, a
-generation or session recheck before each write, has to be repeated correctly
-after every await on every path. Eight review rounds on #224 each found one more
-path that missed it, so the lock replaced the rechecks: the compiler finds every
-path, and a reviewer checks one rule. The cost is one global lock over
-operations that are rare (node connects and disconnects, link-state reports,
-policy installs). Rules that come with it: read policy and session state only
-after taking the lock; it is not re-entrant; and an operation holding it waits
-only on local state writes, never on an event-queue send or a node RPC, which
-could wait on another operation that wants the lock. Visa issuance stays outside
-the lock and is closed by ordering: a link going down sets its flag before its
-revocation pass lists visas, so a visa stored before the listing is revoked by
-the pass, and one stored after it fails its commit-time route check.
+reads policy, link, actor or session state to decide a topology, link-state or
+session write holds one lock (`TopoOps` in `topology_mgr.rs`) from its first read
+to its last write, revocations included. Every mutating `TopologyMgr` method takes
+the guard as an argument, so an unlocked topology mutation does not compile.
+Policy installs commit under the same lock (`PolicyMgr::bind_topology_lock`).
+They take it only around the local commit, after the network-bound build, so a
+guard holder's policy cannot change underneath it.
+
+The alternative was a generation or session recheck before each write. That has
+to be repeated correctly after every await on every path, and nine review rounds
+on #224 each found one more path that missed it. With the lock, a reviewer
+checks one rule, and the compiler covers the mutations. The cost is one global
+lock over operations that are rare: node connects and disconnects, link-state
+reports and policy installs.
+
+Rules that come with it:
+- Read policy, actor and session state only after taking the lock.
+- The lock is not re-entrant: a caller that holds it passes the guard down
+  (`disconnect_locked`, the authentication undo).
+- An operation holding it waits only on local state writes, never on an
+  event-queue send or a node RPC, which could wait on another operation that
+  wants the lock.
+- Work that must read policy before the lock because it waits on the network
+  rechecks under the lock that the policy is still current. Today that is
+  authenticating a node against trusted services.
+
+Visa issuance stays outside the lock and is closed by ordering: a link going
+down sets its flag before its revocation pass lists visas. A visa stored before
+the listing is revoked by the pass, and one stored after it fails its
+commit-time route check. Such a revocation clears the visa's policy stamp, so a
+later policy allow cannot cancel it.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **A down link stays in the graph.** Removing it from the router would make
