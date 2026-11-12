@@ -2836,6 +2836,46 @@ mod tests {
     /// The netns runner: continues after a failing script, records each
     /// script by name, and a prep-build failure fails that one script while
     /// the rest of the tier still runs.
+    /// A planned skip (a feature-branch script the worktree lacks) lands
+    /// in the outcome as `skipped: <reason>` and does not fail a tier whose
+    /// scripts passed (dev-context#99 review).
+    #[test]
+    fn run_netns_records_planned_skips_without_failing() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("integration-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let logs = tmp.path().join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let ok = dir.join("ok.sh");
+        std::fs::write(&ok, "#!/bin/sh\necho fine\n").unwrap();
+        std::fs::set_permissions(&ok, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let plan = NetnsPlan {
+            skipped: vec![(
+                "feature-test.sh",
+                "not in this zl-zpr-core revision".to_string(),
+            )],
+            dir: dir.clone(),
+            jobs: 1,
+            scripts: vec![NetnsScript {
+                script: "ok.sh",
+                program: ok.display().to_string(),
+                args: vec![],
+                env: vec![],
+                env_remove: vec![],
+                prep: None,
+            }],
+        };
+        let outcome = run_netns(&plan, &logs, true);
+        assert!(outcome.passed, "a skip must not fail the tier");
+        assert_eq!(outcome.repos["ok.sh"], "passed");
+        assert_eq!(
+            outcome.repos["feature-test.sh"],
+            "skipped: not in this zl-zpr-core revision"
+        );
+    }
+
     #[test]
     fn run_netns_continues_after_failure_and_prep_failure_hits_one_script() {
         let tmp = tempfile::tempdir().unwrap();
