@@ -452,7 +452,9 @@ Two consequences worth knowing:
    **On `feature/zodes`** (the Zodes epic, org-zpr/zl-zipline#216), the
    consumers pin `zl-zpr-common` at a pre-release tag cut from that branch,
    `zl-v0.32.0-zodes.N`. The first is `zl-v0.32.0-zodes.1`
-   (org-zpr/zl-zipline#218). All three consumers (`zl-zpr-core`,
+   (org-zpr/zl-zipline#218). The second is `zl-v0.32.0-zodes.2`
+   (org-zpr/zl-zipline#244, the visa `prevHop` field); the consumers move to
+   it together in org-zpr/zl-zipline#245. All three consumers (`zl-zpr-core`,
    `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
