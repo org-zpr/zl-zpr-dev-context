@@ -771,6 +771,17 @@ const NETNS_SCRIPTS: &[&str] = &[
     "zode-wrong-ca-test.sh",
 ];
 
+/// Gated scripts newer than some core revisions a build set may pin (the
+/// default one included), so a worktree may lack them: the tier then runs
+/// without them and its notes name them (zl-zipline#222). Any other gated
+/// script missing from the worktree fails planning. Drop an entry once
+/// every build set worth running carries the script.
+const NETNS_NEWER_THAN_OLD_CORES: &[&str] = &[
+    "zode-join-test.sh",
+    "zode-line-test.sh",
+    "zode-wrong-ca-test.sh",
+];
+
 /// Top-level `integration-test/*-test.sh` scripts the netns tier
 /// deliberately does NOT run, each with the reason (zipline#103). A script
 /// belongs here only after a reviewed decision — the drift guard
@@ -980,6 +991,21 @@ pub fn netns_plan(
     if present.is_empty() {
         present = NETNS_SCRIPTS.to_vec();
         absent.clear();
+    }
+    // Only a script known to postdate older cores may be absent; any other
+    // is a deletion, which must not shrink the tier silently.
+    let deleted: Vec<&str> = absent
+        .iter()
+        .copied()
+        .filter(|script| !NETNS_NEWER_THAN_OLD_CORES.contains(script))
+        .collect();
+    if !deleted.is_empty() {
+        anyhow::bail!(
+            "gated netns scripts missing from {}: {} -- restore them, or remove them from \
+             NETNS_SCRIPTS in a reviewed change",
+            integration.display(),
+            deleted.join(", ")
+        );
     }
     let scripts = present
         .into_iter()
@@ -2503,6 +2529,32 @@ mod tests {
         assert_eq!(plan.scripts.len(), NETNS_SCRIPTS.len());
         assert!(plan.absent.is_empty());
         assert_eq!(netns_absent_note(&plan), None);
+    }
+
+    /// Codex review on zl-zpr-dev-context#98: only a script listed as newer
+    /// than older core revisions may be absent. A missing gated script that
+    /// is not -- one a core revision deleted by mistake -- fails planning,
+    /// so the tier can never pass on a silently shrunk list.
+    #[test]
+    fn netns_plan_fails_on_a_missing_script_that_is_not_newer() {
+        let shrunk: Vec<&str> = NETNS_SCRIPTS
+            .iter()
+            .copied()
+            .filter(|script| *script != "capture-test.sh")
+            .collect();
+        let tmp = drift_fixture(&shrunk);
+        let error = netns_plan(
+            tmp.path(),
+            Path::new("/b/dist"),
+            Path::new("/usr/bin/valkey-server"),
+            false,
+            &host_runner(),
+            Path::new("/b"),
+            None,
+        )
+        .expect_err("a deleted gated script must fail planning")
+        .to_string();
+        assert!(error.contains("capture-test.sh"), "{error}");
     }
 
     /// Review finding on zl-zpr-dev-context#35 (zipline#103): a top-level

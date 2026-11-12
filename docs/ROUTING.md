@@ -432,8 +432,8 @@ whose path has fewer than two nodes has none. Core enforces it
 request gets an error `Stream ID Response` and nothing is asked of the next hop.
 The link's peer address is the one the topology gives the peer's verified CN,
 or, on a joining Zode's initial link before its first topology, the next hop of
-its handed-off forward visa -- for the handed-off visas only. A link with no
-recorded address binds nothing.
+its handed-off forward visa, until that first topology replaces it. A link
+with no recorded address binds nothing.
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
@@ -530,8 +530,12 @@ topology entry for its verified CN, never from Hello (gap 5).
 naming a peer Zode as next hop finds that link and never a closed one waiting
 to redial. A joiner that has no topology entry for its relay yet takes the
 relay's address from the next hop of the forward bootstrap visa the relay
-handed it. That address applies only to the handed-off visas, as next hop and
-as previous hop: the relay chose it, so it routes and binds nothing else.
+handed it. The relay chose that address, so it stands only while the relay is
+the joiner's sole Zode link (before any topology, only initial-link CNs may
+link): every topology sets each link's address from its own entries, and
+clears the hand-off address if it does not name the relay. The topology
+itself reaches the joiner over that address (the visa service's VSS
+connection), so it cannot be narrower than all the joiner's visas.
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -878,9 +882,10 @@ test found that stall. ZBOLT is meant to replace this rule later (Zodes plan
 could otherwise claim any address in Hello and attract visas meant for another
 node (gap 5). The one exception has to exist: a joiner has no topology until it
 has authenticated through its relay, so it takes the relay's address from the
-next hop of the bootstrap visa the relay handed it, for those visas alone,
-and replaces it once topology arrives. The relay could put any address there:
-the joiner checks the visas' flows, not their next hop.
+next hop of the bootstrap visa the relay handed it, while the relay is its
+only Zode link, and replaces it -- or clears it -- once topology arrives. The
+relay could put any address there: the joiner checks the visas' flows, not
+their next hop.
 ([#222](https://github.com/org-zpr/zl-zipline/issues/222))
 
 ---

@@ -381,11 +381,13 @@ risk. Everything is a release build. The table is in claim order:
   (`NETNS_EXCLUDED`). Only the top level is judged — `lib/` and
   `unused_or_outdated/` are invisible, matching the Makefile's own
   `$(wildcard *-test.sh)`.
-  The other direction is not an error: a build set pinning an older core
-  lacks the newest listed scripts, so the tier runs the listed scripts that
-  revision carries and the emitted manifest's notes name the rest
+  The other direction is an error too, with one exception: a build set
+  pinning an older core lacks the newest listed scripts (`NETNS_NEWER_THAN_OLD_CORES`),
+  so the tier runs the listed scripts that revision carries and the emitted
+  manifest's notes name the rest
   ("netns scripts not in this core revision did NOT run: ...";
-  zl-zipline#222). A worktree carrying none of them keeps the full list and
+  zl-zipline#222). Any other listed script missing from the worktree fails
+  planning, and a worktree carrying none of them keeps the full list and
   fails, rather than passing with nothing run.
 - The netns tier selects its route **host → container → skip**
   (zipline#92/#93/#192). The host route wins whenever its own prerequisites
