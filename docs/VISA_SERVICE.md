@@ -229,7 +229,7 @@ actor (the `reauthorize` target is the calling node's address):
   a logout drops), the actor stays a node and gets the services a node would
   get, which may be none.
 - **Current generation, no lost work.** The visa sweep after a gain or drop
-  runs after the self-renewal lock is released (it needs none of the actor
+  runs after the node commit lock is released (it needs none of the actor
   serialization), under the policy snapshot current when it starts. It
   repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
   with no failed re-check or verdict write under a generation that did not
@@ -840,7 +840,7 @@ service ([org-zpr/zl-zipline#247](https://github.com/org-zpr/zl-zipline/issues/2
 must revoke visas that needed it (unless device-keyed re-enrichment restores
 an equivalent attribute), and gaining it can trip a `never allow`. The
 existing attribute-change sweep re-checks every live visa inline, after the
-actor is persisted and the self-renewal lock released, and an incomplete
+actor is persisted and the node commit lock released, and an incomplete
 sweep is retried and then handed to the event manager. This costs one full sweep per login or logout; a
 per-actor sweep was not built because logins are rare. An ordinary renewal
 whose claims change still runs no sweep (unchanged behaviour).
@@ -937,9 +937,10 @@ No tracker issues are filed for these unless linked.
   grant checked atomically against concurrent revocation.
   ([org-zpr/zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248))
 - **Refresh vs reauthorize for adapters.** For a node, an attribute refresh
-  takes the self-renewal lock and discards its write if the node was
-  re-authorized since its copy was loaded (the `zpr.vs.bootstrap.ident` token
-  differs), so a refresh cannot undo a Zode's logout. Adapters keep the older
+  fetches outside `PolicyMgr::node_commit_lock` and takes it only to commit,
+  discarding its write if the node was re-authorized since its copy was
+  loaded (the `zpr.vs.bootstrap.ident` token differs) or the session or
+  policy generation moved, so a refresh cannot undo a Zode's logout. Adapters keep the older
   race: `refresh_and_persist_actor` can write back an adapter copy loaded
   before a concurrent renewal. The fix is a shared per-actor lock or a
   revision-checked update.
