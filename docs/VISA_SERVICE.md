@@ -816,6 +816,21 @@ unbound, like the attribute-store clients. Review of the #228 docs found the
 gap.
 ([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
 
+### Bootstrap visas: relay-only, next to the peer's CN
+
+A node that has not connected reaches VSAPI on bootstrap visas the visa service
+mints from the policy-declared peering (`vs/src/visa_bootstrap.rs`; ROUTING.md,
+"Bootstrap routing"). For Zodes this is the defined v1 join path, under three
+rules: only the visa service mints them; only the relay — the node the visa
+service docks on — receives them, pushed in `Link.visas` or pulled when it sees
+the peer's traffic first; and they ride only on the link whose `zprAddr` and
+`peerCn` name the joining peer. A non-relay neighbour of an unconnected node
+gets the link and no visas, so an endpoint never relays a joiner's traffic.
+`peerCn` itself comes from the peer's node join policy
+(`Policy::node_cn_for_addr`). A peer whose address has no CN in policy — no node
+join policy pins that address together with a `device.zpr.adapter.cn`, or two
+pin it with different CNs — is left out of the topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+
 ### Deferred
 
 No tracker issues are filed for these unless linked.
@@ -876,11 +891,13 @@ No tracker issues are filed for these unless linked.
 - **Which links a node should have now has a contract**, outside the design
   document: `setTopology` names each peer with its link-certificate CN
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
-  ROUTING.md). On `feature/zodes` the node checks `peerCn` on Zode links
-  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)); the visa service
-  does not fill it yet and neither side uses `reportLinkStates`
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217); implemented by
-  [#221](https://github.com/org-zpr/zl-zipline/issues/221)–[#224](https://github.com/org-zpr/zl-zipline/issues/224)).
+  ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). On
+  `feature/zodes` the visa service fills `peerCn` from policy
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and the node checks it on
+  Zode links ([#220](https://github.com/org-zpr/zl-zipline/issues/220)); neither side
+  uses `reportLinkStates` yet
+  ([#223](https://github.com/org-zpr/zl-zipline/issues/223),
+  [#224](https://github.com/org-zpr/zl-zipline/issues/224)).
 
 ---
 
