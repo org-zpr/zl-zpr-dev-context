@@ -1358,7 +1358,7 @@ pub fn coverage_summary(
     tier_results: &BTreeMap<String, Tier>,
     build_failed: bool,
     pin_drift_downgraded: bool,
-    netns_container_note: Option<&str>,
+    netns_notes: &[String],
     operator_notes: &[String],
 ) -> Coverage {
     let requested = selection.requested();
@@ -1413,9 +1413,7 @@ pub fn coverage_summary(
     // container route actually ran, after the tier-status lines and before
     // the pin-drift and operator notes — it is generated provenance, not
     // operator commentary.
-    if let Some(note) = netns_container_note {
-        coverage.notes.push(note.to_string());
-    }
+    coverage.notes.extend(netns_notes.iter().cloned());
 
     if pin_drift_downgraded {
         coverage.notes.push(
@@ -1753,7 +1751,9 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
     let mut tier_failed = false;
     // Set iff the netns tier ran through the docker fallback (zipline#93):
     // becomes the generated coverage note in the emitted manifest.
-    let mut netns_container_note: Option<String> = None;
+    // The netns tier's own provenance notes: the docker fallback
+    // (zipline#93) and gated scripts the pinned core lacks (zl-zipline#222).
+    let mut netns_notes: Vec<String> = Vec::new();
     if failure.is_none() && inputs.selection.contains("unit") {
         if !inputs.quiet {
             println!("unit tier:");
@@ -1899,12 +1899,18 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
                         }
                         Ok(plan) => {
                             let outcome = tiers::run_netns(&plan, &logs, inputs.quiet);
+                            if let Some(note) = tiers::netns_absent_note(&plan) {
+                                if !inputs.quiet {
+                                    println!("note: {note}");
+                                }
+                                netns_notes.push(note);
+                            }
                             tier_failed = tier_failed || !outcome.passed;
                             // The coverage note exists iff the container route
                             // actually ran, quoting the real host gap
                             // (zipline#93, contract 2).
                             if let tiers::NetnsRunner::Container { host_reason } = &runner {
-                                netns_container_note = Some(format!(
+                                netns_notes.push(format!(
                                     "netns integration tests ran in a privileged Docker \
                                      container, not on the host (host route unavailable: \
                                      {host_reason})"
@@ -1993,7 +1999,7 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         &tier_results,
         failure.is_some(),
         outcome.pin_drift_downgraded > 0,
-        netns_container_note.as_deref(),
+        &netns_notes,
         inputs.notes,
     );
     emitted.resolved.tests_requested = inputs.selection.requested().to_string();
@@ -4214,7 +4220,7 @@ allow_pin_drift:
             ("netns", passed()),
             ("docker", passed()),
         ]);
-        let coverage = coverage_summary(&selection, &tiers, false, false, None, &[]);
+        let coverage = coverage_summary(&selection, &tiers, false, false, &[], &[]);
         assert!(coverage.skipped.is_empty(), "{coverage:?}");
         assert!(coverage.notes.is_empty(), "{coverage:?}");
     }
@@ -4226,7 +4232,7 @@ allow_pin_drift:
     fn coverage_marks_unselected_tiers_not_selected() {
         let selection = tiers::Selection::parse(Some("unit")).unwrap();
         let tiers = results(&[("unit", passed())]);
-        let coverage = coverage_summary(&selection, &tiers, false, false, None, &[]);
+        let coverage = coverage_summary(&selection, &tiers, false, false, &[], &[]);
         assert_eq!(
             coverage.skipped,
             BTreeMap::from([
@@ -4254,7 +4260,7 @@ allow_pin_drift:
     #[test]
     fn coverage_test_none_is_a_single_note() {
         let selection = tiers::Selection::parse(Some("none")).unwrap();
-        let coverage = coverage_summary(&selection, &BTreeMap::new(), false, false, None, &[]);
+        let coverage = coverage_summary(&selection, &BTreeMap::new(), false, false, &[], &[]);
         assert_eq!(coverage.skipped.len(), 3, "{coverage:?}");
         assert_eq!(coverage.skipped["unit"], "not selected (--test none)");
         assert_eq!(coverage.notes, vec!["no tests ran (--test none)"]);
@@ -4270,7 +4276,7 @@ allow_pin_drift:
             ("netns", Tier::skipped("missing: python3, valkey-server")),
             ("docker", passed()),
         ]);
-        let coverage = coverage_summary(&selection, &tiers, false, false, None, &[]);
+        let coverage = coverage_summary(&selection, &tiers, false, false, &[], &[]);
         assert_eq!(
             coverage.skipped,
             BTreeMap::from([(
@@ -4290,7 +4296,7 @@ allow_pin_drift:
     fn coverage_notes_a_failed_tier_after_the_not_run_lines() {
         let selection = tiers::Selection::parse(Some("unit")).unwrap();
         let tiers = results(&[("unit", failed())]);
-        let coverage = coverage_summary(&selection, &tiers, false, false, None, &[]);
+        let coverage = coverage_summary(&selection, &tiers, false, false, &[], &[]);
         assert!(!coverage.skipped.contains_key("unit"), "{coverage:?}");
         assert_eq!(
             coverage.notes,
@@ -4308,7 +4314,7 @@ allow_pin_drift:
     #[test]
     fn coverage_build_failure_marks_selected_tiers_not_run() {
         let selection = tiers::Selection::parse(Some("unit,netns")).unwrap();
-        let coverage = coverage_summary(&selection, &BTreeMap::new(), true, false, None, &[]);
+        let coverage = coverage_summary(&selection, &BTreeMap::new(), true, false, &[], &[]);
         assert_eq!(coverage.skipped["unit"], "not run: build failed");
         assert_eq!(coverage.skipped["netns"], "not run: build failed");
         assert_eq!(
@@ -4332,7 +4338,14 @@ allow_pin_drift:
         let note = "netns integration tests ran in a privileged Docker container, \
                     not on the host (host route unavailable: missing: valkey-server)";
         let operator = vec!["operator text".to_string()];
-        let coverage = coverage_summary(&selection, &tiers, false, true, Some(note), &operator);
+        let coverage = coverage_summary(
+            &selection,
+            &tiers,
+            false,
+            true,
+            &[note.to_string()],
+            &operator,
+        );
         assert_eq!(
             coverage.notes,
             vec![
@@ -4354,7 +4367,7 @@ allow_pin_drift:
             ("docker", passed()),
         ]);
         let operator = vec!["first".to_string(), "second: with punctuation!".to_string()];
-        let coverage = coverage_summary(&selection, &tiers, false, true, None, &operator);
+        let coverage = coverage_summary(&selection, &tiers, false, true, &[], &operator);
         assert!(coverage.skipped.is_empty());
         assert_eq!(
             coverage.notes,

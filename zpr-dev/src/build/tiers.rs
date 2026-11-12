@@ -901,6 +901,21 @@ pub struct NetnsPlan {
     /// unless `--jobs` overrides it.
     pub jobs: usize,
     pub scripts: Vec<NetnsScript>,
+    /// Gated scripts the core revision under test does not carry (a build
+    /// set pinning an older core): not run, and named in the run's notes by
+    /// [`netns_absent_note`] (zl-zipline#222).
+    pub absent: Vec<&'static str>,
+}
+
+/// The coverage note for the gated scripts a plan could not run because
+/// its core revision predates them, or `None` when it carries them all.
+pub fn netns_absent_note(plan: &NetnsPlan) -> Option<String> {
+    (!plan.absent.is_empty()).then(|| {
+        format!(
+            "netns scripts not in this core revision did NOT run: {}",
+            plan.absent.join(", ")
+        )
+    })
 }
 
 /// Concurrent netns scripts, on either route. On the host route each script
@@ -953,10 +968,23 @@ pub fn netns_plan(
     // planning anything — an unlisted top-level script is a plan error,
     // never a silently smaller tier.
     netns_script_drift(&integration, NETNS_SCRIPTS, NETNS_EXCLUDED)?;
-    let scripts = NETNS_SCRIPTS
+    // A gated script the worktree lacks belongs to a newer core than the
+    // one pinned: running it would only fail as a missing program, so plan
+    // it as absent and let the notes say so (zl-zipline#222). A worktree
+    // carrying none of them (no integration-test/, or an empty one) is
+    // broken rather than old: it keeps the full list, so the tier fails
+    // instead of passing vacuously.
+    let (mut present, mut absent): (Vec<&'static str>, Vec<&'static str>) = NETNS_SCRIPTS
         .iter()
+        .partition(|script| integration.join(script).is_file());
+    if present.is_empty() {
+        present = NETNS_SCRIPTS.to_vec();
+        absent.clear();
+    }
+    let scripts = present
+        .into_iter()
         .map(|script| {
-            let a2a = *script == "a2a-pubkey-test.sh";
+            let a2a = script == "a2a-pubkey-test.sh";
             // The security-testing ph is a debug-profile build in the
             // worktree's own target/, pointed at for this one script only.
             let ph_bin = if a2a {
@@ -1035,6 +1063,7 @@ pub fn netns_plan(
         },
         jobs: jobs.map(std::num::NonZeroUsize::get).unwrap_or(NETNS_JOBS),
         scripts,
+        absent,
     })
 }
 
@@ -2417,6 +2446,65 @@ mod tests {
         .expect("the gated set alone must plan cleanly");
     }
 
+    /// zl-zipline#222 (Codex and Copilot review on zl-zpr-dev-context#98):
+    /// a build set that pins an older core revision -- the default one
+    /// included -- lacks the newest gated scripts. The plan runs the gated
+    /// scripts that revision carries and names the absent ones, whose
+    /// absence the run's notes then record; it never schedules a script
+    /// that is not there.
+    #[test]
+    fn netns_plan_skips_and_names_gated_scripts_the_revision_lacks() {
+        let older: Vec<&str> = NETNS_SCRIPTS
+            .iter()
+            .copied()
+            .filter(|script| !script.starts_with("zode-"))
+            .collect();
+        let tmp = drift_fixture(&older);
+        let plan = netns_plan(
+            tmp.path(),
+            Path::new("/b/dist"),
+            Path::new("/usr/bin/valkey-server"),
+            false,
+            &host_runner(),
+            Path::new("/b"),
+            None,
+        )
+        .expect("an older core revision plans cleanly");
+        let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
+        assert_eq!(names, older);
+        assert_eq!(
+            plan.absent,
+            [
+                "zode-join-test.sh",
+                "zode-line-test.sh",
+                "zode-wrong-ca-test.sh"
+            ]
+        );
+        assert_eq!(
+            netns_absent_note(&plan).as_deref(),
+            Some(
+                "netns scripts not in this core revision did NOT run: \
+                 zode-join-test.sh, zode-line-test.sh, zode-wrong-ca-test.sh"
+            )
+        );
+
+        // A revision carrying every gated script has nothing absent.
+        let tmp = drift_fixture(NETNS_SCRIPTS);
+        let plan = netns_plan(
+            tmp.path(),
+            Path::new("/b/dist"),
+            Path::new("/usr/bin/valkey-server"),
+            false,
+            &host_runner(),
+            Path::new("/b"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(plan.scripts.len(), NETNS_SCRIPTS.len());
+        assert!(plan.absent.is_empty());
+        assert_eq!(netns_absent_note(&plan), None);
+    }
+
     /// Review finding on zl-zpr-dev-context#35 (zipline#103): a top-level
     /// script whose name is not valid UTF-8 cannot be compared against
     /// [`NETNS_SCRIPTS`] / [`NETNS_EXCLUDED`], yet the Makefile's byte-wise
@@ -2778,6 +2866,7 @@ mod tests {
         let plan = NetnsPlan {
             dir: dir.clone(),
             jobs: 1,
+            absent: vec![],
             scripts: vec![
                 NetnsScript {
                     script: "ok.sh",
@@ -2872,6 +2961,7 @@ mod tests {
         let plan = NetnsPlan {
             dir: dir.clone(),
             jobs: 3,
+            absent: vec![],
             scripts: vec![script("a.sh"), never_runs, script("b.sh"), script("c.sh")],
         };
         let outcome = run_netns(&plan, &logs, true);
