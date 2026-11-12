@@ -268,21 +268,30 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   skip it, so policy revalidation does not mistake it for drift, and a policy
   rebuild of the link keeps it down. When a link goes from up to down, every
   live visa whose recorded node path crosses it is marked `PendingRevoke`, VSS
-  housekeeping revokes it, and the flow re-requests and gets a route around the
-  link — the relay path, for a direct endpoint link. A visa whose route was
-  chosen just before the link went down, but stored just after that pass ran,
-  is caught as it is stored: `create_visa` re-checks every link of the route
-  once the visa is committed and revokes it at once if one is down. If a
-  revocation's state write fails, the link is kept for retry; the next report
-  from either end retries it. A report that hit the failure is answered
-  `internal` so the node re-sends; a visa that hit it at commit is not issued.
-  A link coming back up affects new visas only; existing flows stay where they
-  are until their visas expire or a later policy sweep moves them.
+  housekeeping revokes it, and the flow re-requests. It gets a route around the
+  link if another usable path exists — the relay path, for a direct endpoint
+  link — and is denied `NoRoute` otherwise. A visa whose route was chosen just
+  before the link went down, but stored just after that pass ran, is caught as
+  it is stored: `create_visa` re-checks every link of the route once the visa
+  is committed, revokes it if one is down, and fails the issuance, so no
+  `Allow` is ever answered with a visa on a downed route. If a revocation's
+  state write fails, it is retried: for a link, by the next report from either
+  end (the report that hit the failure is answered `internal`, so the node
+  re-sends); for a visa caught at commit, by quarantining it — it is never
+  handed to a node, and every pending-visa read retries its revocation. A link
+  is installed with its flag under the link-state lock, so a report arriving
+  at the same moment is never lost. A link coming back up affects new visas
+  only; existing flows stay where they are until their visas expire or a later
+  policy sweep moves them. The admin network view shows a declared link that
+  reports put down as DOWN, although it stays in the graph.
 - **Policy changes.** CNs come from policy, so a new policy can change which
   reports match a link even when the link itself is unchanged. Policy
   revalidation re-evaluates every link's flag and rebuilds any link whose flag
-  changes in the same atomic batch; the policy sweep that follows revokes visas
-  whose route moved.
+  changes in the same atomic batch. The links it takes from up to down, or
+  removes while up, have their visas revoked the same way as a reported link
+  going down: the policy sweep alone would miss a visa committed under the new
+  policy just before the link went down, because its generation gate counts
+  that visa as current.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
   when it disconnects or is reset. After a visa-service restart every node
   follows the legacy rule until it re-sends its snapshot, which it does after
