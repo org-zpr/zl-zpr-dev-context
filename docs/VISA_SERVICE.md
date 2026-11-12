@@ -197,10 +197,12 @@ actor (the `reauthorize` target is the calling node's address):
   the read their write is based on until the write, so their preparation is
   serialized too. The node `authenticate` persist and the attribute refresh
   prepare *outside* the lock (authentication, the network fetch of trusted
-  attributes) and take it only to commit; there, the recheck -- plus, for a
-  refresh, the identity token -- rejects a preparation that went stale, so
-  their reads and fetches are not serialized with a login or logout, but a
-  stale result is never written:
+  attributes) and take it only to commit. There, the recheck rejects an
+  authentication prepared under a superseded policy, and a refresh merges
+  only the attributes it changed onto the actor as stored then, committing
+  nothing if the node was re-authorized meanwhile. Their reads and fetches
+  are not serialized with a login or logout, but a stale result is never
+  written:
 
   | Writer | Session checked | On a moved generation |
   |---|---|---|
@@ -209,7 +211,7 @@ actor (the `reauthorize` target is the calling node's address):
   | node `authenticate` persist (a `Reset` connect's teardown of the old node state runs only after the recheck, in the same locked commit) | — (it writes the new session) | refused, `temporarilyUnavailable`; the node authenticates again, its old state untouched |
   | `open` (session resume) | load and write both under the lock | — (no re-authorization) |
   | `getLoginNonce` mint | the handle's | — |
-  | attribute refresh of a node | the copy's (and its identity token) | discarded, `AttributesIndeterminate` (denied, retried) |
+  | attribute refresh of a node (commits under the topology guard, merging only the attributes it changed onto the actor as stored) | a reconnect is merged into; a re-authorization (new identity token) commits nothing | — (an install cannot land mid-commit: it publishes under both locks) |
   | `disconnect` | the actor record is removed under the lock | — |
   | policy install | — | publication itself takes the lock |
 
@@ -221,6 +223,15 @@ actor (the `reauthorize` target is the calling node's address):
   recheck (which then sees the new generation) or after its write (which the
   install's reconciliation and re-authentication obligation then cover). The
   identity token is minted after the recheck has chosen the actor to persist.
+  **Lock order** with the topology operation lock (`TopoOps`, see ROUTING.md):
+  topology lock first, then the node commit lock. A policy install, the node
+  `authenticate` persist, `open`, a disconnect's actor removal and a node's
+  refresh commit take both in that order. `reauthorize` and `getLoginNonce`
+  take only the node commit lock, and `reauthorize` never waits for the
+  topology lock while holding it: a disconnect it needs (a CN denylisted
+  mid-renewal, a failed login rollback) runs after it releases the commit
+  lock. A path holding the topology lock can therefore wait behind a login's
+  attribute fetch (org-zpr/zl-zipline#247), but the two locks never deadlock.
   If a login's or logout's actor write fails part-way (the attributes may
   already be committed), the visa service rolls a login back to the pre-login
   actor (disconnecting the node if even that fails, so no login without
