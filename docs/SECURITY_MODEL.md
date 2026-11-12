@@ -630,8 +630,7 @@ not read the RFCs as a description of current guarantees.
   enforced: any node link can send a `Stream ID Request` for a visa ID it knows
   and have the stream bound. `Visa.prevHop` is in the schema
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
-  service fills it in [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)
-  and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)), and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
   Reverse binding for symmetric visas stays undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa
