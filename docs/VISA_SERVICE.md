@@ -158,19 +158,23 @@ actor (the `reauthorize` target is the calling node's address):
   authority, including one whose OIDC provider policy no longer declares (a
   trusted-service-derived authority is re-derived). The renewed actor keeps only
   attributes the visa service stamped itself (never one in `user.`); the policy
-  re-run re-fetches trusted-service attributes from the device identity. The
-  login's OIDC session anchors are forgotten.
+  re-run re-fetches trusted-service attributes from the device identity,
+  which may legitimately include `user.*` attributes a store vends for that
+  device. The login's OIDC session anchors are forgotten.
 - **Device blob always.** An OIDC blob without it, or a namespace change on any
   actor other than the caller's own, is a `paramError`.
 - **Visas follow.** After every gain or drop the visa service re-checks every
-  live visa (the attribute-change sweep), so a visa that needed a user
-  attribute is revoked on logout.
+  live visa against the resulting actor (the attribute-change sweep). A visa
+  is revoked when it no longer passes policy: after a logout that is one that
+  needed the login's attributes, unless device-keyed re-enrichment restored
+  an equivalent attribute.
 - **Serialized.** A node's reauthorizations of its own actor hold one lock
   from loading the actor to recording the OIDC anchors, so two concurrent
-  logins cannot both classify as a gain. Just before persisting, the stored
-  `zpr.session` must still be the one loaded; if the node re-authenticated
-  meanwhile the renewal is refused (`authError`) rather than writing the old
-  session back.
+  logins cannot both classify as a gain. A node's authenticate persists its
+  new `zpr.session` under the same lock (`add_node_serialized`), so a
+  reconnect cannot write between a self-renewal's check and its write; and
+  just before persisting, the stored `zpr.session` must still be the one
+  loaded, else the renewal is refused (`authError`).
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
@@ -747,13 +751,13 @@ trusted-service enrichment is refused: one user authority per actor.
 endpoint is its own docking node, so a nonce it mints itself would not stop a
 replayed `id_token`. The nonce is bound to actor and VS-API session, single-use
 (spent before its own checks and the token's, so a failed login cannot retry
-it), and short-lived;
-the store is in memory and needs no disconnect hook. Past the per-node limit
+it), and short-lived; the store is in memory and needs no disconnect hook. Past the per-node limit
 minting is refused rather than evicting the oldest, as the vs.capnp contract
 says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **Login and logout re-check every live visa.** Dropping the user namespace
-must revoke visas that needed it, and gaining it can trip a `never allow`. The
+must revoke visas that needed it (unless device-keyed re-enrichment restores
+an equivalent attribute), and gaining it can trip a `never allow`. The
 existing attribute-change sweep re-checks every live visa inline, after the
 actor is persisted. This costs one full sweep per login or logout; a
 per-actor sweep was not built because logins are rare. An ordinary renewal

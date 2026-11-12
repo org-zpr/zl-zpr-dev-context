@@ -265,16 +265,22 @@ issued through `getLoginNonce`:
 
 Only the namespace-set check runs before the nonce is spent; a request with
 the wrong blob set leaves it unspent. After the nonce, the device proof and
-the token are checked, the token exactly as on the connect path. Only the node renewing its own actor may gain
-or drop the namespace; an adapter keeps the exact set. A device-only
+the token are checked, the token exactly as on the connect path. Only the
+node renewing its own actor may gain or drop the namespace; an adapter keeps
+the exact set. A device-only
 self-renewal drops any user authority the actor holds, including one whose
 OIDC provider policy no longer declares, and a node's reauthorizations of its
-own actor are serialized, so two concurrent logins cannot both succeed. A
-self-renewal is refused if the node re-authenticated (new `zpr.session`)
-while it was in flight. A logout strips every `user.*` attribute — whatever
-store vended it — forgets the login's session anchors, and every login and
-logout re-checks all live visas, so a visa that needed a user attribute is
-revoked. What remains: a subverted Zode can still use a login of its own
+own actor are serialized, so two concurrent logins cannot both succeed; a
+node's re-authentication persists its new `zpr.session` under the same lock,
+and a self-renewal is refused if that session changed while it was in flight.
+A logout clears the previous login's state: every `user.*` attribute —
+whatever store vended it — and the login's session anchors. The policy re-run
+then re-enriches the actor from its device identity, which can legitimately
+restore `user.*` attributes (and a trusted-service-derived user authority)
+that a store vends for that device. Every login and logout re-checks all live
+visas against the resulting actor, so a visa is revoked when it no longer
+passes policy — in particular one that needed the logged-out user's
+attributes. What remains: a subverted Zode can still use a login of its own
 user, as any endpoint can.
 
 **What this hands to an attacker, and why it is not a new threat.** The
