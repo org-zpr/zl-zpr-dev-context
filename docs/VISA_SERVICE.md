@@ -183,7 +183,9 @@ actor (the `reauthorize` target is the calling node's address):
   so a stale handle cannot mint or sweep away the new session's nonces. An
   attribute refresh of a node writes under that lock too, and is discarded
   (the request is denied and retried) if the node was re-authorized since the
-  refresh loaded it, so a refresh cannot restore what a logout removed.
+  refresh loaded it, so a refresh cannot restore what a logout removed. A
+  disconnect removes the actor record under that lock too, so a self-renewal
+  can never recreate a node that was disconnected while it was in flight.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
@@ -194,8 +196,9 @@ actor (the `reauthorize` target is the calling node's address):
   repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
   with no failed re-check or verdict write under a generation that did not
   move. If none does, the work goes to the event manager as an
-  attribute-change reconcile instead of being dropped, so a visa whose
-  revocation failed does not stay usable until it expires.
+  attribute-change reconcile instead of being dropped; that reconcile queues
+  itself again every 30 s (`RECONCILE_RETRY`) while its own sweep still fails,
+  so a visa whose revocation failed does not stay usable until it expires.
 
 The login-nonce store is in memory. A nonce is 32 random bytes (base64url),
 usable until `expiresAt` (300 s, `LOGIN_NONCE_TTL_SECS`), at most 4 unexpired
