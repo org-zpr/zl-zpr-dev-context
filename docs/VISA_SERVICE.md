@@ -185,8 +185,8 @@ actor (the `reauthorize` target is the calling node's address):
   needed the login's attributes, unless device-keyed re-enrichment restored
   an equivalent attribute.
 - **One commit-time recheck.** Every writer of a node's own actor takes the
-  self-renewal lock (`ConnectionControl::self_reauth_lock`) from the read
-  its write is based on until the write, and calls one shared helper,
+  node commit lock (`PolicyMgr::node_commit_lock`) from the read its write is
+  based on until the write, and calls one shared helper,
   `recheck_before_commit`, just before committing. It checks that the stored
   `zpr.session` is the one expected (else `authError`) and reports whether
   the policy generation moved since the write was prepared:
@@ -200,12 +200,16 @@ actor (the `reauthorize` target is the calling node's address):
   | `getLoginNonce` mint | the handle's | — |
   | attribute refresh of a node | the copy's (and its identity token) | discarded, `AttributesIndeterminate` (denied, retried) |
   | `disconnect` | the actor record is removed under the lock | — |
+  | policy install | — | publication itself takes the lock |
 
   So two concurrent logins cannot both classify as a gain; a stale handle
   cannot act on, or mint for, a newer session; a reconnect, refresh or
   disconnect cannot land between a self-renewal's check and its write; and
-  nothing prepared under a superseded policy is committed. The identity token
-  is minted after the recheck has chosen the actor to persist.
+  nothing prepared under a superseded policy is committed. Because policy
+  publication takes the same lock, an install lands either before a commit's
+  recheck (which then sees the new generation) or after its write (which the
+  install's reconciliation and re-authentication obligation then cover). The
+  identity token is minted after the recheck has chosen the actor to persist.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
@@ -810,7 +814,11 @@ node's own actor takes the same lock and calls one helper just before it
 commits; the helper checks the session and the policy generation. A login,
 renewal or node authentication under a moved generation is refused and
 retried. A logout instead commits a reduced actor, because refusing it would
-leave the user's login in place.
+leave the user's login in place. Policy publication takes the same lock, so
+an install can never land between a commit's recheck and its write. The
+trade-off is that an install waits behind any in-flight login or logout,
+including its attribute fetch from a possibly slow, networked attribute
+service ([org-zpr/zl-zipline#247](https://github.com/org-zpr/zl-zipline/issues/247)).
 ([visaservice#63](https://github.com/org-zpr/zl-zpr-visaservice/pull/63),
 [zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
@@ -908,6 +916,12 @@ No tracker issues are filed for these unless linked.
   re-authentication covers removal from policy; a dedicated administrative
   revocation of an authentication root is future work.
   [zipline#136](https://github.com/org-zpr/zl-zipline/issues/136)
+- **A visa granted from a pre-logout actor copy.** A visa request holds the
+  endpoint actors across awaits; if it inserts its visa after a logout's sweep
+  has taken its snapshot, that visa escapes the logout's revocation and lives
+  until it expires or the next sweep re-checks it. Closing this needs the
+  grant checked atomically against concurrent revocation.
+  ([org-zpr/zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248))
 - **Refresh vs reauthorize for adapters.** For a node, an attribute refresh
   takes the self-renewal lock and discards its write if the node was
   re-authorized since its copy was loaded (the `zpr.vs.bootstrap.ident` token
