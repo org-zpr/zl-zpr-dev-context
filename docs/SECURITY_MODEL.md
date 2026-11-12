@@ -559,7 +559,8 @@ installs them only if all of these hold, and refuses and logs them otherwise:
 - the message arrived on a Zode link that has finished Hello;
 - the peer's verified certificate CN is one of the joiner's configured initial
   links;
-- the joiner has no VS-API session yet;
+- the joiner has no VS-API session at the moment (none yet, or the last one
+  ended when its VSConn run loop exited);
 - there are at most two visas;
 - each visa is exactly the joiner's own VSAPI flow (TCP from the joiner's ZPR
   address to `vs.zpr` port 5002) or that flow's reply.

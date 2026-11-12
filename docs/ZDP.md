@@ -383,8 +383,9 @@ topology names that it has no link to yet
 - **Hello.** The dialer sends the Hello Request and the answerer replies.
   There is no actor authorization on a Zode link. The dialer ignores, with a
   warning, any AAA address or bootstrap flag in the Hello Response. A dialer
-  redials after a close; an answerer drops the link, since the dialer
-  reconnects.
+  redials after a close while the address still belongs to an initial link or
+  a topology entry, and otherwise drops the link; an answerer drops the link,
+  since the dialer reconnects.
 - **Crossed dials.** One substrate address pair carries one link. So when two
   Zodes dial each other at the same moment, each receives the other's first
   message on its own dialing link, and neither handshake could finish. The
