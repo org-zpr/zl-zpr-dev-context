@@ -166,8 +166,11 @@ actor (the `reauthorize` target is the calling node's address):
   attributes the visa service stamped itself (never one in `user.`); the policy
   re-run re-fetches trusted-service attributes from the device identity,
   which may legitimately include `user.*` attributes a store vends for that
-  device. The login's OIDC session anchors are forgotten. A logout is never
-  refused, because that would leave the login in place. If the policy re-run
+  device. The login's OIDC session anchors are forgotten. A valid logout from
+  the node's current session is not refused because of an enrichment failure
+  or a policy change, since that would leave the login in place. (A malformed
+  request is still a `paramError`, and a logout from a stale handle -- an
+  earlier VS-API session -- is still an `authError`.) If the policy re-run
   fails (a trusted service is down) or the policy generation moved before the
   commit, the visa service persists the *reduced* actor instead: the loaded
   actor with only internal-source attributes and nothing in `user.`, still a
@@ -820,15 +823,17 @@ it), and short-lived; the store is in memory and needs no disconnect hook. Past 
 minting is refused rather than evicting the oldest, as the vs.capnp contract
 says. ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
-**One commit-time recheck, and a logout is never refused.** Each round of
+**One commit-time recheck, and a valid logout is not refused for an outage or
+a policy change.** Each round of
 review on the Zode login found another path that read a node's actor or a
 policy snapshot, awaited (enrichment, persistence), and then wrote state the
 read no longer justified. Rather than a check per path, every writer of a
-node's own actor takes the same lock and calls one helper just before it
-commits; the helper checks the session and the policy generation. A login,
+node's own actor commits under the same lock and calls one helper just before
+the write; the helper checks the session and the policy generation. A login,
 renewal or node authentication under a moved generation is refused and
-retried. A logout instead commits a reduced actor, because refusing it would
-leave the user's login in place. Policy publication takes the same lock, so
+retried. A valid logout from the current session instead commits a reduced
+actor, because refusing it would leave the user's login in place; a stale
+handle's logout is still refused by the session check. Policy publication takes the same lock, so
 an install can never land between a commit's recheck and its write. The
 trade-off is that an install waits behind any in-flight login or logout,
 including its attribute fetch from a possibly slow, networked attribute
