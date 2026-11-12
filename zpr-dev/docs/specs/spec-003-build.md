@@ -380,7 +380,11 @@ risk. Everything is a release build. The table is in claim order:
   in the run list (`NETNS_SCRIPTS`) nor deliberately excluded with a reason
   (`NETNS_EXCLUDED`). Only the top level is judged — `lib/` and
   `unused_or_outdated/` are invisible, matching the Makefile's own
-  `$(wildcard *-test.sh)`.
+  `$(wildcard *-test.sh)`. A listed script that only a feature branch carries
+  (`NETNS_SCRIPTS_IF_PRESENT`, today `zode-link-test.sh` from
+  `feature/zodes`, zl-zipline#250) runs only when the worktree has it;
+  otherwise the tier records it as `skipped: not in this zl-zpr-core
+  revision`. Every other listed script must exist.
 - The netns tier selects its route **host → container → skip**
   (zipline#92/#93/#192). The host route wins whenever its own prerequisites
   — unprivileged user namespaces (the probe is `unshare -nr true`; on Ubuntu
