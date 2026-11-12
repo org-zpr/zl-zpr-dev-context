@@ -245,7 +245,10 @@ three combinations are supported.
 On a Zode the "both" case is reached in two steps, on one actor. The machine
 authenticates as a node with its RSA key (device only). A user login then adds
 the user namespace to that same actor through `reauthorize`, and a logout
-removes it; the device authority and the ZPR address never change. That login
+removes what that login added; the device authority and the ZPR address never
+change. A trusted service that vends `user.*` attributes for the device itself
+re-supplies them after the logout, so a logged-out Zode is evaluated with that
+device-keyed user identity, if any, not with none. That login
 binds its token to a nonce the visa service issued (`getLoginNonce`), not to a
 link challenge. See *Design decisions*.
 

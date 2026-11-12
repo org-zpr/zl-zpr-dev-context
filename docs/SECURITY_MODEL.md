@@ -248,7 +248,8 @@ already Case 2.
 
 **A Zode's own login: the nonce comes from the visa service.** On a Zode the
 machine's actor is the node's own actor, and a user login adds the `user`
-namespace to it through `reauthorize` (logout drops it). The connect path
+namespace to it through `reauthorize` (logout drops what the login added;
+device-keyed enrichment may restore an equivalent user namespace, below). The connect path
 binds an OIDC token to a nonce derived from the docking node's link challenge;
 that protects against a replayed `id_token` only because the docking node is a
 separate party. A Zode is its own docking node, so a node-minted nonce would

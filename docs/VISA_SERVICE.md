@@ -142,7 +142,9 @@ rule it serves, are under *A Zode's own login and logout* below.
 ### A Zode's own login and logout
 
 A Zode's machine actor is the node's own actor (RSA only). A user login adds
-the `user` namespace to it through `reauthorize`; a logout removes it. This is
+the `user` namespace to it through `reauthorize`; a logout removes the
+login-derived namespace (device-keyed re-enrichment may restore an equivalent
+one, below). This is
 the one exception to the exact-set rule, and only for a node renewing its own
 actor (the `reauthorize` target is the calling node's address):
 
@@ -172,9 +174,11 @@ actor (the `reauthorize` target is the calling node's address):
   from loading the actor to recording the OIDC anchors, so two concurrent
   logins cannot both classify as a gain. A node's authenticate persists its
   new `zpr.session` under the same lock (`add_node_serialized`), so a
-  reconnect cannot write between a self-renewal's check and its write; and
-  just before persisting, the stored `zpr.session` must still be the one
-  loaded, else the renewal is refused (`authError`).
+  reconnect cannot write between a self-renewal's check and its write. A
+  self-renewal is also bound to the calling handle: once the lock is held, the
+  actor's `zpr.session` must equal the session that handle was minted under,
+  and again just before persisting; otherwise it is refused (`authError`), so
+  a stale handle cannot act on the actor of a newer session.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
