@@ -184,12 +184,20 @@ actor (the `reauthorize` target is the calling node's address):
   is revoked when it no longer passes policy: after a logout that is one that
   needed the login's attributes, unless device-keyed re-enrichment restored
   an equivalent attribute.
-- **One commit-time recheck.** Every writer of a node's own actor takes the
-  node commit lock (`PolicyMgr::node_commit_lock`) from the read its write is
-  based on until the write, and calls one shared helper,
-  `recheck_before_commit`, just before committing. It checks that the stored
-  `zpr.session` is the one expected (else `authError`) and reports whether
-  the policy generation moved since the write was prepared:
+- **One commit-time recheck.** Every writer of a node's own actor commits
+  under the node commit lock (`PolicyMgr::node_commit_lock`) and calls one
+  shared helper, `recheck_before_commit`, just before the write. It checks
+  that the stored `zpr.session` is the one expected (else `authError`) and
+  reports whether the policy generation moved since the write was prepared.
+  Two kinds of writer differ in what the lock covers. `reauthorize` of the
+  node's own actor, `open`, `getLoginNonce` and `disconnect` hold it from
+  the read their write is based on until the write, so their preparation is
+  serialized too. The node `authenticate` persist and the attribute refresh
+  prepare *outside* the lock (authentication, the network fetch of trusted
+  attributes) and take it only to commit; there, the recheck -- plus, for a
+  refresh, the identity token -- rejects a preparation that went stale, so
+  their reads and fetches are not serialized with a login or logout, but a
+  stale result is never written:
 
   | Writer | Session checked | On a moved generation |
   |---|---|---|
