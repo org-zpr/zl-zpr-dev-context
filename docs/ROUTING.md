@@ -285,10 +285,13 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   is applied through its last router update, under the link-state lock, so
   reports arriving at the same moment are never lost or applied out of order.
   A report is evaluated against one snapshot of the policy current when it is
-  applied, read under that lock, so one link never mixes two policies' CNs. A
-  report is accepted only from the node's current VS-API session: a reconnect
-  starts a new session and drops the old snapshot, and a late report from the
-  replaced session is ignored. A link coming back up affects new visas
+  applied, read under that lock, so one link never mixes two policies' CNs.
+  Reports are ordered by VS-API session: each session id carries a generation
+  that only goes up, and a report from an older generation than the node's
+  latest is refused, so a late report from a session the node has replaced
+  (a soft reconnect keeps its router node) never overwrites the new session's.
+  The old snapshot stands until the new session's first report, which a node
+  sends after every reconnect. A link coming back up affects new visas
   only; existing flows stay where they are until their visas expire or a later
   policy sweep moves them. The admin network view shows a declared link that
   reports put down as DOWN, although it stays in the graph.
@@ -304,7 +307,8 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   policy just before the link went down, because its generation gate counts
   that visa as current.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
-  when it disconnects, is reset, or reconnects with a new session. After a visa-service restart every node
+  when it disconnects or is reset; after a reconnect, the new session's first
+  report replaces them. After a visa-service restart every node
   follows the legacy rule until it re-sends its snapshot, which it does after
   every reconnect.
 
