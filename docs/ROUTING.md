@@ -311,7 +311,8 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   first read to its last local write, including the visa revocations that write
   calls for. Those operations are: authentication and connect (from the policy
   recheck to the link install), `open` (actor lookup to session persist), a
-  link-state report (liveness check to the last revocation), a policy pass
+  link-state report (from the call's arrival to the last revocation, so reports
+  a node pipelines on one handle apply in the order sent), a policy pass
   (policy, live-node set and node validity through disconnecting invalid nodes,
   link reconciliation and revocations), a disconnect (actor lookup to the last
   state removal), and the startup restore. Policy installs commit under the same
@@ -735,9 +736,13 @@ Rules that come with it:
 - Read policy, actor and session state only after taking the lock.
 - The lock is not re-entrant: a caller that holds it passes the guard down
   (`disconnect_locked`, the authentication undo).
-- An operation holding it waits only on local state writes, never on an
-  event-queue send or a node RPC, which could wait on another operation that
-  wants the lock.
+- An operation holding it waits only on local state writes. It never waits on
+  the visa request queue, a trusted service, an event-queue send or a node RPC:
+  those can be slow, and can wait on another operation that wants the lock.
+- An actor attribute refresh queries trusted services outside the lock and
+  commits under it. The commit applies only the attributes it changed onto the
+  actor as stored then, so it never rolls back a session or claim written
+  meanwhile.
 - Work that must read policy before the lock because it waits on the network
   rechecks under the lock that the policy is still current. Today that is
   authenticating a node against trusted services.
