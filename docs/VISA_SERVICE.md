@@ -120,16 +120,18 @@ docked — nodes cannot authenticate connections by themselves. Each time a new
 trusted service connects, the visa service refreshes attributes for every
 connected actor.
 
-### VS-API calls added for Zodes (schema only)
+### VS-API calls added for Zodes
 
 `vs.capnp` on `feature/zodes` adds three `VSHandle` calls a node makes over its
 existing session ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-The visa service does not implement them yet: capnp gives every unimplemented
-method a default body, so each one currently returns "unimplemented".
+The visa service implements `reportLinkStates`
+([#224](https://github.com/org-zpr/zl-zipline/issues/224)). The other two are
+schema only: capnp gives every unimplemented method a default body, so each
+returns "unimplemented".
 
 | Call | Contract | Errors | Implemented by |
 |---|---|---|---|
-| `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states; see [ROUTING.md](ROUTING.md), "Link-state reports" | entries for unknown peers are logged and ignored, not errors | [#224](https://github.com/org-zpr/zl-zipline/issues/224) |
+| `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states, replacing its previous report; the router uses a link only while both ends agree it is up — a reporting end must list the peer `up`, and a node that has never reported counts as agreeing until it does (transitional, removal [#242](https://github.com/org-zpr/zl-zipline/issues/242)). A link going down revokes the visas crossing it. See [ROUTING.md](ROUTING.md), "Link-state reports" | `authRequired` on a dead handle; `paramError` for more entries than the node's policy-declared links, an empty `peerCn`, or a `peerCn` listed twice. A visa whose revocation fails is quarantined and retried by the visa service; the report still succeeds. An entry whose CN matches no declared peer is kept, not an error, and cannot make a link usable under the current policy | implemented, [#224](https://github.com/org-zpr/zl-zipline/issues/224); node side [#223](https://github.com/org-zpr/zl-zipline/issues/223) |
 | `updateSubstrateAddr @9 (addr :SockAddr) -> (res :OkOrError)` | The node's substrate address changed; no re-authentication; the visa service re-sends `setTopology` to the node's peers | `paramError`: unspecified IP or port 0 | [#227](https://github.com/org-zpr/zl-zipline/issues/227) |
 | `getLoginNonce @10 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
 
@@ -823,11 +825,11 @@ No tracker issues are filed for these unless linked.
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
   ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). On
   `feature/zodes` the visa service fills `peerCn` from policy
-  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and the node checks it on
-  Zode links ([#220](https://github.com/org-zpr/zl-zipline/issues/220)); neither side
-  uses `reportLinkStates` yet
-  ([#223](https://github.com/org-zpr/zl-zipline/issues/223),
-  [#224](https://github.com/org-zpr/zl-zipline/issues/224)).
+  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and acts on
+  `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224));
+  the node checks `peerCn` on Zode links
+  ([#220](https://github.com/org-zpr/zl-zipline/issues/220)) but does not send
+  `reportLinkStates` yet ([#223](https://github.com/org-zpr/zl-zipline/issues/223)).
 
 ---
 
