@@ -400,6 +400,13 @@ does this only with its `forwarding` setting on, and only between two node
 links: an adapter binds by traffic classifier, which a `forwardOnly` visa lacks.
 See [ROUTING.md](ROUTING.md) ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
 
+A `Stream ID Request` is accepted only from the visa's **previous hop**:
+`Visa.prevHop`, compared against the ZPR address the node learned for the
+arriving link's peer from topology, never from Hello. A visa without
+`prevHop` (every ingress visa, and any visa from a visa service that predates
+the field) never accepts one, so it cannot be bound for forwarding (gap 7;
+[zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)).
+
 ### Forwarding
 
 Forwarding is on **Stream ID alone** (6.4 §5.14): the ingress link plus the
@@ -454,6 +461,13 @@ Specified, not implemented:
 - **ZPR Configurations.** Only the Baseline Configuration exists; field widths
   are Rust struct definitions, not runtime-configurable.
 - **A2A SAIDs other than 0**, and MAC sizes other than 8 bytes.
+- **`Stream ID Request` previous-hop rule.** `Visa.prevHop` is in the schema
+  only: the visa service fills it in
+  [zipline#245](https://github.com/org-zpr/zl-zipline/issues/245) and core
+  enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  Today a node accepts a `Stream ID Request` from any node link.
+  Reverse binding for symmetric visas is undefined
+  ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
   cascade. `Stream ID Withdrawal` and `Unbind Egress Stream` exist.
 - **PEP traffic constraints** — rate limits, QoS, DSCP marking, queue
