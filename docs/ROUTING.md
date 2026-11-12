@@ -319,7 +319,12 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   Authentication can query trusted services, so it reads policy before taking
   the lock. Under the lock it checks that the policy it was approved under is
   still current, and refuses with `temporarilyUnavailable` if not; the node
-  retries. Node RPCs and event-queue sends run after the lock is released:
+  retries. A call a node makes on its VS-API handle (connecting a newcomer,
+  `notifyDisconnect`, `registerVss`, a link-state report) rechecks under the lock
+  that the handle's session is still current, and is refused with `authRequired`
+  if a reconnect replaced it. A policy pass whose policy was replaced while it
+  refreshed actor attributes applies nothing: the newer policy's own pass does
+  the work. Node RPCs and event-queue sends run after the lock is released:
   stopping a disconnected node's VSS worker, `setTopology`, and `ActorJoins`.
   Visa issuance is the one path outside the lock. It is not a topology write,
   and the commit-time route check above covers it.
@@ -740,8 +745,8 @@ Rules that come with it:
 Visa issuance stays outside the lock and is closed by ordering: a link going
 down sets its flag before its revocation pass lists visas. A visa stored before
 the listing is revoked by the pass, and one stored after it fails its
-commit-time route check. Such a revocation clears the visa's policy stamp, so a
-later policy allow cannot cancel it.
+commit-time route check. Such a revocation clears the visa's policy stamp, and
+a later policy deny leaves it unstamped, so no later policy allow can cancel it.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **A down link stays in the graph.** Removing it from the router would make
