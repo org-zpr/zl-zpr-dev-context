@@ -530,10 +530,12 @@ topology entry for its verified CN, never from Hello (gap 5).
 naming a peer Zode as next hop finds that link and never a closed one waiting
 to redial. A joiner that has no topology entry for its relay yet takes the
 relay's address from the next hop of the forward bootstrap visa the relay
-handed it. The relay chose that address, so it stands only while the relay is
-the joiner's sole Zode link (before any topology, only initial-link CNs may
-link): every topology sets each link's address from its own entries, and
-clears the hand-off address if it does not name the relay. The topology
+handed it. The relay chose that address, so it stands only until the first
+topology arrives. Until then only the configured initial links can link, so
+the relays the operator named are the only peers that can supply one. Every
+topology sets each link's address from its own entries and clears the
+hand-off address if it does not name the relay. After the first topology, a
+hand-off gives no address. The topology
 itself reaches the joiner over that address (the visa service's VSS
 connection), so it cannot be narrower than all the joiner's visas.
 
@@ -882,8 +884,9 @@ test found that stall. ZBOLT is meant to replace this rule later (Zodes plan
 could otherwise claim any address in Hello and attract visas meant for another
 node (gap 5). The one exception has to exist: a joiner has no topology until it
 has authenticated through its relay, so it takes the relay's address from the
-next hop of the bootstrap visa the relay handed it, while the relay is its
-only Zode link, and replaces it -- or clears it -- once topology arrives. The
+next hop of the bootstrap visa the relay handed it. That happens only before
+its first topology, when only its configured initial links can link, and the
+topology replaces or clears that address once it arrives. The
 relay could put any address there: the joiner checks the visas' flows, not
 their next hop.
 ([#222](https://github.com/org-zpr/zl-zipline/issues/222))
