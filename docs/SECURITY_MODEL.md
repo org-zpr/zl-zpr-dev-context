@@ -565,7 +565,10 @@ and logs them otherwise (a refusal leaves the link up):
   ended when its VSConn run loop exited);
 - there are at most two visas;
 - each visa is exactly the joiner's own VSAPI flow (TCP from the joiner's ZPR
-  address to `vs.zpr` port 5002) or that flow's reply.
+  address to `vs.zpr` port 5002) or that flow's reply;
+- no visa carries the ID of a different visa the joiner already holds. An
+  identical repeat is kept as installed, stream bindings included. The check
+  and the install are one step under the visa-table lock, all or nothing.
 
 So a peer can at most give a joining Zode a route to the visa service through
 that peer, and only before the joiner has authenticated; it cannot open any

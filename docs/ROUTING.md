@@ -512,7 +512,8 @@ fn process_topology(asm: &Arc<Assembly>, links: Vec<Link>) -> SetTopologyRespons
 topology arrives over that link. So a Zode is configured with initial links:
 `[[node.initial_link]]` entries (`addr`, `cn`) in the `ph node` config file, or
 `ph node --initial-link CN@IP:PORT`, repeatable, which replaces the file's
-list. The Zode dials each at startup, and the configured CN is allowed as a
+list. The Zode dials each at startup, and retries after the link holddown if
+a dial cannot even start (no route yet). The configured CN is allowed as a
 peer as well as the topology's `peerCn`s. A dialed link must reach the CN it
 dialed, and redials after a close unless a topology update has removed its
 address (and it is no initial link) or it lost a crossed-dial election: then
