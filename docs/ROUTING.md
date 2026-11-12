@@ -274,10 +274,15 @@ sends the reports, is [#223](https://github.com/org-zpr/zl-zipline/issues/223).
   is caught as it is stored: `create_visa` re-checks every link of the route
   once the visa is committed and revokes it at once if one is down. If a
   revocation's state write fails, the link is kept for retry; the next report
-  from either end retries it, and the report that hit the failure is answered
-  `internal` so the node re-sends. A link coming back up affects new visas only;
-  existing flows stay where they are until their visas expire or a later policy
-  sweep moves them.
+  from either end retries it. A report that hit the failure is answered
+  `internal` so the node re-sends; a visa that hit it at commit is not issued.
+  A link coming back up affects new visas only; existing flows stay where they
+  are until their visas expire or a later policy sweep moves them.
+- **Policy changes.** CNs come from policy, so a new policy can change which
+  reports match a link even when the link itself is unchanged. Policy
+  revalidation re-evaluates every link's flag and rebuilds any link whose flag
+  changes in the same atomic batch; the policy sweep that follows revokes visas
+  whose route moved.
 - **Lifetime.** Reports live in the visa service's memory. A node's reports go
   when it disconnects or is reset. After a visa-service restart every node
   follows the legacy rule until it re-sends its snapshot, which it does after
