@@ -211,8 +211,10 @@ actor (the `reauthorize` target is the calling node's address):
   install's reconciliation and re-authentication obligation then cover). The
   identity token is minted after the recheck has chosen the actor to persist.
   If a login's or logout's actor write fails part-way (the attributes may
-  already be committed), the visa service still invalidates a reduced
-  logout's revisions and queues an attribute-change reconcile before it
+  already be committed), the visa service rolls a login back to the pre-login
+  actor (disconnecting the node if even that fails, so no login without
+  session anchors stays active), invalidates a reduced logout's revisions,
+  releases the lock, and queues an attribute-change reconcile before it
   reports the error.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
