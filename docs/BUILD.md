@@ -459,6 +459,10 @@ Two consequences worth knowing:
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
    [org-zpr/zl-zpr-dev-context#82](https://github.com/org-zpr/zl-zpr-dev-context/pull/82).
+   Core's CI integration jobs on `feature/zodes` use a visa-service
+   pre-release from that branch, `VISA_SERVICE_RELEASE: v0.22.0-zodes.1` in
+   `adapter.yml` (org-zpr/zl-zipline#222); bump it when the visa service
+   changes there.
 
 Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
 across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
