@@ -479,11 +479,16 @@ All three mint through the ordinary visa-request pipeline, evaluated by
 policy, never built by hand. Each is requested as if by the ingress Zode of
 its path and **delivered ingress last**: every other Zode on the path gets its
 copy by VSS push first, and the ingress copy is pushed only once all of them
-have acked (`VisaMgr::deliverable_visas_for_node`). The ingress then
+have acked (`VisaMgr::deliverable_visas_for_node`). One copy cannot wait for a
+push: the registering Zode's own copy of its new J5b VSS visa rides in the
+`registerVss` answer, because the VSS connection needs it before any push can
+arrive. The ingress then
 supersedes the older visa and rebinds the live stream (ZODE_LINKS.md J11),
-and every other hop already holds the new visa. **A newer core visa never
-revokes an older one**: superseded visas expire on their own. Core visas are
-revoked only when their join ends, by a rejoin's teardown or a disconnect.
+and every other hop already holds the new visa. **Issuing or renewing a core
+visa never revokes the one it supersedes**: superseded visas expire on their
+own. Otherwise core visas are revoked like any visa (a policy that denies
+them, a link going down under them), and all of a node's core visas are
+revoked when its join ends, by a rejoin's teardown or a disconnect.
 **Core visas carry no session keys** (an empty `KeySet`), because the
 bootstrap visas they supersede cannot carry any and J11 refuses a rebind
 across a key change (see "Design decisions").

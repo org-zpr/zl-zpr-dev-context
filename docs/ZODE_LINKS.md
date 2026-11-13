@@ -394,8 +394,8 @@ J5. **Authentication.** The joiner authenticates as a node over the bootstrap
       `registerVss`, even when an older one is still installed. The answer to
       `registerVss` carries only the Zode's copy of it.
     - **J5c.** The bootstrap visas are left to expire. They only carried the
-      authentication exchange. *Built:* the visa service never revokes a
-      superseded core visa (see J9). On the Zodes the bootstrap visas also go
+      authentication exchange. *Built:* issuing a core visa never revokes
+      the visa it supersedes (see J9). On the Zodes the bootstrap visas also go
       when the link they arrived on goes (rule 9).
 J6. **Every return is a join** (rule 11a). A new initial link means a new request
     and a new hand-off. Nothing waits in the visa service for an offline Zode, so
@@ -466,8 +466,11 @@ J9. **The visa service renews them.** It re-mints a Zode's three core visas
     worker heartbeat (800 ms). For each core five-tuple it takes the newest visa
     still grantable to the Zode, and once that visa has passed `RENEW_AT`
     (2/3 of its lifetime, gate g89 q3), mints a new one, delivered ingress last
-    like J5a. A newer core visa never revokes an older one: core visas are
-    revoked only when their join ends (a rejoin or a disconnect). A failed mint
+    like J5a. Issuing or renewing a core visa never revokes the one it
+    supersedes, which expires on its own. Core visas are otherwise revoked
+    like any visa (a policy that denies them, a link going down under them),
+    and all of a Zode's core visas are revoked when its join ends (a rejoin or
+    a disconnect). A failed mint
     or push is retried on the next heartbeat.
 J10. **Fallback: a broken session means rejoin.** If a Zode's VS-API session
     fails for any reason, including its core visas lapsing, it closes its
