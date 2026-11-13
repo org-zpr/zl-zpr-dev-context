@@ -436,8 +436,12 @@ joiner's two VS-API visas and hands them over in this message
      address, any port, to the visa service's VSAPI port, with a forwarding
      PEP whose next hop is set and is not the joiner) and one reverse visa
      (full, TCP, from the visa service's VSAPI port to the joiner's address,
-     any port, with no forwarding PEP), with different IDs, and
-  8. neither has expired.
+     any port, with no forwarding PEP), with different IDs,
+  8. the reverse visa's `prevHop` is set and is the forward visa's next hop,
+     the relay address the hand-off records (so the relay's later
+     `Stream ID Request` for the reverse visa passes the previous-hop rule;
+     [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)), and
+  9. neither has expired.
 
   A refusal is logged, counted (`BootstrapHandoffRefused`) and closes the
   link, and the joiner redials with its initial-link backoff. On success
@@ -564,8 +568,10 @@ netns run yet. That is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 **`Bootstrap Visas` (146) is implemented**
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)): the codec and the
 joiner's checks in zl-zpr-core#111 (merged), the relay's request and hand-off
-in zl-zpr-core#113 (#252 merge set C). `zode-link-test.sh` runs the hand-off in
-netns: a joiner's first join, a restart and a rejoin after a forced link drop.
+in zl-zpr-core#113 (#252 merge set C). Check 8, the reverse visa's `prevHop`,
+is zl-zpr-core#115 ([#253](https://github.com/org-zpr/zl-zipline/issues/253)).
+`zode-link-test.sh` runs the hand-off in netns: a joiner's first join, a
+restart and a rejoin after a forced link drop.
 
 Specified, not implemented:
 
