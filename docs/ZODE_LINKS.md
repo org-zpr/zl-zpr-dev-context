@@ -1,8 +1,8 @@
 # Zode links: lifecycle (v1)
 
 **Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a) and for
-#251, forwarding over Zode links (F1–F8, except F2's `prev_hop` check, which is
-#253), on `feature/zodes`. Rules 11a and 16 and the relay join (J1–J11) are
+#251, forwarding over Zode links (F1–F8; F2's `prev_hop` check is #253's,
+zl-zpr-core#115), on `feature/zodes`. Rules 11a and 16 and the relay join (J1–J11) are
 implemented for #252: the hand-off codec and checks (zl-zpr-core#111) and J11
 (zl-zpr-core#112) are merged; the relay and joiner (zl-zpr-core#113), the visa
 service's half (zl-zpr-visaservice#67) and the compiler's pin
@@ -249,6 +249,11 @@ F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is 
     **up** Zode link whose peer has that ZPR address. The address is the topology
     `Link.zprAddr` of the entry matched by the peer's verified CN. It never comes
     from the Hello or anything else the peer claims about itself (gap 5).
+    The one exception is a joiner until a `setTopology` names its relay: its
+    initial link's peer address is the relay address its bootstrap hand-off
+    recorded
+    (see "The joiner's egress before it has topology" below). F2's
+    previous-hop check uses this same lookup, exception included.
     `find_egress_link` matches these links just as it matches local and adapter
     addresses. A next hop with no up link is `DestNotFound`, and the bind is
     refused. **An endpoint's initial link to its relay is always also an entry in
@@ -257,9 +262,20 @@ F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is 
 F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
     `visa_id` walks down the path, and each Zode fills its forwarding (PFT) entry
     when the answer comes back. Keep the loop guard (egress == ingress is
-    refused) and refuse when transaction IDs run out, instead of panicking. #253
-    adds the `prev_hop` check: a request is accepted only from the visa's
-    previous hop.
+    refused) and refuse when transaction IDs run out, instead of panicking. A
+    request that arrives on a Zode link is accepted only from the visa's
+    **previous hop** (#253): the visa's `prev_hop` must be set, and F1's
+    egress lookup for that address must give exactly the link the request
+    came in on. So the address is F1's: the topology `zprAddr` of the entry
+    matched by the link's verified CN, or, on a joiner until a `setTopology`
+    names its relay, the relay address its hand-off recorded (J4). The link's
+    record must be up and point at this connection. An unset `prev_hop`, or a
+    link with no address, is refused, with no fallback. A refusal is an error
+    `Stream ID Response`; the link stays open. It is logged with its reason
+    and counted (`StreamIdRequestRejected`, which counts every refused
+    `Stream ID Request`, whatever the reason). An adapter or the local actor
+    is a stream's ingress and has no previous hop, so the check does not
+    apply to it.
 F3. **Both sides of a binding are recorded.** Each binding remembers its ingress
     link and its egress link. Then rule 9 (a lost link clears everything tied to
     it) clears entries on **both** sides, so no forwarding entry points at a dead
@@ -368,7 +384,12 @@ J4. **The hand-off.** The relay sends the two visas in the `Bootstrap Visas`
     [ZDP.md](ZDP.md) ("Bootstrap Visas"). The relay installs its own copies,
     bound to the link (rule 9), before it sends the joiner's, so the joiner's
     first packet already matches at the relay. The joiner installs both visas
-    bound to the link, and a refused hand-off closes the link.
+    bound to the link, and a refused hand-off closes the link. *Built (#253,
+    gate g106 q4):* the joiner also refuses a pair whose reverse visa's
+    `prev_hop` is unset or is not the forward visa's next hop, the relay
+    address the hand-off records (`HandoffError::PrevHopMismatch`). The relay's
+    `Stream ID Request` for that visa would otherwise be refused at bind time
+    (F2), a silent J10 rejoin loop.
 J5. **Authentication.** The joiner authenticates as a node over the bootstrap
     visas, or reconnects (`reconnect` vs `reset`: the visa service decides, R16).
     *Built:* the joiner connects only once a hand-off is installed, and after a
@@ -553,7 +574,8 @@ gate g89) answered them, along with the choices the code forced:
 
 ## Design decisions
 
-Decisions taken while #252 was built, at the operator gates of pd plan p33.
+Decisions taken while #252 was built, at the operator gates of pd plan p33,
+and while #253 was built (pd plan p34).
 The planning gate's answers are in "Answered at the planning gate (g89)" above.
 
 **A bootstrap visa is rechecked against its peering, not its route** (gate
@@ -608,6 +630,42 @@ connection. Now:
 No lock is held across a VSS call. Two passes' pushes for one node may
 interleave, which is harmless: a `setTopology` or `setServices` makes the
 worker re-send the current state at its next heartbeat.
+
+**A Zode binds a `Stream ID Request` only from the visa's previous hop**
+(gap 7, #253, pd plan p34, gate g106). Decided:
+
+- **One address, F1's** (g106 q2). The check runs F1's egress lookup in
+  reverse: `find_zode_egress_link(prev_hop)` must return the link the
+  request arrived on. After topology that is the topology `zprAddr` for the
+  verified CN; on a joiner until a `setTopology` names its relay, the relay
+  address from the hand-off. The record must be up and point at this connection, so the old
+  connection of a CN replaced under rule 5 is refused. Rejected: a second
+  link-to-address helper that ignores record state (two definitions to keep
+  in step).
+- **It sits with the other F2 guards**, in `prepare_next_hop_bind`, first
+  after the visa and egress lookup, and before the loop guard. Every bind
+  path that can see a Zode requestor goes through it. A J11 rebind starts
+  only at an adapter or local-actor ingress, and its `Stream ID Request` is
+  checked at the next hop against the new visa's `prev_hop`.
+- **The visa-by-ID fetch runs before the check**: `prev_hop` is in the visa.
+  The cost is bounded: the visa service returns only copies installed on
+  this Zode, and the requestor's transaction IDs bound its open requests.
+- **A refusal keeps the link open**: it is an error `Stream ID Response`,
+  not the handler-error path F5 uses.
+- **One counter for every refusal** (g106 q3): `StreamIdRequestRejected`
+  ("Stream ID Request Rejected") counts every refused `Stream ID Request`:
+  the previous-hop check, the other F2 guards, no egress, a visa denial,
+  and rule 9's refusal of a bind pending over a lost link. The log line
+  carries the reason; the previous-hop line says "not the visa's previous
+  hop". `zode-link-test.sh` asserts that no previous-hop refusal is logged
+  on the relay or the joiner, and that the counter is zero on both until
+  the first scenario that breaks a link.
+- **J4 refuses a mismatched pair** (g106 q4), see J4.
+- **Symmetric visas stay separate**
+  ([#246](https://github.com/org-zpr/zl-zipline/issues/246)). A request
+  from a visa's next hop is refused, which is #246's recorded state; #246
+  will extend this one check when it defines reverse binding.
+- The core PR and this document merge together (g106 q5).
 
 ## Implementation status
 
@@ -702,7 +760,7 @@ because it needs #252's relay join.
 |---|---|
 | F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; adapter matching (`actor_auth`, AAA) on non-Zode links only | `assembly.rs::find_egress_link` |
 | F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
-| F2 loop guard (egress == ingress is refused), and a refusal when transaction IDs run out. F2's `prev_hop` check is **not** implemented: it is #253 | `mgmt/node.rs::requested_visa_granted` |
+| F2 guards, in order: no visa or no egress, the previous hop (#253: `check_prev_hop`, F1's `find_zode_egress_link` for the visa's `prev_hop` must give the ingress link; `Visa::prev_hop`), the loop guard (egress == ingress is refused), a forward-only visa from or to an adapter, and a refusal when transaction IDs run out. Every refused `Stream ID Request` is counted once, as `StreamIdRequestRejected`, in `bind_reject` | `mgmt/node.rs::prepare_next_hop_bind` |
 | F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of the bootstrap visas carried over an initial link is #252's `bootstrap_handoff::revoke_for_lost_link` | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |
 | Rule 9 for pending binds: binds waiting on the lost link are refused, next-hop binds issued for it are abandoned | `mgmt/node.rs::clear_pending_binds_for_lost_link`, called from `assembly.rs::drop_peer` |
 | F5 types 5 and 13 refused on Zode links; none sent on one | `mgmt/handlers.rs` (`handle_stream_id_withdrawal`, `handle_unbind_indication`), `assembly.rs::withdraw_streams` |
@@ -835,8 +893,6 @@ Visa-service pre-releases for core CI while set C is open are in
 
 ### What waits for which issue
 
-- **#253** gap 7: the `prev_hop` check on `Stream ID Request` (F2). Today a
-  Zode accepts a request from any node link.
 - **#254** netns scripts, including #251's re-route scenario and the
   two-joiner and wrong-CA scenarios #252 left out (gate g89 q8).
 - **#257** a visa granted for a next hop whose link is already down: its

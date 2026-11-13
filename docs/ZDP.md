@@ -436,8 +436,12 @@ joiner's two VS-API visas and hands them over in this message
      address, any port, to the visa service's VSAPI port, with a forwarding
      PEP whose next hop is set and is not the joiner) and one reverse visa
      (full, TCP, from the visa service's VSAPI port to the joiner's address,
-     any port, with no forwarding PEP), with different IDs, and
-  8. neither has expired.
+     any port, with no forwarding PEP), with different IDs,
+  8. the reverse visa's `prevHop` is set and is the forward visa's next hop,
+     the relay address the hand-off records (so the relay's later
+     `Stream ID Request` for the reverse visa passes the previous-hop rule;
+     [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)), and
+  9. neither has expired.
 
   A refusal is logged, counted (`BootstrapHandoffRefused`) and closes the
   link, and the joiner redials with its initial-link backoff. On success
@@ -495,11 +499,17 @@ links: an adapter binds by traffic classifier, which a `forwardOnly` visa lacks.
 See [ROUTING.md](ROUTING.md) ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
 
 A `Stream ID Request` is accepted only from the visa's **previous hop**:
-`Visa.prevHop`, compared against the ZPR address the node learned for the
-arriving link's peer from topology, never from Hello. A visa without
-`prevHop` (every ingress visa, and any visa from a visa service that predates
-the field) never accepts one, so it cannot be bound for forwarding (gap 7;
-[zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)).
+`Visa.prevHop`, compared against the ZPR address the node has for the
+arriving link's peer. That address comes from topology (the `zprAddr` for the
+peer's verified CN) or, on a joining Zode until a `setTopology` names its
+relay, from the bootstrap hand-off, which records its relay's address (the one
+exception to F1 in [ZODE_LINKS.md](ZODE_LINKS.md)). It never comes from
+Hello. A visa without `prevHop` (every ingress visa) never accepts one, so it
+cannot be bound for forwarding. A refused request gets an error
+`Stream ID Response`, the link stays open, and the node counts it as
+`StreamIdRequestRejected`, the counter of every refused `Stream ID Request`
+(gap 7; [zipline#243](https://github.com/org-zpr/zl-zipline/issues/243),
+[zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)).
 
 ### Forwarding
 
@@ -558,8 +568,10 @@ netns run yet. That is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 **`Bootstrap Visas` (146) is implemented**
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)): the codec and the
 joiner's checks in zl-zpr-core#111 (merged), the relay's request and hand-off
-in zl-zpr-core#113 (#252 merge set C). `zode-link-test.sh` runs the hand-off in
-netns: a joiner's first join, a restart and a rejoin after a forced link drop.
+in zl-zpr-core#113 (#252 merge set C). Check 8, the reverse visa's `prevHop`,
+is zl-zpr-core#115 ([#253](https://github.com/org-zpr/zl-zipline/issues/253)).
+`zode-link-test.sh` runs the hand-off in netns: a joiner's first join, a
+restart and a rejoin after a forced link drop.
 
 Specified, not implemented:
 
@@ -574,11 +586,11 @@ Specified, not implemented:
 - **ZPR Configurations.** Only the Baseline Configuration exists; field widths
   are Rust struct definitions, not runtime-configurable.
 - **A2A SAIDs other than 0**, and MAC sizes other than 8 bytes.
-- **`Stream ID Request` previous-hop rule.** The visa service sets
-  `Visa.prevHop` ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
-  Today a node accepts a `Stream ID Request` from any node link.
-  Reverse binding for symmetric visas is undefined
-  ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
+- **Reverse binding for symmetric visas** is undefined
+  ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)): a
+  `Stream ID Request` from a visa's next hop is refused by the previous-hop
+  rule, which core enforces since
+  [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
   cascade. Teardown has three causes only: expiry, a visa-service revocation,
   and a lost link (ZODE_LINKS.md F4). `Stream ID Withdrawal` and `Unbind Egress
