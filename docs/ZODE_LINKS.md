@@ -355,7 +355,7 @@ J8. **`Link.visas` is removed from the schema.** Topology no longer carries
     bootstrap visas: vsapi, then a common tag, then the pins move together (BUILD.md
     rule 6).
 
-### Keeping the core visas alive *(coordinator proposal, confirm)*
+### Keeping the core visas alive (operator approved 2026-11-12)
 
 The three core visas from J5a and J5b are what the Zode needs to talk to the visa
 service at all. If they lapse, the Zode can't send a `visaRequest` (that needs
