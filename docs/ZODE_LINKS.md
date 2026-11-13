@@ -1,7 +1,8 @@
 # Zode links: lifecycle (v1)
 
 **Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a) and for
-#251, forwarding over Zode links (F1–F8), on `feature/zodes`. Rules 11a and 16
+#251, forwarding over Zode links (F1–F8, except F2's `prev_hop` check, which is
+#253), on `feature/zodes`. Rules 11a and 16
 and the relay join (J1–J11) come with #252: designed and approved, not yet
 implemented. See "Implementation status" for where the code lives and what it
 does differently.
@@ -523,8 +524,8 @@ because it needs #252's relay join.
 |---|---|
 | F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; adapter matching (`actor_auth`, AAA) on non-Zode links only | `assembly.rs::find_egress_link` |
 | F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
-| F2 loop guard (egress == ingress is refused), and a refusal when transaction IDs run out | `mgmt/node.rs::requested_visa_granted` |
-| F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |
+| F2 loop guard (egress == ingress is refused), and a refusal when transaction IDs run out. F2's `prev_hop` check is **not** implemented: it is #253 | `mgmt/node.rs::requested_visa_granted` |
+| F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of VS-API and bootstrap visas carried over an initial link comes with #252 | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |
 | Rule 9 for pending binds: binds waiting on the lost link are refused, next-hop binds issued for it are abandoned | `mgmt/node.rs::clear_pending_binds_for_lost_link`, called from `assembly.rs::drop_peer` |
 | F5 types 5 and 13 refused on Zode links; none sent on one | `mgmt/handlers.rs` (`handle_stream_id_withdrawal`, `handle_unbind_indication`), `assembly.rs::withdraw_streams` |
 | F6 `down`/`failed` skip the coalescing window; the loss barrier | `zode_links.rs` (`register_loss`, `wait_for_loss_reports`, `run_link_state_reporter`), `mgmt/node.rs` (`visa_request_task`, `visa_push_request_task`) |
@@ -543,9 +544,11 @@ replacing the visa without editing either one.
 
 Decided while building it:
 
-- **The F6 barrier releases when the report's RPC returns**, Ok or error. It is
-  bounded by the RPC timeout, and with no VS-API session the report fails
-  locally at once, so a visa request never hangs on it. Each snapshot carries
+- **The F6 barrier releases when the report's RPC returns**, Ok or error. With
+  no VS-API session the report fails locally at once, so a visa request never
+  hangs on it. Each send is bounded by the RPC timeout, but snapshots go out one
+  at a time, in order, so the loss report can also wait behind earlier sends
+  still queued (at most `REPORT_QUEUE_MAX`, each bounded the same way). Each snapshot carries
   the loss epoch read just before it was taken; the reporter publishes it once
   the send returns.
 - **A loss is registered before any revocation.** `drop_peer` registers it
@@ -558,8 +561,10 @@ Decided while building it:
   its transaction ID), the next-hop transaction stays open and its answer is
   dropped. Refusing it as an unknown transaction would close the next hop's
   link, which did nothing wrong. The consistency panics on that path are gone.
-- **A visa request's result is dropped** if the bind request it serves is gone
-  by the time it returns, so nothing reaches a peer that took the link ID since.
+- **A visa request's result is dropped** unless the bind request it serves is
+  still there and still names that request's worker task, so it never answers
+  a peer that took the link ID since, or a newer request that reused the
+  transaction ID (core#110 review).
 - Gate g88: **q2** a type 5 or 13 on a Zode link is refused through the strict
   handler-error path, which closes the link. **q3** a type 13 from a node's own
   adapter or local actor is refused too. **q4** a held visa ID is an idempotent

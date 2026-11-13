@@ -448,8 +448,11 @@ Stream ID 0 goes to the control plane. An unknown Stream ID is dropped
 silently and counted (`UnknownStreamId`), **by design**: the RFC says send
 `Destination Unreachable` upstream, but its own editorial note warns that doing
 so lets a compromised upstream probe which IDs are live (ZODE_LINKS.md F7). A
-stale Stream ID shows up only after a link loss or restart, and revocation plus
-the next visa request recover from that. `fastpath.rs::forward` still has a
+stale Stream ID shows up after a link loss or restart, or on a healthy link when
+expiry or revocation removed the downstream entry before the upstream stopped
+sending. The counter is not by itself a sign of link loss. Recovery is the
+upstream's own visa cleanup (expiry, or the visa service's revocation on every
+Zode on the path) followed by a new visa request. `fastpath.rs::forward` still has a
 `TODO: policy enforcement` where the PEP's constraints should be applied.
 
 ### Compression
