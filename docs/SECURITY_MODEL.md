@@ -683,14 +683,17 @@ not read the RFCs as a description of current guarantees.
   ([zipline#227](https://github.com/org-zpr/zl-zipline/issues/227)). Until it
   does, keeping traffic off an endpoint rests on that endpoint's `forwarding`
   setting being off, which a subverted endpoint controls.
-- **Stream binding restricted to the previous hop (gap 7).** The intended
-  rule: a node accepts a `Stream ID Request` for a visa only on the link whose
-  peer's topology ZPR address equals the visa's `Visa.prevHop`, and a visa
-  without `prevHop` (every ingress visa) never accepts one. Today it is not
-  enforced: any node link can send a `Stream ID Request` for a visa ID it knows
-  and have the stream bound. `Visa.prevHop` is in the schema
-  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
-  service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)), and core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
+- **Stream binding restricted to the previous hop (gap 7).** Enforced since
+  [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253): a node
+  accepts a `Stream ID Request` for a visa only on the link F1 would use to
+  send to the visa's `Visa.prevHop`, whose peer's topology ZPR address (by
+  verified CN) is `prevHop`, or, on a joiner before its first topology, the
+  initial link whose hand-off recorded `prevHop` as the relay's address. A
+  visa without `prevHop` (every ingress visa) never accepts one, and there is
+  no fallback. So a neighbour cannot pull a flow onto a path it is not on.
+  `Visa.prevHop` is in the schema
+  ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)) and the
+  visa service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)).
   Reverse binding for symmetric visas stays undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa

@@ -405,8 +405,9 @@ in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
 `actualize_visa_for_target_node` sets it on each copy ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)). This
 includes the bootstrap visas of a joining Zode: the relay's copy of the forward
 visa names the joiner, and the joiner's copy of the reverse visa names the relay.
-A visa whose path has fewer than two nodes has no `prevHop`. Core enforces it in
-[zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
+A visa whose path has fewer than two nodes has no `prevHop`. Core enforces it
+since [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253), so a
+copy without `prevHop` is never bound from a Zode link.
 
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
@@ -1097,9 +1098,6 @@ No tracker issues are filed for these unless linked.
   zipline#78 (see ATTRIBUTE_SERVICE.md). The RFC's network trusted-service API
   was never implemented, and the compiler rejects any `api` other than `file`,
   `oidc` and `zpr-attr/1`.
-- **`Visa.prevHop` is set but not enforced yet.** The visa service sets it
-  ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core accepts a `Stream ID Request` from any node link until
-  [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 - **Renewal is a new visa matched by five-tuple, not a replacement message.**
   The design sends a renewal as a replacement naming the visa it replaces.
   For a Zode's core visas the visa service pushes the new visa as an ordinary install, and the Zode

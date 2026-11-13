@@ -470,7 +470,7 @@ ZPR address equals `prevHop`; the ingress visa has none and never accepts one
 (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
 `Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
 each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
-whose path has fewer than two nodes has none. Core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
+whose path has fewer than two nodes has none. Core enforces it since [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
