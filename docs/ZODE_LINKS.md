@@ -355,6 +355,30 @@ J8. **`Link.visas` is removed from the schema.** Topology no longer carries
     bootstrap visas: vsapi, then a common tag, then the pins move together (BUILD.md
     rule 6).
 
+### Settled after the builder check *(coordinator calls)*
+
+- **The joiner's egress before it has topology.** Bootstrap visas are bound to
+  the initial link they arrive on. The joiner records the relay's ZPR address
+  from the forward bootstrap visa's next hop, as that link's peer address.
+  This is the one exception to F1's "address from topology", and it holds only
+  until the Zode's first `setTopology`, which then includes the relay (F1).
+- **Who may request on someone's behalf (J3).** In v1 that is only **the node the
+  visa service docks on**: one relay, one hop from the visa service. This
+  matches `visa_bootstrap.rs` and g44 q3. A Zode reached over a direct link never
+  qualifies, so the non-transit rule holds. Multiple relays, and relays that
+  don't host the visa service, are deferred.
+- **A rejoin before the visa service has noticed the old session is gone.** The
+  relay's on-behalf request is the proof: one link per peer (rule 5) means the
+  relay holds no other live link for that CN. So the visa service tears down
+  the old session state and mints the bootstrap visas, instead of refusing.
+- **`reconnect` after a link wipe.** A rejoin may still be `reconnect`: the
+  Zode's identity and local actors survive. But the visa service treats every
+  visa it pushed to that Zode as **not installed** and pushes them again,
+  including the VSS visa. Rule 9 cleared them on the Zode.
+- **The `Bootstrap Visas` message** is a new ZDP control message (core#104 used
+  type 146). It gets defined in ZDP.md, with the message body: exactly two
+  visas.
+
 ### Keeping the core visas alive (operator approved 2026-11-12)
 
 The three core visas from J5a and J5b are what the Zode needs to talk to the visa
