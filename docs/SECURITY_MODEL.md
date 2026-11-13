@@ -687,8 +687,8 @@ not read the RFCs as a description of current guarantees.
   [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253): a node
   accepts a `Stream ID Request` for a visa only on the link F1 would use to
   send to the visa's `Visa.prevHop`, whose peer's topology ZPR address (by
-  verified CN) is `prevHop`, or, on a joiner before its first topology, the
-  initial link whose hand-off recorded `prevHop` as the relay's address. A
+  verified CN) is `prevHop`, or, on a joiner until a `setTopology` names its
+  relay, the initial link whose hand-off recorded `prevHop` as the relay's address. A
   visa without `prevHop` (every ingress visa) never accepts one, and there is
   no fallback. So a neighbour cannot pull a flow onto a path it is not on.
   `Visa.prevHop` is in the schema

@@ -249,8 +249,9 @@ F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is 
     **up** Zode link whose peer has that ZPR address. The address is the topology
     `Link.zprAddr` of the entry matched by the peer's verified CN. It never comes
     from the Hello or anything else the peer claims about itself (gap 5).
-    The one exception is a joiner before its first `setTopology`: its initial
-    link's peer address is the relay address its bootstrap hand-off recorded
+    The one exception is a joiner until a `setTopology` names its relay: its
+    initial link's peer address is the relay address its bootstrap hand-off
+    recorded
     (see "The joiner's egress before it has topology" below). F2's
     previous-hop check uses this same lookup, exception included.
     `find_egress_link` matches these links just as it matches local and adapter
@@ -266,8 +267,8 @@ F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
     **previous hop** (#253): the visa's `prev_hop` must be set, and F1's
     egress lookup for that address must give exactly the link the request
     came in on. So the address is F1's: the topology `zprAddr` of the entry
-    matched by the link's verified CN, or, on a joiner before its first
-    `setTopology`, the relay address its hand-off recorded (J4). The link's
+    matched by the link's verified CN, or, on a joiner until a `setTopology`
+    names its relay, the relay address its hand-off recorded (J4). The link's
     record must be up and point at this connection. An unset `prev_hop`, or a
     link with no address, is refused, with no fallback. A refusal is an error
     `Stream ID Response`; the link stays open. It is logged with its reason
@@ -636,8 +637,8 @@ worker re-send the current state at its next heartbeat.
 - **One address, F1's** (g106 q2). The check runs F1's egress lookup in
   reverse: `find_zode_egress_link(prev_hop)` must return the link the
   request arrived on. After topology that is the topology `zprAddr` for the
-  verified CN; before topology on a joiner, the relay address from the
-  hand-off. The record must be up and point at this connection, so the old
+  verified CN; on a joiner until a `setTopology` names its relay, the relay
+  address from the hand-off. The record must be up and point at this connection, so the old
   connection of a CN replaced under rule 5 is refused. Rejected: a second
   link-to-address helper that ignores record state (two definitions to keep
   in step).

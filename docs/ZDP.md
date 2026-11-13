@@ -501,8 +501,8 @@ See [ROUTING.md](ROUTING.md) ([zipline#219](https://github.com/org-zpr/zl-ziplin
 A `Stream ID Request` is accepted only from the visa's **previous hop**:
 `Visa.prevHop`, compared against the ZPR address the node has for the
 arriving link's peer. That address comes from topology (the `zprAddr` for the
-peer's verified CN) or, on a joining Zode before its first `setTopology`,
-from the bootstrap hand-off, which records its relay's address (the one
+peer's verified CN) or, on a joining Zode until a `setTopology` names its
+relay, from the bootstrap hand-off, which records its relay's address (the one
 exception to F1 in [ZODE_LINKS.md](ZODE_LINKS.md)). It never comes from
 Hello. A visa without `prevHop` (every ingress visa) never accepts one, so it
 cannot be bound for forwarding. A refused request gets an error
