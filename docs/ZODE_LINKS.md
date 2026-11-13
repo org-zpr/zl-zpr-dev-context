@@ -398,6 +398,8 @@ J10. **Fallback: a broken session means rejoin.** If a Zode's VS-API session
 
 ### Moving a live connection onto newer visas (operator: supersede and rebind)
 
+**Core tenet: visas are immutable** (operator). Once granted, a visa is never changed: not its expiry, not its binding to an actor, nothing. Renewing or upgrading a visa always means issuing a **new** visa, and the old one is revoked or left to expire.
+
 J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      five-tuple** as visas the Zode already uses for a live VS-API or VSS
      connection. A newer visa for an identical five-tuple **supersedes** the
