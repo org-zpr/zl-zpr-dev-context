@@ -466,8 +466,10 @@ each node's role straight off its position in that path:
 `Visa.prevHop` (schema `@6`, [zipline#243](https://github.com/org-zpr/zl-zipline/issues/243))
 is the **previous node's ZPR address** on the path, `path[pos-1]`. A node
 accepts a `Stream ID Request` for a visa only on the link whose peer's topology
-ZPR address equals `prevHop`; the ingress visa has none and never accepts one
-(gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
+ZPR address equals `prevHop`, or, on a joiner before its first `setTopology`,
+on the initial link whose bootstrap hand-off recorded `prevHop` as the relay's
+address (the F1 lookup in [ZODE_LINKS.md](ZODE_LINKS.md), used both ways). The
+ingress visa has none and never accepts one (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
 `Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
 each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
 whose path has fewer than two nodes has none. Core enforces it since [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).

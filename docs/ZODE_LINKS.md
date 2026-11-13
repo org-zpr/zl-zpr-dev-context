@@ -249,6 +249,10 @@ F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is 
     **up** Zode link whose peer has that ZPR address. The address is the topology
     `Link.zprAddr` of the entry matched by the peer's verified CN. It never comes
     from the Hello or anything else the peer claims about itself (gap 5).
+    The one exception is a joiner before its first `setTopology`: its initial
+    link's peer address is the relay address its bootstrap hand-off recorded
+    (see "The joiner's egress before it has topology" below). F2's
+    previous-hop check uses this same lookup, exception included.
     `find_egress_link` matches these links just as it matches local and adapter
     addresses. A next hop with no up link is `DestNotFound`, and the bind is
     refused. **An endpoint's initial link to its relay is always also an entry in
