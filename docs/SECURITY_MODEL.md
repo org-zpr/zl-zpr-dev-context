@@ -73,6 +73,10 @@ Three properties follow that are hard to get otherwise:
   revocation of the credentials that established them, revoking a visa
   terminates in-progress communication in real time.
 
+A granted visa is never changed. Replacing one means issuing a new visa, and
+a Zode keeps per-stream state beside the visa, never in it (ZODE_LINKS.md,
+"visas are immutable").
+
 ### Least privilege in the distribution itself
 
 The visa service distributes visa information **only to the nodes that need

@@ -444,11 +444,13 @@ the field) never accepts one, so it cannot be bound for forwarding (gap 7;
 Forwarding is on **Stream ID alone** (6.4 §5.14): the ingress link plus the
 Stream ID in the header determine the outbound link and the Stream ID to write.
 Nothing else is consulted; the substrate's own IP routing is invisible to ZDP.
-Stream ID 0 goes to the control plane. An unknown Stream ID is dropped and
-counted — the RFC says send `Destination Unreachable` upstream, with an
-editorial note that doing so lets a compromised upstream probe which IDs are
-live. `fastpath.rs::forward` drops silently and has a `TODO: policy
-enforcement` where the PEP's constraints should be applied.
+Stream ID 0 goes to the control plane. An unknown Stream ID is dropped
+silently and counted (`UnknownStreamId`), **by design**: the RFC says send
+`Destination Unreachable` upstream, but its own editorial note warns that doing
+so lets a compromised upstream probe which IDs are live (ZODE_LINKS.md F7). A
+stale Stream ID shows up only after a link loss or restart, and revocation plus
+the next visa request recover from that. `fastpath.rs::forward` still has a
+`TODO: policy enforcement` where the PEP's constraints should be applied.
 
 ### Compression
 
@@ -477,17 +479,23 @@ dropped.
 
 ## Implementation status
 
+**Forwarding over Zode links is implemented**
+([#251](https://github.com/org-zpr/zl-zipline/issues/251), ZODE_LINKS.md
+"Forwarding over Zode links"): egress to a Zode by its topology address, hop by
+hop binding with the loop guard, both sides of each binding recorded, a lost
+link revoking its visas locally, and `down`/`failed` reported before any visa
+request that follows. **`Stream ID Withdrawal` (5) and `Unbind Egress Stream`
+(13) are docking-session only** (F5): a Zode never sends one on a Zode link and
+refuses one that arrives there, which closes the link. It is covered by unit
+tests and core CI; no flow has crossed a Zode link in a netns run yet, which
+needs the relay join ([#252](https://github.com/org-zpr/zl-zipline/issues/252))
+and is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+
 Specified, not implemented:
 
-- **Forwarding over node-to-node links.** Zode links come up, are kept and
-  recover ([#250](https://github.com/org-zpr/zl-zipline/issues/250),
-  `zode-link-test.sh`), but no flow crosses one yet: `Stream ID Withdrawal` and
-  `Unbind Egress Stream` on a Zode link are refused
-  ([#251](https://github.com/org-zpr/zl-zipline/issues/251)). Multi-hop
-  forwarding, visa heralding, next-hop selection (6.4 §5.11.2), and route
-  distribution (§5.12) are therefore unexercised. The intermediary node's
-  `forwardOnly` stream binding (Flow setup, above) is implemented but tested
-  in-process only ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)).
+- **Visa heralding, next-hop selection (6.4 §5.11.2), and route distribution
+  (§5.12).** The visa service plans every path and seeds each Zode with its
+  hop's visa; a Zode never picks a route.
 - **Substrates other than IP/UDP** — raw links, PPP, bare Ethernet.
 - **ZARP** (6.4 §3.3.1) — type 128 reserved, no implementation.
 - **IKEv2** — constant only; Noise is what runs.
@@ -497,12 +505,14 @@ Specified, not implemented:
   are Rust struct definitions, not runtime-configurable.
 - **A2A SAIDs other than 0**, and MAC sizes other than 8 bytes.
 - **`Stream ID Request` previous-hop rule.** The visa service sets
-  `Visa.prevHop` ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  `Visa.prevHop` ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
   Today a node accepts a `Stream ID Request` from any node link.
   Reverse binding for symmetric visas is undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
-  cascade. `Stream ID Withdrawal` and `Unbind Egress Stream` exist.
+  cascade. Teardown has three causes only: expiry, a visa-service revocation,
+  and a lost link (ZODE_LINKS.md F4). `Stream ID Withdrawal` and `Unbind Egress
+  Stream` exist for docking sessions.
 - **PEP traffic constraints** — rate limits, QoS, DSCP marking, queue
   assignment. The PEP carries next-hop only.
 

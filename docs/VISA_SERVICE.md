@@ -445,7 +445,10 @@ the next policy is installed.
 Renewal covers visas the service can refresh without a new request — node-to-VS
 and VS-to-trusted-service traffic — and visas a node asks to renew with the
 re-request flag. A renewal is sent over the VSS-API as a replacement carrying
-the new visa and the ID of the one it replaces.
+the new visa and the ID of the one it replaces. **Granted visas are
+immutable**: a renewal or upgrade is always a new visa under a new ID, and a
+Zode treats an ID it already holds as the same visa (ZODE_LINKS.md, "Moving a
+live connection onto newer visas").
 
 ---
 
