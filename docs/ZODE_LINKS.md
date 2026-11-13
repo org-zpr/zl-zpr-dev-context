@@ -548,7 +548,10 @@ Decided while building it:
   no VS-API session the report fails locally at once, so a visa request never
   hangs on it. Each send is bounded by the RPC timeout, but snapshots go out one
   at a time, in order, so the loss report can also wait behind earlier sends
-  still queued (at most `REPORT_QUEUE_MAX`, each bounded the same way). Each snapshot carries
+  still queued (at most `REPORT_QUEUE_MAX`, each bounded the same way). A
+  waiting request rechecks the current loss epoch whenever the reported epoch
+  moves, so a second loss registered while it waits holds it until that report
+  has returned too (core#110 review). Each snapshot carries
   the loss epoch read just before it was taken; the reporter publishes it once
   the send returns.
 - **A loss is registered before any revocation.** `drop_peer` registers it

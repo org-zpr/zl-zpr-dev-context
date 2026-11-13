@@ -496,6 +496,10 @@ and is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 
 Specified, not implemented:
 
+- **The `Bootstrap Visas` control message** (ZODE_LINKS.md J4, #252). Designed,
+  not yet assigned: its type value and body (exactly two visas) are defined
+  here when #252 is built. core#104 used type 146; nothing in core uses it
+  today.
 - **Visa heralding, next-hop selection (6.4 §5.11.2), and route distribution
   (§5.12).** The visa service plans every path and seeds each Zode with its
   hop's visa; a Zode never picks a route.
