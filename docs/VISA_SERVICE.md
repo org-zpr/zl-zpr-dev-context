@@ -124,18 +124,21 @@ connected actor.
 ### VS-API calls added for Zodes
 
 `vs.capnp` on `feature/zodes` adds three `VSHandle` calls a node makes over its
-existing session ([#217](https://github.com/org-zpr/zl-zipline/issues/217)).
-The visa service implements `reportLinkStates`
-([#224](https://github.com/org-zpr/zl-zipline/issues/224)) and `getLoginNonce`
-([#232](https://github.com/org-zpr/zl-zipline/issues/232)). The third,
-`updateSubstrateAddr`, is schema only: capnp gives every unimplemented method
-a default body, so it returns "unimplemented".
+existing session, and the visa service implements all three:
+`reportLinkStates` ([#217](https://github.com/org-zpr/zl-zipline/issues/217),
+[#224](https://github.com/org-zpr/zl-zipline/issues/224)), `getLoginNonce`
+([#232](https://github.com/org-zpr/zl-zipline/issues/232)) and
+`requestBootstrapVisas` ([#252](https://github.com/org-zpr/zl-zipline/issues/252)).
+A fourth, `updateSubstrateAddr`, was removed in #252 without ever being
+implemented: a node's substrate address is fixed for the life of its VS-API
+session, and a new one arrives with a rejoin's `connect` or `open`. The members
+after it were renumbered as a flag day (`zl-v0.32.0-zodes.4`).
 
 | Call | Contract | Errors | Implemented by |
 |---|---|---|---|
 | `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states, replacing its previous report; the router uses a link only while both ends list each other `up`, and an end that has not reported counts as down ([ZODE_LINKS.md](ZODE_LINKS.md) rule 14; [#242](https://github.com/org-zpr/zl-zipline/issues/242), done by [#250](https://github.com/org-zpr/zl-zipline/issues/250)). A link going down revokes the visas crossing it. A **new** `failed` entry (one the node's previous snapshot did not list as `failed`) marks the pair, and the visa service leaves a marked pair out of both ends' `setTopology` until either end (re)connects its VS-API session, which clears the pair and re-sends topology to the other end (rule 13a). A `failed` report never itself sends topology. See [ROUTING.md](ROUTING.md), "Link-state reports" | `authRequired` on a dead handle; `paramError` for more entries than the node's policy-declared links, an empty `peerCn`, or a `peerCn` listed twice. A visa whose revocation fails is quarantined and retried by the visa service; the report still succeeds. An entry whose CN matches no declared peer is kept, not an error, and cannot make a link usable under the current policy | implemented, [#224](https://github.com/org-zpr/zl-zipline/issues/224), [#250](https://github.com/org-zpr/zl-zipline/issues/250); node side [#250](https://github.com/org-zpr/zl-zipline/issues/250) |
-| `updateSubstrateAddr @9 (addr :SockAddr) -> (res :OkOrError)` | The node's substrate address changed; no re-authentication; the visa service re-sends `setTopology` to the node's peers | `paramError`: unspecified IP or port 0 | [#227](https://github.com/org-zpr/zl-zipline/issues/227) |
-| `getLoginNonce @10 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
+| `getLoginNonce @9 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
+| `requestBootstrapVisas @10 (peerCn :Text) -> (res :Result(BootstrapVisas))` | The relay asks for the bootstrap visas of a Zode joining over an initial link to it, naming the joiner by the CN on its verified link certificate ([ZODE_LINKS.md](ZODE_LINKS.md) J2, J3, J6). The joiner's address is the one the relay's topology gives that CN. `BootstrapVisas { peer, relay }` holds two visas in each list, the joiner's VS-API flow in both directions, forward first: `peer` for the relay to hand on in ZDP message 146, `relay` for it to install. Every call is a join: see "Bootstrap visas, on demand" below | Checked in this order, so a caller that may not ask learns nothing about the CN: `authRequired` on a dead handle; `invalidOperation` when the caller is not the node the visa service docks on, whatever `peerCn` it sent; `notFound` when `peerCn` is not valid UTF-8 or names no peer in the caller's topology (an unknown CN, the caller's own, an empty one, or a pair left out under rule 13a); `internal` when the mint fails. `vs.capnp` also lists `temporarilyUnavailable`, which the visa service never sends | [#252](https://github.com/org-zpr/zl-zipline/issues/252) |
 
 How the nonce is checked on `reauthorize`, and the exception to the exact-set
 rule it serves, are under *A Zode's own login and logout* below.
@@ -449,6 +452,46 @@ the new visa and the ID of the one it replaces. **Granted visas are
 immutable**: a renewal or upgrade is always a new visa under a new ID, and a
 Zode treats an ID it already holds as the same visa (ZODE_LINKS.md, "Moving a
 live connection onto newer visas").
+
+**A Zode's core visas** are the three it needs to talk to the visa service at
+all: its VS-API pair (`node:0 -> vs:VSAPI` and back) and the visa service's
+VSS visa to it (`vs:0 -> node:VSS`). The visa service issues them itself
+([#252](https://github.com/org-zpr/zl-zipline/issues/252), ZODE_LINKS.md J5a,
+J5b, J9; `vs/src/core_visas.rs`):
+
+- **J5a.** A new VS-API pair on every `authenticate` and every `open`. If the
+  first try fails (on a first join the node's link to the relay is not
+  routable until both ends have reported it), it is retried every second, for
+  that session only, until it succeeds, the session is replaced, or the
+  bootstrap lifetime (5 minutes) has passed.
+- **J5b.** A new VSS visa on every `registerVss`, even when an older one is
+  still installed. The answer to `registerVss` carries only the node's copy of
+  it.
+- **J9.** On every VSS heartbeat (800 ms), for each core five-tuple, the
+  newest visa still grantable to the node is checked, and once it has passed
+  2/3 of its lifetime a new one is minted. The check runs without the
+  issuance lock and takes it only when a renewal is due. A failed mint or push
+  is retried on the next heartbeat. A node with no VS-API session gets none.
+  The new visa is pushed as an ordinary install. Nothing names the visa it
+  replaces: the Zode matches the two by five-tuple (J11).
+
+All three mint through the ordinary visa-request pipeline, evaluated by
+policy, never built by hand. Each is requested as if by the ingress Zode of
+its path and **delivered ingress last**: every other Zode on the path gets its
+copy by VSS push first, and the ingress copy is pushed only once all of them
+have acked (`VisaMgr::deliverable_visas_for_node`). One copy cannot wait for a
+push: the registering Zode's own copy of its new J5b VSS visa rides in the
+`registerVss` answer, because the VSS connection needs it before any push can
+arrive. The ingress then
+supersedes the older visa and rebinds the live stream (ZODE_LINKS.md J11),
+and every other hop already holds the new visa. **Issuing or renewing a core
+visa never revokes the one it supersedes**: superseded visas expire on their
+own. Otherwise core visas are revoked like any visa (a policy that denies
+them, a link going down under them), and all of a node's core visas are
+revoked when its join ends, by a rejoin's teardown or a disconnect.
+**Core visas carry no session keys** (an empty `KeySet`), because the
+bootstrap visas they supersede cannot carry any and J11 refuses a rebind
+across a key change (see "Design decisions").
 
 ---
 
@@ -911,27 +954,97 @@ unbound, like the attribute-store clients. Review of the #228 docs found the
 gap.
 ([zl-zipline#240](https://github.com/org-zpr/zl-zipline/issues/240))
 
-### Bootstrap visas: relay-only, next to the peer's CN
+### Bootstrap visas, on demand
 
-> **Superseded by design, still what runs.** #252's approved design
-> (ZODE_LINKS.md "Joining through the relay", J1–J8) replaces this: the relay
-> requests a joiner's bootstrap visas on demand when its initial link comes up,
-> and `Link.visas` is removed from the schema (J8). Nothing of that is built
-> yet, so this section describes the code as it runs today, not the contract
-> to build against. New work follows ZODE_LINKS.md.
-
-A node that has not connected reaches VSAPI on bootstrap visas the visa service
+A Zode that has not connected reaches VSAPI on bootstrap visas the visa service
 mints from the policy-declared peering (`vs/src/visa_bootstrap.rs`; ROUTING.md,
-"Bootstrap routing"). For Zodes this is the join path the code implements today, under three
-rules: only the visa service mints them; only the relay — the node the visa
-service docks on — receives them, pushed in `Link.visas` or pulled when it sees
-the peer's traffic first; and they ride only on the link whose `zprAddr` and
-`peerCn` name the joining peer. A non-relay neighbour of an unconnected node
-gets the link and no visas, so an endpoint never relays a joiner's traffic.
-`peerCn` itself comes from the peer's node join policy
-(`Policy::node_cn_for_addr`). A peer whose address has no CN in policy — no node
-join policy pins that address together with a `device.zpr.adapter.cn`, or two
-pin it with different CNs — is left out of the topology message. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+"Bootstrap routing"). Since [#252](https://github.com/org-zpr/zl-zipline/issues/252)
+they are minted only when the relay asks, with `requestBootstrapVisas`, as the
+joiner's initial link comes up (ZODE_LINKS.md J2, J3). Topology carries none
+(`Link.visas` is gone), and nothing is minted ahead of time or from a joiner's
+traffic: a VSAPI packet about a peer with no actor is evaluated like any other
+and denied. The rules:
+
+- **Only the relay may ask**, the node the visa service docks on, and only for
+  a peer its topology names by `peerCn`. The joiner's address is the one that
+  topology gives the CN, never anything the joiner claims. A non-relay
+  neighbour of an unconnected node never gets bootstrap visas, so an endpoint
+  never relays a joiner's traffic.
+- **Only the joiner's VS-API flow**, one visa per direction, with a 5-minute
+  lifetime (`BOOTSTRAP_VISA_LIFETIME`, gate g89 q3) and no session keys, even
+  if the joiner's A2A key is still stored from an earlier join: it may have
+  restarted with a new one. The path is stitched from the peering,
+  `[joiner, relay]`, not routed. Each visa is recorded installed on both Zodes
+  at once, so ingress-last delivery never holds the relay's copy back.
+- **Every request is a join** (J6) and mints new visas, with no dedup. It first
+  ends the joiner's previous join (`end_previous_join`): every visa between the
+  joiner and the visa service is revoked (bootstrap pairs, VS-API pairs, VSS
+  visas on any port).
+- **The rejoin rule.** If the joiner still has a live VS-API session, the
+  relay's request is the proof that it is gone, because a peer has one link at
+  a time (ZODE_LINKS.md rule 5). The visa service ends that session: a new
+  session id is stamped, so the old handles fail, and its VSS worker is
+  stopped. Its link-state reports are forgotten, so its links are down until it
+  reports again, and the visas crossing a link that went down are revoked.
+  Every other visa installed on the joiner is marked not installed, so a
+  `reconnect` gets it pushed again. The node actor and its adapters stay, so
+  `reconnect` still works (gate g89 q5).
+
+The checks, the teardown and the mint run as one step under the core-visa
+issuance lock and then the topology lock, so they are atomic against connect,
+disconnect, core-visa issuance and policy passes. The old VSS worker is stopped
+after both locks are released. `peerCn` itself comes from the peer's node join
+policy (`Policy::node_cn_for_addr`). A peer whose address has no CN in policy —
+no node join policy pins that address together with a `device.zpr.adapter.cn`,
+or two pin it with different CNs — is left out of the topology, so a request
+for it is `notFound`.
+([#221](https://github.com/org-zpr/zl-zipline/issues/221),
+[#252](https://github.com/org-zpr/zl-zipline/issues/252))
+
+**A sweep rechecks a bootstrap visa against its peering, not its route**
+(gate g94 q1). A policy or attribute sweep asks what the mint asked: the visa's
+holder is still the relay, and the relay's topology still names the joiner by
+the CN policy gives the joiner's address. It does not route the visa. A rejoin
+forgets the joiner's link reports, so a routed recheck in that window would
+revoke the very pair the rejoin needs. A policy that drops the peering or the
+joiner's CN revokes the pair. Known limit: the visa does not record its CN, so
+a policy that only renames the joiner keeps the pair for at most its 5 minutes.
+
+**A node's core visas carry no session keys** (gate g100). Every visa between
+the visa service and a node actor, in either direction, is minted with an empty
+`KeySet` (`VisaMgr::session_key_for`). The bootstrap visas cannot carry keys,
+because the joiner has not authenticated and so has no A2A key registered, and
+a Zode refuses to rebind a live stream onto a visa whose keys differ (J11). So
+the J5a, J5b and J9 visas that supersede them carry none either; otherwise a
+joiner would rejoin every 5 minutes. Visas between two nodes keep their keys.
+That traffic is protected by the VS-API and VSS TLS alone, and that TLS does
+not authenticate either end yet (SECURITY_MODEL.md, "Design decisions";
+[#259](https://github.com/org-zpr/zl-zipline/issues/259)).
+
+### A policy pass never waits on a node's VSS
+
+The policy pass runs on the single event-queue worker, so anything it waits on
+delays the next policy install. Until #252 it waited for each node's
+`setTopology`, `setServices` and `requestAuthentication`. A policy that removes
+a joiner's link to the relay cuts the joiner off, and each call to it then
+waited out the 10 s RPC timeout: the next install, even one restoring the link,
+was applied 21–50 s later, or in some runs not for minutes. #252 made this
+reachable, because a joiner now has a VSS connection. The invariant now (gate
+g101; `vs/src/event_mgr.rs`):
+
+- **Each node's pushes run in a detached task of their own**, in order:
+  topology, then the services list, then (once the obligation is recorded) the
+  re-authentication request. A slow or unreachable node delays only its own
+  pushes. Overlapping passes are harmless: a `setTopology` or `setServices`
+  command makes the worker re-send the current state at its next heartbeat.
+- **No push to a node the pass cut off.** A node at the end of a link the pass
+  took down, with no route left from the node the visa service docks on
+  (`nodes_cut_off`), gets nothing; its VSS worker is stopped. It finds its
+  session broken and rejoins (ZODE_LINKS.md J10).
+- **Stopping a VSS worker never waits on it**
+  (`ConnectionControl::stop_vss_worker` queues the stop from a detached task),
+  for the policy pass, a disconnect and a rejoin's teardown alike. No lock is
+  held across a VSS call.
 
 ### Deferred
 
@@ -987,6 +1100,11 @@ No tracker issues are filed for these unless linked.
 - **`Visa.prevHop` is set but not enforced yet.** The visa service sets it
   ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core accepts a `Stream ID Request` from any node link until
   [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
+- **Renewal is a new visa matched by five-tuple, not a replacement message.**
+  The design sends a renewal as a replacement naming the visa it replaces.
+  For a Zode's core visas the visa service pushes the new visa as an ordinary install, and the Zode
+  supersedes the older visa with the same five-tuple (ZODE_LINKS.md J9, J11;
+  [#252](https://github.com/org-zpr/zl-zipline/issues/252)).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root
@@ -1024,6 +1142,9 @@ No tracker issues are filed for these unless linked.
 | Policy lifecycle | `vs/src/policy_mgr.rs`, `visa_reconciler.rs` |
 | Connection admission | `vs/src/connection_control.rs`, `auth.rs`, `login_nonce.rs` |
 | Routing | `vs/src/topology_mgr.rs`, `router.rs` |
+| Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
+| A node's core visas (J5a, J5b, J9), ingress-last delivery | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`) |
+| Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
 | State | `vs/src/db/` |
 | Admin API | `vs/src/admin_service.rs`, `admin_apikeys.rs`, `admin-http-api.txt` |

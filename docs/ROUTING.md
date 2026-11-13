@@ -291,7 +291,8 @@ its links up, and what it reports when, is
   point that clears a node's marks, when something about its pairs changed.
   Today that is the node (re)connecting its VS-API session (`authenticate` and
   `open`), and the other end of each cleared pair is sent `setTopology` again.
-  #227's `updateSubstrateAddr` is meant to call it too. The marks live in
+  A changed substrate address also arrives only that way (see "Substrate
+  address changes"). The marks live in
   memory: a restart forgets them, so every link is proposed again.
 - **What a change does.** A link that is not usable stays in the graph and in
   persisted state with its id, attributes and cost; both route queries simply
@@ -336,6 +337,16 @@ its links up, and what it reports when, is
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
+- **A node the pass cut off gets nothing.** A policy pass pushes each node's
+  topology, services and re-authentication request from a detached task of
+  its own, so a slow node never delays the pass or the install queued behind
+  it. A node at the end of a link the pass took down, with no route left from
+  the node the visa service docks on (`event_mgr::nodes_cut_off`), is sent
+  nothing: its VSS worker is stopped, and the node rejoins through its relay
+  (ZODE_LINKS.md J10). Pushing to it would only wait out each call's timeout
+  over a link that is gone (gate g101,
+  [#252](https://github.com/org-zpr/zl-zipline/issues/252); VISA_SERVICE.md,
+  "A policy pass never waits on a node's VSS").
 - **One topology operation at a time.** The visa service runs its topology
   operations one at a time under a single lock, each held from the operation's
   first read to its last local write, including the visa revocations that write
@@ -366,18 +377,19 @@ its links up, and what it reports when, is
   reconnect; `restore_from_state` installs the persisted links down and
   revokes the persisted visas over them.
 
-### Substrate address changes (schema only)
+### Substrate address changes
 
-`VSHandle.updateSubstrateAddr(addr :SockAddr)` tells the visa service that the
-node's substrate address — the address peers dial, as in the `substrate_addr`
-connect parameter — has changed. It travels over the existing VS-API session,
-with no re-authentication. The visa service updates the node's address and
-re-sends `setTopology` to the node's peers; an unspecified IP or port 0 is a
-`paramError`. This is how an endpoint whose policy entry has no substrate
-address (see "From `.zplc` to the visa service") keeps its peers current when
-it changes networks. Not implemented: the node side is
-[#223](https://github.com/org-zpr/zl-zipline/issues/223), the visa-service side
-[#227](https://github.com/org-zpr/zl-zipline/issues/227).
+A node's substrate address — the address peers dial, as in the
+`substrate_addr` connect parameter — is fixed for the life of its VS-API
+session. An endpoint that changes networks loses its initial link, redials
+from the new network and rejoins (ZODE_LINKS.md rule 11a), and the new session
+carries the new address in its `connect` or `open`. There is no call to change
+it inside a session: `VSHandle.updateSubstrateAddr` was removed from the
+schema in [#252](https://github.com/org-zpr/zl-zipline/issues/252), after the
+node side ([#223](https://github.com/org-zpr/zl-zipline/issues/223)) was
+closed without it. Proposing links to a peer at the address it reported,
+rather than one from policy, is
+[#255](https://github.com/org-zpr/zl-zipline/issues/255).
 
 ---
 
@@ -469,6 +481,10 @@ interface. `FwdPep.symmetric` exists in the schema; the code always sets
 On policy install, `visa_reconciler` re-checks each live visa via
 `recheck_visa_allowed`: denied → revoke; still allowed but the newly derived
 path differs from the stored one → **revoke**. Routes are never edited in place.
+A bootstrap visa is the exception: its path was stitched from the peering,
+not routed, so it is rechecked against the peering, not the route, and kept
+while the relay's topology still names the joiner (gate g94; see "Bootstrap
+routing").
 
 ---
 
@@ -526,17 +542,19 @@ is closed and forgotten (ZODE_LINKS.md rule 12). A new link this Zode owns is
 dialed (rule 6), and a `failed` or `down` link still in the topology gets one
 more attempt (rule 13); links that are up are untouched. The owner is the end
 with the lower ZPR address; a relay owns nothing and never dials. So a node is
-told its peers, their substrate addresses, their ZPR addresses and CNs — and,
-on the relay only, holds bootstrap visas for joining peers (see "Bootstrap
-routing") — and brings its links up from that. Forwarding over a Zode link is
+told its peers, their substrate addresses, their ZPR addresses and CNs, and
+brings its links up from that. Topology carries no visas: when a joiner's link
+to the relay comes up, the relay asks the visa service for the joiner's
+bootstrap visas (see "Bootstrap routing"). Forwarding over a Zode link is
 implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251),
 ZODE_LINKS.md "Forwarding over Zode links"): a visa's next hop resolves to the
 up Zode link whose peer has that topology address, and an intermediary node
 binds a `forwardOnly` visa from one Zode link to the next. It is covered by unit
-tests and core CI only. No flow has crossed a Zode link in a netns run yet,
-because Zodes other than the visa service's own get a VS-API session only with
-the relay join ([#252](https://github.com/org-zpr/zl-zipline/issues/252)); that
-scenario is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+tests and core CI only. With the relay join
+([#252](https://github.com/org-zpr/zl-zipline/issues/252)) every Zode gets its
+own VS-API session, and a joiner's VS-API flow crosses its link to the relay
+in netns; a flow between two Zodes across a Zode link is
+[#254](https://github.com/org-zpr/zl-zipline/issues/254).
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -612,47 +630,43 @@ or merely as an employee.
 
 ## Bootstrap routing
 
-> **Superseded by design, still what runs.** #252's approved design
-> (ZODE_LINKS.md "Joining through the relay", J1–J8) replaces this: the relay
-> requests a joiner's bootstrap visas on demand when its initial link comes up,
-> and `Link.visas` is removed from the schema (J8). Nothing of that is built
-> yet, so the section below describes the code as it runs today, not the
-> contract to build against. New work follows ZODE_LINKS.md.
-
 A node that is not yet connected cannot be evaluated by policy — it has no
 actor, and no route until its link is up — but it needs to reach the visa
-service's VSAPI port to connect at all. `visa_bootstrap` resolves the circularity:
+service's VSAPI port to connect at all. `visa_bootstrap` resolves the
+circularity, on demand
+([#252](https://github.com/org-zpr/zl-zipline/issues/252); ZODE_LINKS.md
+"Joining through the relay"):
 
-- A `setTopology` message **to the relay** — the node the visa service docks
-  on — mints, per link, **two** visas for the *peer* (not the recipient): one for
-  the peer's own SYN to VSAPI, one for the visa service's reply. Both are needed
-  — with only the forward visa the reply is dropped, since no dock PEP matches it
-  and no node on the forward path has a route back.
-- They ride only in the `Link.visas` of the link whose `zprAddr` and `peerCn`
-  name the joining peer, so the relay can bind them to the link whose
-  certificate carries that CN (node side:
-  [#222](https://github.com/org-zpr/zl-zipline/issues/222)).
-- The relay holds them and hands them off when the peer shows up. The peer's
-  own link is not in the router yet, so it is stitched on from the peering
-  rather than routed.
-- The relay may also *pull* its own copy when it sees the peer's traffic before
-  its queued copy landed (`visa_for_future_peer_request`). Any other node gets
-  neither: a link from a non-relay node to an unconnected peer carries
-  `peerCn` and no bootstrap visas, so an endpoint never relays a joiner's
-  traffic. Joining across more than one hop is deferred until the visa service
-  runs on its own Zode.
-- Minting deliberately bypasses policy evaluation: **a peering declared in
-  policy is itself the authorization** for that peer to reach VSAPI. Only the
-  visa service mints bootstrap visas; a node accepting none from a peer (none
-  in Hello) is [#222](https://github.com/org-zpr/zl-zipline/issues/222).
-- An already-connected peer yields no bootstrap visas — it has a VSAPI session
-  and asks for what it needs.
-
-Only the visa-service side of this runs today: minting the bootstrap visas
-and placing them in `Link.visas`
-([#221](https://github.com/org-zpr/zl-zipline/issues/221)). The relay's
-node-side hand-off of them to the joiner is not implemented, and #252 replaces
-the whole path with on-demand bootstrap visas (see the note above).
+- **The relay hands off.** When a joiner's initial link comes up, the relay
+  (the node the visa service docks on) calls `requestBootstrapVisas` with the
+  CN from the joiner's verified certificate. The visa service mints **two**
+  visas: one for the joiner's own SYN to VSAPI, one for the visa service's
+  reply. Both are needed: with only the forward visa the reply is dropped,
+  since no dock PEP matches it and no node on the forward path has a route
+  back. The relay installs its own copies, bound to that link, and hands the
+  joiner its copies in ZDP message 146.
+- **The joiner's address comes from the relay's topology**, the `zprAddr` it
+  gives that CN, never from the joiner.
+- **Stitched, not routed.** The joiner's link is not in the router yet (it has
+  not reported), so the path is stitched from the peering, `[joiner, relay]`,
+  reversed for the reply. Each Zode's copy is cut to its role as usual: the
+  joiner's forward copy has a `FwdPep` whose next hop is the relay, and the
+  relay's copy of the forward visa has `prevHop` set to the joiner. Until its
+  first `setTopology` names the relay, the joiner finds its egress for that
+  next hop on the initial link.
+- **Only the relay.** Any other caller is refused, so a non-relay neighbour of
+  an unconnected node never carries a joiner's traffic. Joining across more
+  than one hop is deferred until the visa service runs on its own Zode.
+- **The peering is the authorization.** Minting bypasses policy evaluation,
+  and a policy sweep rechecks the visas against the peering, not the route
+  (gate g94).
+- **Short-lived.** They live 5 minutes. Once the joiner has authenticated, the
+  visa service issues its own VS-API visas, which are routed like any visa and
+  supersede the bootstrap pair (ZODE_LINKS.md J5a, J11).
+- **Every request is a join** and mints new visas, after revoking every visa
+  between the joiner and the visa service. Nothing is minted ahead of time or
+  from the joiner's traffic, and topology carries no visas (`Link.visas` is
+  gone).
 
 ---
 
@@ -749,6 +763,9 @@ from the visa service through the relay. `Policy.transitNodes` was the
 alternative, but it stays empty until the compiler fills it
 ([#226](https://github.com/org-zpr/zl-zipline/issues/226)), so nothing could
 join until then. ([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+Since #252 the rule is enforced where the visas are asked for: only the relay
+may call `requestBootstrapVisas`
+([#252](https://github.com/org-zpr/zl-zipline/issues/252)).
 
 **Reports are stored by CN and resolved when a link is evaluated.** Resolving a
 `peerCn` to an address when the report arrives would drop the relay-link entry
@@ -890,20 +907,28 @@ every multi-hop path gets `NoRoute`. So the compiler minor and
 
 ## Implementation status
 
-Specified or designed, not working:
+Implemented on `feature/zodes`:
 
 - **Node-side topology** drives Zode links
   ([#250](https://github.com/org-zpr/zl-zipline/issues/250), see
-  [ZODE_LINKS.md](ZODE_LINKS.md) "Implementation status"). Before
-  [#252](https://github.com/org-zpr/zl-zipline/issues/252) only the Zode that
-  hosts the visa service has a VS-API session, so only it receives
-  `setTopology` and reports; other Zodes reach it over their initial link.
+  [ZODE_LINKS.md](ZODE_LINKS.md) "Implementation status").
+- **The relay join**
+  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)): every Zode gets
+  a VS-API session over its initial link, so each receives `setTopology` and
+  reports its own links. Bootstrap visas are requested on demand (see
+  "Bootstrap routing"), `Link.visas` is gone, and a policy pass sends nothing
+  to a node it cut off. `zode-link-test.sh` runs the join and the rejoin in
+  netns.
+
+Specified or designed, not working:
+
 - **Paths through an intermediary node, end to end.** `forwardOnly` visas
   install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
   and forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
   but only unit tests and core CI exercise it: no such path has run end to
-  end in a netns run. That needs the relay join ([#252](https://github.com/org-zpr/zl-zipline/issues/252))
-  and is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+  end in a netns run. The relay join it needed is in place
+  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)); the scenario is
+  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 - **Non-transit routing in the visa service.** Path computation does not read
   `Policy.transitNodes` yet (see the `transitNodes` item below), so it may route through any
   node. Until it does, a node with `forwarding` off refusing `forwardOnly` visas
@@ -916,11 +941,9 @@ Specified or designed, not working:
 - **Link/route liveness.** The visa service acts on `reportLinkStates` (see
   "Link-state reports"; [#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   and Zodes send it ([#250](https://github.com/org-zpr/zl-zipline/issues/250));
-  `zode-link-test.sh` checks the relay's reports in netns. The end-to-end
-  check — block a direct link, the flow moves to the relay — waits for
-  forwarding over Zode links and a second VS-connected Zode
-  ([#251](https://github.com/org-zpr/zl-zipline/issues/251),
-  [#252](https://github.com/org-zpr/zl-zipline/issues/252)) and the demo
+  `zode-link-test.sh` checks both ends' reports in netns. The end-to-end
+  check — block a direct link, the flow moves to the relay — is
+  [#254](https://github.com/org-zpr/zl-zipline/issues/254), and the demo
   integration test
   ([#222](https://github.com/org-zpr/zl-zipline/issues/222),
   [#231](https://github.com/org-zpr/zl-zipline/issues/231)). ZRFC 6.4 §5.12
@@ -941,17 +964,11 @@ Specified or designed, not working:
   substrate address until the visa service fills it from the node's report. It
   does not read `transitNodes`, so path computation still routes through any
   node ([#227](https://github.com/org-zpr/zl-zipline/issues/227)).
-- **`Link.peerCn`, `reportLinkStates` and `updateSubstrateAddr`** are in
-  `vs.capnp` on `feature/zodes`
-  ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The visa service
-  fills `peerCn` from policy
-  ([#221](https://github.com/org-zpr/zl-zipline/issues/221)), and Zodes use it to
-  accept links and send `reportLinkStates`
-  ([#250](https://github.com/org-zpr/zl-zipline/issues/250)). The visa service
-  answers `updateSubstrateAddr` with the generated default ("unimplemented"),
-  and the node does not send it; that is
-  [#223](https://github.com/org-zpr/zl-zipline/issues/223) and
-  [#227](https://github.com/org-zpr/zl-zipline/issues/227).
+- **A node's own substrate address**, reported in `connect` or `open`, is not
+  used for its links yet
+  ([#255](https://github.com/org-zpr/zl-zipline/issues/255)); see "Substrate
+  address changes". `updateSubstrateAddr` was removed from `vs.capnp` in
+  [#252](https://github.com/org-zpr/zl-zipline/issues/252).
 
 Also note that ZRFC 6.4 assigns route generation to the **Admin Service**, which
 distributes `(egress address, next hop)` routes to docks and forwarders as a
@@ -976,7 +993,9 @@ distributes next hops **per visa** instead. Nodes hold no routing table at all.
 | DNS resolution of substrate hostnames | `vs/src/policy_mgr.rs` (`PolicyResolver`) |
 | Docking-node resolution, route selection, `NoRoute` | `vs/src/visa_policy.rs` |
 | Path orientation, per-node visa actualization, re-check | `vs/src/visa_mgr.rs` |
-| Bootstrap visas for unconnected peers | `vs/src/visa_bootstrap.rs` |
+| Bootstrap visas for a joining peer (`requestBootstrapVisas`) | `vs/src/visa_bootstrap.rs`, `vs/src/visa_mgr.rs` (`mint_bootstrap_visa`) |
+| Policy-pass pushes; nodes cut off by a removed link | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
+| Node: the relay's request and the joiner's hand-off (ZDP 146) | `zl-zpr-core/adapter/ph/src/bootstrap_handoff.rs` |
 | Link install on node connect | `vs/src/vsapi_worker.rs` |
 | `setTopology` send path | `vs/src/vss_worker.rs` |
 | Address pools, AAA prefixes | `vs/src/net_mgr.rs` |
