@@ -1,8 +1,11 @@
 # Zode links: lifecycle (v1)
 
-**Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a, on
-`feature/zodes`). Rules 11a and 16 come with #252. See "Implementation status"
-for where the code lives and what it does differently.
+**Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a) and for
+#251, forwarding over Zode links (F1–F8, except F2's `prev_hop` check, which is
+#253), on `feature/zodes`. Rules 11a and 16
+and the relay join (J1–J11) come with #252: designed and approved, not yet
+implemented. See "Implementation status" for where the code lives and what it
+does differently.
 
 This document says how two Zodes bring up, keep, lose and recover a link between
 them. It replaces the link handling built in core#104 (closed), which grew
@@ -220,6 +223,207 @@ layer from scratch:
   re-proposed link from being dropped before it is ever tried. *(Agreed between core
   and the visa service while implementing #250, from a Copilot review finding on visaservice#66.)*
 
+## Forwarding over Zode links (#251, design approved 2026-11-12, implemented)
+
+The link layer above decides **which links exist**. This section covers how traffic
+**crosses** them.
+
+**The visa service drives all forwarding.** It plans each path and seeds every
+Zode on it with that hop's visa: the forward-only visa and its next hop, plus
+`prev_hop` since #245. A Zode never picks a route and never agrees teardown with
+a neighbour. It does what its visas say.
+
+### Rules
+
+F1. **Egress to a Zode.** When a visa's next hop is another Zode, the egress is the
+    **up** Zode link whose peer has that ZPR address. The address is the topology
+    `Link.zprAddr` of the entry matched by the peer's verified CN. It never comes
+    from the Hello or anything else the peer claims about itself (gap 5).
+    `find_egress_link` matches these links just as it matches local and adapter
+    addresses. A next hop with no up link is `DestNotFound`, and the bind is
+    refused. **An endpoint's initial link to its relay is always also an entry in
+    the endpoint's `setTopology`**, carrying the relay's `zprAddr` and `peerCn`, so
+    F1 can always find the relay. That is the path F6's recovery depends on. *(Coordinator call, builder check.)*
+F2. **Binding.** Streams bind hop by hop as today: a `Stream ID Request` for the
+    `visa_id` walks down the path, and each Zode fills its forwarding (PFT) entry
+    when the answer comes back. Keep the loop guard (egress == ingress is
+    refused) and refuse when transaction IDs run out, instead of panicking. #253
+    adds the `prev_hop` check: a request is accepted only from the visa's
+    previous hop.
+F3. **Both sides of a binding are recorded.** Each binding remembers its ingress
+    link and its egress link. Then rule 9 (a lost link clears everything tied to
+    it) clears entries on **both** sides, so no forwarding entry points at a dead
+    or reused link ID. Losing either side **revokes the visa locally**, not just
+    its binding. So at the Zode where a flow starts, the next packet finds no visa
+    and F6 applies. *(Coordinator call, builder check.)*
+F4. **Teardown has exactly three causes.**
+    - The visa **expires**.
+    - The visa service **revokes** it. Only the visa service tears a binding down
+      administratively, and it tells every Zode on the path directly with a VSS
+      revoke. A link going down causes this too (#224).
+    - A **link drops**: local cleanup under rule 9, a `down` report, then the
+      revocation above.
+F5. **No Zode-to-Zode teardown messages.** On Zode links, `Stream ID Withdrawal`
+    (ZDP type 5) and `Unbind Egress Stream Indication` (type 13) are neither sent
+    nor accepted. Zodes don't use them with each other: the existing NodeToNode
+    handlers and the `node::unbind_stream` send path are **removed**, not fixed.
+    The message types stay for docking sessions.
+F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
+    finds no visa and sends a `visaRequest`. The visa service plans a route that
+    avoids the dead link, usually through the relay. No other recovery signal
+    exists. The race where the request beats the `down` report can't happen for
+    the Zode that saw the link drop, because its report and its request are
+    ordered on one VS-API session. A `down` or `failed` transition is reported
+    **at once**, skipping the reporter's coalescing window, and any `visaRequest`
+    made after a link loss goes out only after that report has been sent. Other
+    Zodes lose their visa only after the visa service already knows the link is
+    down. *(Coordinator call, builder check: the 100 ms coalescing would
+    otherwise let the request overtake the report.)*
+F7. **An unknown Stream ID on a Zode link is dropped silently** and counted.
+    This deliberately departs from the RFC's `Destination Unreachable`, for the
+    reason the RFC's own editorial note gives: answering would let a compromised
+    upstream probe which stream IDs are live. A stale stream ID shows up after
+    a link loss or restart, or on a healthy link when expiry or revocation
+    removed the downstream entry before the upstream stopped sending; F4 and
+    F6, and the upstream's own expiry, already recover from all of these.
+F8. **One-address endpoint.** A Zode's own traffic, sent from the address it also
+    authenticates with, leaves through a Zode link under F1. Expected to need
+    tests only.
+
+### Acceptance (#251)
+- Unit tests for F1 (egress by topology address, up links only, Hello addresses
+  ignored), F2's guards, and F3 on both sides of a link loss. Also a test that
+  a withdrawal or unbind arriving on a Zode link is refused and logged.
+- Netns, modelled on the sj branch's `two-node-test.sh`: two Zodes on a direct
+  link ping across it under their own identities, the link is dropped, and the
+  flow re-routes through the relay after the revoke and re-request.
+
+### Order
+#251's code and unit tests can land before #252. Its netns acceptance needs
+Zodes with their own VS-API sessions, which only #252's relay join provides. So
+that scenario moves to #254, after #252, the same way #250 deferred its two-Zode
+scenarios. *(Coordinator call, builder check.)*
+
+### Prior art
+`org-zpr/zpr-core` branch `sj/link-state-inter-node` routed between nodes the
+same way: it filled the peer's actor addresses so `find_egress_link` matched, and
+it relied on visa-service revocation for teardown. It took the peer address from
+the Hello, which F1 forbids. #250 replaces its link-layer rework.
+
+## Joining through the relay (#252, design approved 2026-11-12, not implemented)
+
+**Bootstrap visas are requested on demand, not stocked ahead of time.** The relay
+already has a VS-API session, so it asks for a joining Zode's bootstrap visas
+when that Zode's initial link comes up. This is the same idea as a node acting
+for an adapter that docks with it. The visa service no longer keeps bootstrap visas
+for offline Zodes in topology.
+
+### Steps
+
+J1. **The link comes up.** The joiner dials its configured relay (an initial
+    link). The relay verifies the joiner's certificate and accepts the link only
+    if that CN is in its topology (rule 4). The joiner starts with an empty VS-API
+    visa table.
+J2. **The relay requests the bootstrap visas.** Once the link is up, the relay
+    sends a `visaRequest` over its own VS-API session for joiner ↔ visa
+    service:VSAPI, in both directions. The request names the joiner by its
+    **link-verified CN**. The joiner's ZPR address is the relay's topology
+    `zprAddr` for that CN, never anything the joiner claims.
+J3. **A narrow rule in the visa service.** A relay may request on behalf of a peer
+    with no VS-API session only for a CN in that relay's topology, and only to
+    the visa service's VSAPI port. The visa service mints these visas from the
+    policy-declared peering, the same authorization `visa_bootstrap.rs` uses today.
+    Only the timing changes: they are minted on request instead of pushed ahead of
+    time. They are **short-lived**: they only have to last through
+    authentication.
+J4. **The hand-off.** The relay sends the two visas in the `Bootstrap Visas`
+    message right after Hello. The joiner keeps the strict checks: initial link
+    only, no VS-API session yet, exactly two visas, the right five-tuple, Active,
+    and never inside Hello.
+J5. **Authentication.** The joiner authenticates as a node over the bootstrap
+    visas, or reconnects (`reconnect` vs `reset`: the visa service decides, R16).
+    - **J5a.** When it succeeds, the visa service issues the Zode its **own VS-API
+      visas** (Zode ↔ visa service:VSAPI, both directions), bound to the
+      authenticated node, with a normal lifetime. The Zode switches to them at
+      once.
+    - **J5b.** On `registerVss`, the visa service issues the **VSS visa** (visa
+      service → Zode's VSS port), as today.
+    - **J5c.** The bootstrap visas are left to expire. They only carried the
+      authentication exchange.
+J6. **Every return is a join** (rule 11a). A new initial link means a new request
+    and a new hand-off. Nothing waits in the visa service for an offline Zode, so
+    bootstrap visas expiring while a Zode is away is never a problem.
+J7. **If the relay can't reach the visa service**, it can't request visas. It
+    closes the link instead of handing off, and the joiner retries with its
+    initial-link backoff.
+J8. **`Link.visas` is removed from the schema.** Topology no longer carries
+    bootstrap visas: vsapi, then a common tag, then the pins move together (BUILD.md
+    rule 6).
+
+### Settled after the builder check *(coordinator calls)*
+
+- **The joiner's egress before it has topology.** Bootstrap visas are bound to
+  the initial link they arrive on. The joiner records the relay's ZPR address
+  from the forward bootstrap visa's next hop, as that link's peer address.
+  This is the one exception to F1's "address from topology", and it holds only
+  until the Zode's first `setTopology`, which then includes the relay (F1).
+- **Who may request on someone's behalf (J3).** In v1 that is only **the node the
+  visa service docks on**: one relay, one hop from the visa service. This
+  matches `visa_bootstrap.rs` and g44 q3. A Zode reached over a direct link never
+  qualifies, so the non-transit rule holds. Multiple relays, and relays that
+  don't host the visa service, are deferred.
+- **A rejoin before the visa service has noticed the old session is gone.** The
+  relay's on-behalf request is the proof: one link per peer (rule 5) means the
+  relay holds no other live link for that CN. So the visa service tears down
+  the old session state and mints the bootstrap visas, instead of refusing.
+- **`reconnect` after a link wipe.** A rejoin may still be `reconnect`: the
+  Zode's identity and local actors survive. But the visa service treats every
+  visa it pushed to that Zode as **not installed** and pushes them again,
+  including the VSS visa. Rule 9 cleared them on the Zode.
+- **The `Bootstrap Visas` message** is a new ZDP control message (core#104 used
+  type 146). It gets defined in ZDP.md, with the message body: exactly two
+  visas.
+
+### Keeping the core visas alive (operator approved 2026-11-12)
+
+The three core visas from J5a and J5b are what the Zode needs to talk to the visa
+service at all. If they lapse, the Zode can't send a `visaRequest` (that needs
+VSAPI), and the visa service can't push anything (that needs VSS). So F6's
+"re-request on the next packet" cannot renew them.
+
+J9. **The visa service renews them.** It re-mints a Zode's three core visas
+    before they expire, at about two-thirds of their lifetime, and pushes them
+    over VSS while the current VSS visa is still valid. The Zode installs the new
+    ones and lets the old ones expire.
+J10. **Fallback: a broken session means rejoin.** If a Zode's VS-API session
+    fails for any reason, including its core visas lapsing, it closes its
+    initial link and dials it again. That is J1–J6: fresh bootstrap visas, then
+    reconnect or re-authentication. There is always a way back, and only one
+    recovery path to test.
+
+### Moving a live connection onto newer visas (operator: supersede and rebind)
+
+**Core tenet: visas are immutable** (operator). Once granted, a visa is never changed: not its expiry, not its binding to an actor, nothing. Renewing or upgrading a visa always means issuing a **new** visa, and the old one is revoked or left to expire. A visa ID from the visa service always names the same visa: a Zode never compares two visas with the same ID, and when asked to install an ID it already holds it drops the incoming visa and answers success, so install is idempotent for the visa service (operator, gate g88 q4).
+
+J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
+     five-tuple** as visas the Zode already uses for a live VS-API or VSS
+     connection. A newer visa for an identical five-tuple **supersedes** the
+     older one. Each Zode on the path moves the existing stream binding onto the
+     new visa ID **atomically**: a `Stream ID Request` for the new visa ID goes
+     down the path, and each hop swaps its forwarding entry once the answer
+     comes back, so packets are never left without a binding. Only then does the
+     older visa stop being used, and it expires on its own. If the rebind fails
+     at any hop, the old binding stays until it expires. If that kills the
+     session, J10's rejoin recovers.
+     This is general: it applies to any same-five-tuple visa replacement, not
+     only the core visas.
+
+### Open for the planning gate
+- How the on-behalf-of identity is carried: a new optional `visaRequest` field
+  (for example `onBehalfOfCn`) or a separate VS-API call.
+- The bootstrap visa lifetime (short, for example a few minutes) and the J9
+  renewal threshold.
+
 ## Left to the builder
 
 - The link-up timeout: 5 s is the default (my call). It is a constant with a comment.
@@ -253,8 +457,9 @@ zl-zpr-visaservice#66 and the schema in zl-zpr-vsapi#5 and zl-zpr-common#14
 
 Everything scoped to one connection hangs off that connection's peer-table
 entry, so dropping the entry clears it (rule 9). A record holds only the
-connection's id. #251 and #252 hang their state (stream bindings, bootstrap
-visas) off the same entry.
+connection's id. #251's stream bindings are the exception: they live beside
+their visa in the visa table, and `drop_peer` revokes every visa bound over the
+lost connection (F3). #252 hangs its bootstrap visas off the peer entry.
 
 ### Constants
 
@@ -309,16 +514,78 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   proposes a link only to a peer whose substrate address policy gives and
   skips the rest. Using an address the peer reported itself is #227 and #255.
 
+### Forwarding over Zode links (#251)
+
+Built on `feature/zodes` in two core PRs: zl-zpr-core#109 (F1, F2, F5, and the
+F7 and F8 tests) and the F3/F6 PR (merge set B with this document). Covered by
+unit tests and core CI; the netns scenario (two Zodes ping across a direct
+link, the link drops, the flow re-routes through the relay) is **#254**,
+because it needs #252's relay join.
+
+| Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
+|---|---|
+| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; adapter matching (`actor_auth`, AAA) on non-Zode links only | `assembly.rs::find_egress_link` |
+| F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
+| F2 loop guard (egress == ingress is refused), and a refusal when transaction IDs run out. F2's `prev_hop` check is **not** implemented: it is #253 | `mgmt/node.rs::requested_visa_granted` |
+| F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of VS-API and bootstrap visas carried over an initial link comes with #252 | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |
+| Rule 9 for pending binds: binds waiting on the lost link are refused, next-hop binds issued for it are abandoned | `mgmt/node.rs::clear_pending_binds_for_lost_link`, called from `assembly.rs::drop_peer` |
+| F5 types 5 and 13 refused on Zode links; none sent on one | `mgmt/handlers.rs` (`handle_stream_id_withdrawal`, `handle_unbind_indication`), `assembly.rs::withdraw_streams` |
+| F6 `down`/`failed` skip the coalescing window; the loss barrier | `zode_links.rs` (`register_loss`, `wait_for_loss_reports`, `run_link_state_reporter`), `mgmt/node.rs` (`visa_request_task`, `visa_push_request_task`) |
+| F7 unknown Stream ID dropped and counted (`UnknownStreamId`) | `fastpath.rs::forward` |
+| F8 a Zode's own traffic out a Zode link | `mgmt/node.rs` (test `test_own_traffic_binds_out_a_zode_link`) |
+
+**The tenet in code.** `visa_table::Visa` has only private fields, set once
+when the visa is inserted; nothing hands out `&mut Visa`. Stream bindings live
+in a separate table in `VisaTable`, under the same lock. `bind` is the only
+writer that adds one; revocation, expiry and link loss all remove a visa's
+bindings, with their PFT entries, through one function. `insert_visa` of a held
+ID returns success before it parses anything, so a duplicate leaves no trace.
+#252's J11 adds one `rebind(old, new)` under the same lock: it moves a binding
+onto the superseding visa's ID and swaps the `visa_id` of the ingress PFT entry,
+replacing the visa without editing either one.
+
+Decided while building it:
+
+- **The F6 barrier releases when the report's RPC returns**, Ok or error. With
+  no VS-API session the report fails locally at once, so a visa request never
+  hangs on it. Each send is bounded by the RPC timeout, but snapshots go out one
+  at a time, in order, so the loss report can also wait behind earlier sends
+  still queued (at most `REPORT_QUEUE_MAX`, each bounded the same way). A
+  waiting request rechecks the current loss epoch whenever the reported epoch
+  moves, so a second loss registered while it waits holds it until that report
+  has returned too (core#110 review). Each snapshot carries
+  the loss epoch read just before it was taken; the reporter publishes it once
+  the send returns.
+- **A loss is registered before any revocation.** `drop_peer` registers it
+  first, then revokes and withdraws, so a visa request that a withdrawal
+  triggers already waits. Only a connection serving an up link record counts as
+  a loss: a dial attempt that never came up, or a connection a newer one
+  replaced (rule 5), revokes its visas but sends no extra report.
+- **A late answer to an abandoned next-hop bind is ignored.** When the bind it
+  served is gone (its link was lost, it was refused, or the requestor reused
+  its transaction ID), the next-hop transaction stays open and its answer is
+  dropped. Refusing it as an unknown transaction would close the next hop's
+  link, which did nothing wrong. The consistency panics on that path are gone.
+- **A visa request's result is dropped** unless the bind request it serves is
+  still there and still names that request's worker task, so it never answers
+  a peer that took the link ID since, or a newer request that reused the
+  transaction ID (core#110 review).
+- Gate g88: **q2** a type 5 or 13 on a Zode link is refused through the strict
+  handler-error path, which closes the link. **q3** a type 13 from a node's own
+  adapter or local actor is refused too. **q4** a held visa ID is an idempotent
+  no-op with no content comparison (the tenet above).
+
 ### What waits for which issue
 
-- **#251** node-to-node forwarding: traffic over Zode links. Today a
-  `Stream ID Withdrawal` or `Unbind Egress Stream` on a Zode link is refused
-  (`MessageNotPermitted`), and no flow has run across a Zode link end to end.
-- **#252** relay join: rule 11a (the bootstrap hand-off on every join) and rule 16
-  (the VS-API session over the initial link). Until then only the Zode that
+- **#252** relay join: J1–J11, rule 11a (the bootstrap hand-off on every join)
+  and rule 16 (the VS-API session over the initial link). Designed and
+  approved above; none of it is implemented. Until then only the Zode that
   hosts the visa service has a VS-API session. Other Zodes link to it but cannot
   receive `setTopology` or report, so the netns test reports from the relay's
-  side only.
+  side only, and no flow can be set up across a Zode link outside unit tests.
+- **#253** gap 7: the `prev_hop` check on `Stream ID Request` (F2). Today a
+  Zode accepts a request from any node link.
+- **#254** netns scripts, including #251's re-route scenario.
 - **#227** `updateSubstrateAddr`: once implemented, it calls
   `TopologyMgr::clear_failed_pairs_for` as a second rule-13a trigger. Today only
   a VS-API (re)connect (`authenticate`, `open`) clears a node's failed pairs.

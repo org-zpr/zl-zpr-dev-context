@@ -458,7 +458,7 @@ ZPR address equals `prevHop`; the ingress visa has none and never accepts one
 (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
 `Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
 each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
-whose path has fewer than two nodes has none. Core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+whose path has fewer than two nodes has none. Core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
@@ -528,10 +528,15 @@ more attempt (rule 13); links that are up are untouched. The owner is the end
 with the lower ZPR address; a relay owns nothing and never dials. So a node is
 told its peers, their substrate addresses, their ZPR addresses and CNs — and,
 on the relay only, holds bootstrap visas for joining peers (see "Bootstrap
-routing") — and brings its links up from that. No flow crosses a Zode link yet:
-forwarding over one is [#251](https://github.com/org-zpr/zl-zipline/issues/251),
-so although an intermediary node can install and bind a `forwardOnly` visa, no
-path through one runs end to end.
+routing") — and brings its links up from that. Forwarding over a Zode link is
+implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251),
+ZODE_LINKS.md "Forwarding over Zode links"): a visa's next hop resolves to the
+up Zode link whose peer has that topology address, and an intermediary node
+binds a `forwardOnly` visa from one Zode link to the next. It is covered by unit
+tests and core CI only. No flow has crossed a Zode link in a netns run yet,
+because Zodes other than the visa service's own get a VS-API session only with
+the relay join ([#252](https://github.com/org-zpr/zl-zipline/issues/252)); that
+scenario is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -552,10 +557,11 @@ no CN in policy — no node join policy pins that address together with a
 topology message, with a warning.
 
 The consequence is worth stating plainly: **the control plane computes
-multi-hop routes that the data plane cannot yet use.** Everything above —
-Dijkstra, all-paths DFS, path orientation, per-role visa actualization — is
-built, tested, and exercised by unit tests, while `zl-zpr-core`'s integration
-tests are `one-node-test.sh` and `one-node-v6-test.sh`. `zl-zpr-demo/multinode-demo`
+multi-hop routes that no netns run has carried end to end yet.** Everything
+above — Dijkstra, all-paths DFS, path orientation, per-role visa actualization —
+is built, tested, and exercised by unit tests, and the data plane can forward
+over Zode links (#251, unit-tested), while no `zl-zpr-core` integration test
+runs a flow across a Zode link (that is #254). `zl-zpr-demo/multinode-demo`
 is the two-node deployment being built out against this gap.
 
 ---
@@ -606,6 +612,13 @@ or merely as an employee.
 
 ## Bootstrap routing
 
+> **Superseded by design, still what runs.** #252's approved design
+> (ZODE_LINKS.md "Joining through the relay", J1–J8) replaces this: the relay
+> requests a joiner's bootstrap visas on demand when its initial link comes up,
+> and `Link.visas` is removed from the schema (J8). Nothing of that is built
+> yet, so the section below describes the code as it runs today, not the
+> contract to build against. New work follows ZODE_LINKS.md.
+
 A node that is not yet connected cannot be evaluated by policy — it has no
 actor, and no route until its link is up — but it needs to reach the visa
 service's VSAPI port to connect at all. `visa_bootstrap` resolves the circularity:
@@ -635,9 +648,11 @@ service's VSAPI port to connect at all. `visa_bootstrap` resolves the circularit
 - An already-connected peer yields no bootstrap visas — it has a VSAPI session
   and asks for what it needs.
 
-This is the defined join path for a Zode in v1
-([#221](https://github.com/org-zpr/zl-zipline/issues/221)); the earlier plan to
-delete the module (`zl-zpr-visaservice` issue 301) is dropped.
+Only the visa-service side of this runs today: minting the bootstrap visas
+and placing them in `Link.visas`
+([#221](https://github.com/org-zpr/zl-zipline/issues/221)). The relay's
+node-side hand-off of them to the joiner is not implemented, and #252 replaces
+the whole path with on-demand bootstrap visas (see the note above).
 
 ---
 
@@ -883,12 +898,12 @@ Specified or designed, not working:
   [#252](https://github.com/org-zpr/zl-zipline/issues/252) only the Zode that
   hosts the visa service has a VS-API session, so only it receives
   `setTopology` and reports; other Zodes reach it over their initial link.
-- **Paths through an intermediary node.** `forwardOnly` visas install and bind
-  on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)), but no flow crosses a Zode link yet
-  ([#251](https://github.com/org-zpr/zl-zipline/issues/251)), so no such
-  path runs end to end; this is unit-tested in-process only. Two nodes with one
-  link between them need only ingress and egress visas, which is why that is
-  the frontier.
+- **Paths through an intermediary node, end to end.** `forwardOnly` visas
+  install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
+  and forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
+  but only unit tests and core CI exercise it: no such path has run end to
+  end in a netns run. That needs the relay join ([#252](https://github.com/org-zpr/zl-zipline/issues/252))
+  and is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 - **Non-transit routing in the visa service.** Path computation does not read
   `Policy.transitNodes` yet (see the `transitNodes` item below), so it may route through any
   node. Until it does, a node with `forwarding` off refusing `forwardOnly` visas
