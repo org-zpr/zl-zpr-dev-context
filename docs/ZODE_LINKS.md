@@ -305,6 +305,79 @@ same way: it filled the peer's actor addresses so `find_egress_link` matched, an
 it relied on visa-service revocation for teardown. It took the peer address from
 the Hello, which F1 forbids. #250 replaces its link-layer rework.
 
+## Joining through the relay (#252, design approved 2026-11-12)
+
+**Bootstrap visas are requested on demand, not stocked ahead of time.** The relay
+already has a VS-API session, so it asks for a joining Zode's bootstrap visas
+when that Zode's initial link comes up. This is the same idea as a node acting
+for an adapter that docks with it. The visa service no longer keeps bootstrap visas
+for offline Zodes in topology.
+
+### Steps
+
+J1. **The link comes up.** The joiner dials its configured relay (an initial
+    link). The relay verifies the joiner's certificate and accepts the link only
+    if that CN is in its topology (rule 4). The joiner starts with an empty VS-API
+    visa table.
+J2. **The relay requests the bootstrap visas.** Once the link is up, the relay
+    sends a `visaRequest` over its own VS-API session for joiner ↔ visa
+    service:VSAPI, in both directions. The request names the joiner by its
+    **link-verified CN**. The joiner's ZPR address is the relay's topology
+    `zprAddr` for that CN, never anything the joiner claims.
+J3. **A narrow rule in the visa service.** A relay may request on behalf of a peer
+    with no VS-API session only for a CN in that relay's topology, and only to
+    the visa service's VSAPI port. The visa service mints these visas from the
+    policy-declared peering, the same authorization `visa_bootstrap.rs` uses today.
+    Only the timing changes: they are minted on request instead of pushed ahead of
+    time. They are **short-lived**: they only have to last through
+    authentication.
+J4. **The hand-off.** The relay sends the two visas in the `Bootstrap Visas`
+    message right after Hello. The joiner keeps the strict checks: initial link
+    only, no VS-API session yet, exactly two visas, the right five-tuple, Active,
+    and never inside Hello.
+J5. **Authentication.** The joiner authenticates as a node over the bootstrap
+    visas, or reconnects (`reconnect` vs `reset`: the visa service decides, R16).
+    - **J5a.** When it succeeds, the visa service issues the Zode its **own VS-API
+      visas** (Zode ↔ visa service:VSAPI, both directions), bound to the
+      authenticated node, with a normal lifetime. The Zode switches to them at
+      once.
+    - **J5b.** On `registerVss`, the visa service issues the **VSS visa** (visa
+      service → Zode's VSS port), as today.
+    - **J5c.** The bootstrap visas are left to expire. They only carried the
+      authentication exchange.
+J6. **Every return is a join** (rule 11a). A new initial link means a new request
+    and a new hand-off. Nothing waits in the visa service for an offline Zode, so
+    bootstrap visas expiring while a Zode is away is never a problem.
+J7. **If the relay can't reach the visa service**, it can't request visas. It
+    closes the link instead of handing off, and the joiner retries with its
+    initial-link backoff.
+J8. **`Link.visas` is removed from the schema.** Topology no longer carries
+    bootstrap visas: vsapi, then a common tag, then the pins move together (BUILD.md
+    rule 6).
+
+### Keeping the core visas alive *(coordinator proposal, confirm)*
+
+The three core visas from J5a and J5b are what the Zode needs to talk to the visa
+service at all. If they lapse, the Zode can't send a `visaRequest` (that needs
+VSAPI), and the visa service can't push anything (that needs VSS). So F6's
+"re-request on the next packet" cannot renew them.
+
+J9. **The visa service renews them.** It re-mints a Zode's three core visas
+    before they expire, at about two-thirds of their lifetime, and pushes them
+    over VSS while the current VSS visa is still valid. The Zode installs the new
+    ones and lets the old ones expire.
+J10. **Fallback: a broken session means rejoin.** If a Zode's VS-API session
+    fails for any reason, including its core visas lapsing, it closes its
+    initial link and dials it again. That is J1–J6: fresh bootstrap visas, then
+    reconnect or re-authentication. There is always a way back, and only one
+    recovery path to test.
+
+### Open for the planning gate
+- How the on-behalf-of identity is carried: a new optional `visaRequest` field
+  (for example `onBehalfOfCn`) or a separate VS-API call.
+- The bootstrap visa lifetime (short, for example a few minutes) and the J9
+  renewal threshold.
+
 ## Left to the builder
 
 - The link-up timeout: 5 s is the default (my call). It is a constant with a comment.
