@@ -75,7 +75,12 @@ Three properties follow that are hard to get otherwise:
 
 A granted visa is never changed. Replacing one means issuing a new visa, and
 a Zode keeps per-stream state beside the visa, never in it (ZODE_LINKS.md,
-"visas are immutable").
+"visas are immutable"). A newer visa for an identical five-tuple supersedes
+the older one: the ingress Zode moves a live stream onto it without editing
+either visa, and the older one is revoked or expires (ZODE_LINKS.md J11,
+[#252](https://github.com/org-zpr/zl-zipline/issues/252)). The rebind is
+refused if the two visas' session keys differ, since the stream's endpoints
+still hold the old keys.
 
 ### Least privilege in the distribution itself
 
@@ -542,16 +547,57 @@ their initial link.
 [#250](https://github.com/org-zpr/zl-zipline/issues/250); see
 [ZODE_LINKS.md](ZODE_LINKS.md) rules 3 and 12)
 
-**A joining node's bootstrap visas go only to the relay.** Bootstrap visas let
-a node that has no actor yet reach VSAPI, so whoever carries them relays that
-node's traffic. The visa service mints them only for the node it docks on (the
-relay), and only on the link whose `peerCn` names the joining node; every other
-neighbour gets the link without them. So the visa service's half of the join
-path cannot turn an endpoint into a transit node. The node's half — installing
-them only for the link whose certificate carries that CN, and accepting no
-bootstrap visa from a peer (none in Hello) — is
-[#222](https://github.com/org-zpr/zl-zipline/issues/222) and not built yet.
-([#221](https://github.com/org-zpr/zl-zipline/issues/221))
+**A joining node's bootstrap visas are requested on demand, and only by the
+relay.** Bootstrap visas let a node that has no actor yet reach VSAPI, so
+whoever carries them relays that node's traffic. `requestBootstrapVisas` is
+the trust boundary for them (ZODE_LINKS.md J2–J4, VISA_SERVICE.md "Bootstrap
+visas, on demand"):
+
+- **Who may ask.** Only the node the visa service docks on (the relay), over
+  its own live VS-API session. Any other caller is refused with
+  `invalidOperation` before its `peerCn` is even decoded, so it learns nothing
+  about which CNs exist.
+- **For whom.** Only a peer the relay's topology names by `peerCn`, which the
+  relay takes from the joiner's verified link certificate. The joiner's ZPR
+  address comes from that topology, never from anything the joiner claims.
+  Anything else is `notFound`.
+- **For what.** Only the joiner's VS-API flow, both directions, for 5 minutes,
+  with no session keys. The peering declared in policy is the authorization;
+  policy evaluation cannot answer for a node with no actor.
+
+Every other neighbour of an unconnected node gets the link and no bootstrap
+visas, so the visa service's half of the join path cannot turn an endpoint into
+a transit node. The node's half is built too: the joiner accepts a hand-off
+only on its initial link, from the relay CN in its own config, after Hello
+(never inside it), with no VS-API session yet, and only exactly its own two
+VS-API visas, unexpired (ZDP.md, "Bootstrap Visas"). A relay that lies can
+then affect only the joiner's VS-API flow, which it carries anyway. Each
+request is a join: it revokes every visa between the joiner and the visa
+service, and ends any session the visa service still holds for the joiner.
+([#221](https://github.com/org-zpr/zl-zipline/issues/221),
+[#252](https://github.com/org-zpr/zl-zipline/issues/252))
+
+**Control traffic between a node and the visa service carries no A2A keys; it
+relies on TLS, and that TLS does not authenticate either end yet.** A node's
+core visas (its VS-API pair and the visa service's VSS visa to it, with their
+renewals) are minted with an empty `KeySet`, like the bootstrap visas they
+supersede (gate g100). The bootstrap visas cannot carry keys, because the
+joiner has not authenticated, and a Zode refuses to rebind a live stream onto
+a visa whose keys differ, so keys on the core visas would stop the supersede
+and force a rejoin every 5 minutes. The traffic on those flows is the VS-API
+and VSS connections, which are TLS. **That TLS authenticates neither end
+today:** the client side of each (the node for VS-API, the visa service for
+VSS) accepts any server certificate (`NoVerification`) and presents none. So
+it gives confidentiality against a passive observer only. The node proves
+its identity to the visa service at the application layer (`authenticate`,
+an RSA challenge), but nothing proves the visa service's identity to the
+node, or the node's to the visa service on VSS, beyond the ZPR path itself:
+Noise-keyed Zode links with CA-checked CNs, and visas the visa service
+issued. Authenticating both ends with ZIPLINE-provisioned per-customer
+certificates is [#259](https://github.com/org-zpr/zl-zipline/issues/259).
+Rejected: letting the rebind cross a key change for node-to-VS flows only (a
+special case in J11's guard).
+([#252](https://github.com/org-zpr/zl-zipline/issues/252))
 
 **The visa service mints a Zode's login nonce.** Every endpoint is a node, so
 "a compromised docking node" now includes every laptop; a nonce the endpoint
@@ -674,9 +720,16 @@ not read the RFCs as a description of current guarantees.
   ([#251](https://github.com/org-zpr/zl-zipline/issues/251), ZODE_LINKS.md
   F1-F8): a lost link revokes its visas locally, and the `down` report goes out
   before any visa request that follows. No flow has crossed a Zode link in a
-  netns run yet: that needs the relay join
-  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)) and is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+  netns run yet; that is
+  [#254](https://github.com/org-zpr/zl-zipline/issues/254). The relay join is
+  implemented ([#252](https://github.com/org-zpr/zl-zipline/issues/252);
+  *Design decisions*, above) and runs in netns in `zode-link-test.sh`.
+- **TLS on VS-API and VSS authenticates neither end.** Both are encrypted, but
+  neither client verifies the server's certificate and neither presents one.
+  Since the core visas carry no A2A keys (*Design decisions*, above), this is
+  the only end-to-end protection of a node's control traffic with the visa
+  service. ZIPLINE-provisioned per-customer certificates are
+  [#259](https://github.com/org-zpr/zl-zipline/issues/259).
 
 ---
 

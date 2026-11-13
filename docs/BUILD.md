@@ -130,7 +130,16 @@ asset, so a release without it fails every job at **Download Asset**). The first
 org-zpr/zl-zipline#250, because `v0.21.2` sends no `Link.peerCn`. **Re-cut
 rule** (org-zpr/zl-zipline#254): when the visa service changes in a way core CI
 needs, cut the next `-zodes.N` and move `VISA_SERVICE_RELEASE` in
-`zl-zpr-core/.github/workflows/adapter.yml` to it.
+`zl-zpr-core/.github/workflows/adapter.yml` to it. `v0.22.0-zodes.2` is
+`c94d2fc`, after #250. For #252, core's join and rejoin scenario needs
+`requestBootstrapVisas` before the visa service's PR merges, so the next ones
+were cut from the head of org-zpr/zl-zpr-visaservice#67 **before it merged**
+(gate g89 q9): `v0.22.0-zodes.3` (`7c373b8`), `v0.22.0-zodes.4` (`06fe9ba`,
+adding the g100 fix: no session keys on a node's core visas) and
+`v0.22.0-zodes.5` (`0fc740e`, adding the g101 fix: a policy pass never
+waits on a node's VSS). Core's #252 PR points `VISA_SERVICE_RELEASE` at the
+latest of them. Once #252's merge set C has merged, the next pre-release is
+cut from the merged commit and core moves to it.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
@@ -466,7 +475,10 @@ Two consequences worth knowing:
    (org-zpr/zl-zipline#244, the visa `prevHop` field); the consumers moved to
    it together in org-zpr/zl-zipline#245. The third is `zl-v0.32.0-zodes.3`
    (org-zpr/zl-zipline#250, `Link.peerCn` required); core, visaservice and
-   compiler move to it together in #250. All three consumers (`zl-zpr-core`,
+   compiler move to it together in #250. The fourth is `zl-v0.32.0-zodes.4`
+   (org-zpr/zl-zipline#252, `BootstrapVisas`, `Link` without `visas`,
+   `updateSubstrateAddr` gone); core, visaservice and compiler move to it
+   together in #252. It is on common `bdbcc18`. All three consumers (`zl-zpr-core`,
    `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
