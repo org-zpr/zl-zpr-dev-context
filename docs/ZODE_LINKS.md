@@ -282,8 +282,10 @@ F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
 F7. **An unknown Stream ID on a Zode link is dropped silently** and counted.
     This deliberately departs from the RFC's `Destination Unreachable`, for the
     reason the RFC's own editorial note gives: answering would let a compromised
-    upstream probe which stream IDs are live. A stale stream ID only shows up
-    after a link loss or restart, and F4 and F6 already recover from that.
+    upstream probe which stream IDs are live. A stale stream ID shows up after
+    a link loss or restart, or on a healthy link when expiry or revocation
+    removed the downstream entry before the upstream stopped sending; F4 and
+    F6, and the upstream's own expiry, already recover from all of these.
 F8. **One-address endpoint.** A Zode's own traffic, sent from the address it also
     authenticates with, leaves through a Zode link under F1. Expected to need
     tests only.

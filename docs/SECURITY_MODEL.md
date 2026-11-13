@@ -644,7 +644,7 @@ not read the RFCs as a description of current guarantees.
   enforced: any node link can send a `Stream ID Request` for a visa ID it knows
   and have the stream bound. `Visa.prevHop` is in the schema
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)); the visa
-  service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)), and core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)), and core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
   Reverse binding for symmetric visas stays undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 - **k-of-n administrative concurrence.** No mechanism for it exists in the visa
@@ -669,8 +669,14 @@ not read the RFCs as a description of current guarantees.
   decisions*, above), and the visa service fills `Link.peerCn` from the peer's
   node join policy ([#221](https://github.com/org-zpr/zl-zipline/issues/221)).
   Zodes start links from the topology and from their configured initial link
-  ([#250](https://github.com/org-zpr/zl-zipline/issues/250)). No traffic crosses
-  a Zode link yet ([#251](https://github.com/org-zpr/zl-zipline/issues/251)).
+  ([#250](https://github.com/org-zpr/zl-zipline/issues/250)). Forwarding over
+  Zode links is implemented and unit-tested
+  ([#251](https://github.com/org-zpr/zl-zipline/issues/251), ZODE_LINKS.md
+  F1-F8): a lost link revokes its visas locally, and the `down` report goes out
+  before any visa request that follows. No flow has crossed a Zode link in a
+  netns run yet: that needs the relay join
+  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)) and is
+  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 
 ---
 

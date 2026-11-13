@@ -458,7 +458,7 @@ ZPR address equals `prevHop`; the ingress visa has none and never accepts one
 (gap 7). It sits on `Visa` rather than `FwdPep` because the egress visa — where a
 `Stream ID Request` matters most — carries no `FwdPep`. The visa service sets it on
 each copy it actualizes, bootstrap visas included ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); a visa
-whose path has fewer than two nodes has none. Core enforces it in [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+whose path has fewer than two nodes has none. Core enforces it in [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 Reverse-direction binding for symmetric visas is undefined and refused
 ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)).
 
@@ -648,9 +648,11 @@ service's VSAPI port to connect at all. `visa_bootstrap` resolves the circularit
 - An already-connected peer yields no bootstrap visas — it has a VSAPI session
   and asks for what it needs.
 
-This is the join path that runs today
-([#221](https://github.com/org-zpr/zl-zipline/issues/221)) until #252 replaces it
-with on-demand bootstrap visas (see the note above).
+Only the visa-service side of this runs today: minting the bootstrap visas
+and placing them in `Link.visas`
+([#221](https://github.com/org-zpr/zl-zipline/issues/221)). The relay's
+node-side hand-off of them to the joiner is not implemented, and #252 replaces
+the whole path with on-demand bootstrap visas (see the note above).
 
 ---
 

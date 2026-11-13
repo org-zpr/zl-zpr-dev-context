@@ -403,7 +403,7 @@ in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
 includes the bootstrap visas of a joining Zode: the relay's copy of the forward
 visa names the joiner, and the joiner's copy of the reverse visa names the relay.
 A visa whose path has fewer than two nodes has no `prevHop`. Core enforces it in
-[zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+[zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
@@ -913,9 +913,16 @@ gap.
 
 ### Bootstrap visas: relay-only, next to the peer's CN
 
+> **Superseded by design, still what runs.** #252's approved design
+> (ZODE_LINKS.md "Joining through the relay", J1–J8) replaces this: the relay
+> requests a joiner's bootstrap visas on demand when its initial link comes up,
+> and `Link.visas` is removed from the schema (J8). Nothing of that is built
+> yet, so this section describes the code as it runs today, not the contract
+> to build against. New work follows ZODE_LINKS.md.
+
 A node that has not connected reaches VSAPI on bootstrap visas the visa service
 mints from the policy-declared peering (`vs/src/visa_bootstrap.rs`; ROUTING.md,
-"Bootstrap routing"). For Zodes this is the defined v1 join path, under three
+"Bootstrap routing"). For Zodes this is the join path the code implements today, under three
 rules: only the visa service mints them; only the relay — the node the visa
 service docks on — receives them, pushed in `Link.visas` or pulled when it sees
 the peer's traffic first; and they ride only on the link whose `zprAddr` and
@@ -979,7 +986,7 @@ No tracker issues are filed for these unless linked.
   `oidc` and `zpr-attr/1`.
 - **`Visa.prevHop` is set but not enforced yet.** The visa service sets it
   ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)); core accepts a `Stream ID Request` from any node link until
-  [zipline#222](https://github.com/org-zpr/zl-zipline/issues/222).
+  [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root
