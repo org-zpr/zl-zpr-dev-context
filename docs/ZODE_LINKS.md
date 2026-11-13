@@ -396,6 +396,21 @@ J10. **Fallback: a broken session means rejoin.** If a Zode's VS-API session
     reconnect or re-authentication. There is always a way back, and only one
     recovery path to test.
 
+### Moving a live connection onto newer visas (operator: supersede and rebind)
+
+J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
+     five-tuple** as visas the Zode already uses for a live VS-API or VSS
+     connection. A newer visa for an identical five-tuple **supersedes** the
+     older one. Each Zode on the path moves the existing stream binding onto the
+     new visa ID **atomically**: a `Stream ID Request` for the new visa ID goes
+     down the path, and each hop swaps its forwarding entry once the answer
+     comes back, so packets are never left without a binding. Only then does the
+     older visa stop being used, and it expires on its own. If the rebind fails
+     at any hop, the old binding stays until it expires. If that kills the
+     session, J10's rejoin recovers.
+     This is general: it applies to any same-five-tuple visa replacement, not
+     only the core visas.
+
 ### Open for the planning gate
 - How the on-behalf-of identity is carried: a new optional `visaRequest` field
   (for example `onBehalfOfCn`) or a separate VS-API call.
