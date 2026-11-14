@@ -728,9 +728,11 @@ not read the RFCs as a description of current guarantees.
   before any visa request that follows. The relay join is implemented
   ([#252](https://github.com/org-zpr/zl-zipline/issues/252); *Design
   decisions*, above): in netns, `zode-link-test.sh` carries a joiner's VS-API
-  flow across its Zode link to the relay. No flow between two Zodes has
-  crossed a Zode link in a netns run yet; that is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+  flow across its Zode link to the relay. Since
+  [#254](https://github.com/org-zpr/zl-zipline/issues/254), flows between two
+  Zodes cross Zode links in netns too (`zode-line-test.sh`,
+  `zode-reroute-test.sh`), and `zode-wrong-ca-test.sh` shows a Zode whose
+  certificate comes from another CA refused in the handshake.
 - **TLS on VS-API and VSS authenticates neither end.** Both are encrypted, but
   neither client verifies the server's certificate and neither presents one.
   Since the core visas carry no A2A keys (*Design decisions*, above), this is

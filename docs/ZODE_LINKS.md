@@ -556,7 +556,8 @@ gate g89) answered them, along with the choices the code forced:
 - **q7, the relay:** it gets J5a/J9 visas like every Zode, and grants itself
   its VS-API pair again whenever it loses its session.
 - **q8, netns scope:** the join and rejoin go into `zode-link-test.sh`; the
-  two-joiner and wrong-CA scripts are #254.
+  two-joiner and wrong-CA scripts are #254. *Done in #254:*
+  `zode-join-test.sh` and `zode-wrong-ca-test.sh`.
 - **q9, core CI:** core takes the visa service from a pre-release cut from the
   visaservice PR's head while the set is open (BUILD.md).
 - **q10, J11 per hop:** only the ingress swaps its forwarding entry (see J11).
@@ -687,6 +688,7 @@ see "Relay join (#252)" below.
 | `reportLinkStates` RPC; per-link `setTopology` decoding | `zl-zpr-core/libnode2/src/vsconn.rs`, `libnode2/src/vss.rs` (`decode_topology_links`) |
 | Rule 14 (`end_agrees`), rule 13a (failed pairs, `record_failures`, `clear_failed_pairs_for`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
 | netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology; since #252 also the join, restart and rejoin (see "Relay join (#252)") | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
+| netns tests (#254): two joiners at once; zb - relay - zc with the relay's forwarding on and off; a direct link that drops and re-routes through the relay; a Zode in the policy with a certificate from another CA | `zl-zpr-core/integration-test/zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh`, `zode-wrong-ca-test.sh` |
 
 Everything scoped to one connection hangs off that connection's peer-table
 entry, so dropping the entry clears it (rule 9). A record holds only the
@@ -744,6 +746,14 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   The old link is closed only once the new link's CN has passed rule 3, so a
   stray or refused dial cannot take down a working link. A redial from the
   same substrate address takes over that address only then (gate g78 q5).
+- **Rules 3 and 6 (refuse, then redial).** A link refused after keying gives
+  up the peer's substrate address at once, then closes. Its close can wait
+  up to `DEFAULT_TERMINATE_TIMEOUT` for a Terminate ack the dialer often
+  cannot send, because it has already dropped its SA. Before #254 the
+  address stayed with the dying link for that wait, and the owner's redial
+  from the same address went to it and was lost, so the link ended
+  `failed` (gate g120, found by `zode-reroute-test.sh`). Now the redial
+  starts a link of its own.
 - **Rule 13b** holds today for addresses from policy: the visa service
   proposes a link only to a peer whose substrate address policy gives and
   skips the rest. Using an address the peer reported itself is #227 and #255.
@@ -752,9 +762,13 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
 
 Built on `feature/zodes` in two core PRs: zl-zpr-core#109 (F1, F2, F5, and the
 F7 and F8 tests) and the F3/F6 PR (merge set B with this document). Covered by
-unit tests and core CI; the netns scenario (two Zodes ping across a direct
-link, the link drops, the flow re-routes through the relay) is **#254**,
-because it needs #252's relay join.
+unit tests and core CI, and in netns since #254 by `zode-reroute-test.sh`:
+zb and zc bring up a direct link and ping across it with no forward-only
+visa on the relay; the zb-zc substrate is blocked, both ends report the link
+down, the visa service stops routing over it, and zb's next echo re-requests
+and comes back through the relay on forward-only visas (rules 9, 10, 14, 15;
+F3, F4, F6). `zode-line-test.sh` runs a flow between two Zodes through the
+relay with its `forwarding` on and off (F1, F2, F8).
 
 | Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
 |---|---|
@@ -871,6 +885,13 @@ IDs each time), a CN outside the relay's topology (no request), J7 (the relay
 cut off from its visa service closes zb's link), and the relay never dialing.
 Before the g101 fix, the policy scenario (a policy removes, then restores, the
 relay-zb link) failed in about 2 of 8 local runs; with it, 7 of 7 passed.
+Since #254, `zode-join-test.sh` runs two joiners at once: each gets its own
+hand-off, none of whose IDs is the other's, holds only those before it
+authenticates, joins fully and pings the visa service.
+`zode-wrong-ca-test.sh` has a Zode in the policy whose certificate comes
+from another CA: the relay refuses it in the handshake, it never links, gets
+a hand-off or registers, and a joiner beside it is unaffected. Neither, nor
+`zode-line-test.sh`, refuses a Stream ID Request.
 
 **Deviations** (each is flagged inline above):
 
@@ -893,8 +914,6 @@ Visa-service pre-releases for core CI while set C is open are in
 
 ### What waits for which issue
 
-- **#254** netns scripts, including #251's re-route scenario and the
-  two-joiner and wrong-CA scenarios #252 left out (gate g89 q8).
 - **#257** a visa granted for a next hop whose link is already down: its
   bind is refused, but the visa stays in the table until the visa service
   revokes it or it expires, so F6's re-request does not happen. It should be

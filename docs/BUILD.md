@@ -138,8 +138,10 @@ were cut from the head of org-zpr/zl-zpr-visaservice#67 **before it merged**
 adding the g100 fix: no session keys on a node's core visas) and
 `v0.22.0-zodes.5` (`0fc740e`, adding the g101 fix: a policy pass never
 waits on a node's VSS). Core's #252 PR points `VISA_SERVICE_RELEASE` at the
-latest of them. Once #252's merge set C has merged, the next pre-release is
-cut from the merged commit and core moves to it.
+latest of them. Once #252's merge set C had merged, `v0.22.0-zodes.6` was
+cut from the merged commit (`e1dd1c7`) and core moved to it
+(zl-zpr-core#114). The re-cut rule stands: the next visa-service change that
+core CI needs gets the next `-zodes.N`.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
@@ -771,6 +773,10 @@ Other entry points, each a standalone script:
 | `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
 | `node-restart-test.sh` | a node restarting (killed and graceful) under a running visa service brings every link back to Active (zipline#167) |
 | `zode-link-test.sh` | the Zode link lifecycle (zl-zipline#250, `docs/ZODE_LINKS.md`): a relay Zode docking the visa service, a Zode with an initial link to it, and a Zode outside the relay's topology. Covers join, restart (rule 5), refusal of an unknown CN (rule 3), substrate loss and redial (rules 9-11), a policy that removes the link (rule 12) and link-state reports |
+| `zode-join-test.sh` | two Zodes joining through the relay at once (zl-zipline#254, `docs/ZODE_LINKS.md` J1-J5, J11): each gets its own hand-off of two visa-service IDs, none of them the other's, starts with only those in its table, authenticates, reports its link, registers its VSS, receives topology, has its bootstrap visa superseded, and pings the visa service. No Zode refuses a Stream ID Request |
+| `zode-line-test.sh` | zb - relay - zc in a line (zl-zipline#254, Zodes plan W1 and W4), in two legs from a clean start. Relay forwarding on: zb and zc ping each other under their own identities, the relay carries the flow on forward-only visas, and no Zode refuses a Stream ID Request. Forwarding off: both still reach the visa service, zb cannot reach zc, and the relay logs that it refuses the forward-only visas |
+| `zode-reroute-test.sh` | #251's re-route (zl-zipline#254, `docs/ZODE_LINKS.md` rules 9, 10, 14, 15 and F3, F4, F6): zb and zc bring up a direct link and ping over it with no forward-only visa on the relay; the zb-zc substrate is blocked, both ends report the link down, and the ping comes back through the relay on forward-only visas. Not covered: the link coming back, which needs a new `setTopology` |
+| `zode-wrong-ca-test.sh` | a Zode in the policy whose certificate comes from another CA (zl-zipline#254, Zodes plan W2): the relay refuses it in the handshake, no link exists at either end, it never gets a hand-off or registers, and a control Zode signed by the right CA joins normally |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
 Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,
