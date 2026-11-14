@@ -98,7 +98,7 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
 ### Bringing a topology link up (owner)
 
 6. When `setTopology` names a link this Zode owns, the owner dials and keys. If the
-   link isn't up within **5 seconds** (default, see "Left to the builder"), it
+   link isn't up within **10 seconds** (default, see "Left to the builder"), it
    reports `failed` and stops. **Within that window the owner may redial about once
    a second.** This covers the case where the owner's copy of topology lands first
    and the peer refuses it because the peer doesn't know the link yet (rule 3).
@@ -217,7 +217,7 @@ other. The lower ZPR address dials (rules 1 and 6), the higher one accepts it (r
 one refuses it after keying because the dialer isn't the owner (rule 3). No
 duplicate is possible.
 
-**A direct link can't come up** (a firewall, say). After 5 seconds the owner
+**A direct link can't come up** (a firewall, say). After 10 seconds the owner
 reports `failed` (rule 6). Traffic goes through the relay. The visa service stops
 proposing that link (rule 13a) until something about the pair changes. When it does
 propose the link again, the owner tries once more (rule 13).
@@ -257,7 +257,7 @@ layer from scratch:
 `reportLinkStates` is a snapshot. A topology link that isn't listed counts as not up.
 
 - The owner lists a link as `failed` **only while that link's attempt has ended
-  without the link coming up** (the 5 s window ran out). Once a retry starts after a
+  without the link coming up** (the 10 s window ran out). Once a retry starts after a
   new `setTopology`, the entry is **no longer listed**. If the retry fails too, it is
   listed as `failed` again.
 - Every change to the set of listed entries sends a new snapshot. That includes
@@ -600,7 +600,9 @@ gate g89) answered them, along with the choices the code forced:
 
 ## Left to the builder
 
-- The link-up timeout: 5 s is the default (my call). It is a constant with a comment.
+- The link-up timeout: 10 s is the default. It is a constant with a comment.
+  It started at 5 s (my call); gate g123 raised it to 10 s, because the
+  non-owner can learn the link about 4 s after the owner (see Deviations).
 - The initial-link backoff schedule: start around 1 s, double, cap around 30 s,
   with jitter (my call).
 - Where the per-link state machine lives in `ph`, and its exact state names. The
@@ -773,7 +775,7 @@ lost connection (F3). #252's bootstrap visas hang off the peer entry
 
 All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
 
-- `LINK_UP_WINDOW` = 5 s, the owner's link-up window (rule 6), `zode_link_record.rs`.
+- `LINK_UP_WINDOW` = 10 s, the owner's link-up window (rule 6), `zode_link_record.rs`.
 - `OWNER_REDIAL_INTERVAL` = 1 s, the owner's redial inside the window (rule 6).
 - `INITIAL_LINK_BACKOFF_MIN` = 1 s, doubling to `INITIAL_LINK_BACKOFF_MAX` = 30 s,
   each delay jittered to between half and all of it (rule 11).
@@ -831,6 +833,12 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   from the same address went to it and was lost, so the link ended
   `failed` (gate g120, found by `zode-reroute-test.sh`). Now the redial
   starts a link of its own.
+- **Rule 6 (the window).** The window is 10 s, not 5 s (gate g123). If the
+  owner already has a VSS session when the non-owner authenticates, the
+  visa service sends the owner the link at once. The non-owner gets it
+  only after the visa service's VSS start delay (3 s) and a NoRoute retry
+  (1 s). `zode-reroute-test.sh` saw a lag of 4.2 s. With 5 s and a redial
+  every second, the window ended `failed` although both ends were healthy.
 
 ### Forwarding over Zode links (#251)
 

@@ -243,7 +243,7 @@ its links up, and what it reports when, is
   its current topology, plus its initial link, that has an outcome
   (ZODE_LINKS.md "Reporting summary" and "Reporting contract"):
   - the owner of a topology link lists it `up`, `down` once an up link is lost,
-    or `failed` once a 5-second link-up window ends without the link coming
+    or `failed` once a 10-second link-up window ends without the link coming
     up. It lists nothing during the first window, or while a new
     `setTopology` retries a `failed` link. A link retried from `down` stays
     listed `down` during its window;

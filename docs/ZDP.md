@@ -364,7 +364,7 @@ Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
 5 s, and a node drops an adapter dock whose keying does not finish within
 `NODE_KEYING_TIMEOUT = 60 s` (zipline#173). A Zode link is bounded tighter,
-on both ends, so an attempt ends inside the owner's 5-second link-up window:
+on both ends, so an attempt ends inside the owner's 10-second link-up window:
 `ZODE_KEYING_TIMEOUT = 2 s` and `ZODE_HELLO_TIMEOUT = 2 s`.
 
 ### Zode links
