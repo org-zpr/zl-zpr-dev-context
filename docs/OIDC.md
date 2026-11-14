@@ -1104,6 +1104,9 @@ or resuming with `open`); that was not taken.
 Re-checked against the forks' `zipline` branches on 2026-09-17 (`zl-zpr-compiler`
 0.18.0, `zl-zpr-visaservice` 0.19.0 with `POLICY_MIN_COMPILER_MINOR = 18`,
 `zl-zpr-common` 0.27.0, `zl-zpr-core` 0.7.0).
+The *A Zode's own login* entry below was checked on 2026-11-14 against
+`feature/zodes` (`zl-zpr-visaservice` `v0.22.0-zodes.6`, `zl-zpr-common`
+`zl-v0.32.0-zodes.4`) plus `zl-zpr-core` #120.
 **The OIDC design in this document is implemented**: the umbrella epic
 [zipline#1](https://github.com/org-zpr/zl-zipline/issues/1) is closed, and the
 oidc + file interplay epic
