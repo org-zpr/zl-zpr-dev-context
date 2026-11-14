@@ -547,6 +547,45 @@ their initial link.
 [#250](https://github.com/org-zpr/zl-zipline/issues/250); see
 [ZODE_LINKS.md](ZODE_LINKS.md) rules 3 and 12)
 
+**ZIPLINE issues each Zode's link certificate at registration, from a
+per-customer CA whose key no container can read.** Each ZIPLINE network has
+its own RSA CA, and a network belongs to one customer, so the CA is that
+customer's trust root. The ZIPLINE web server keeps the CA's private key at
+`${ZIPLINE_DATA_DIR}/ca/<networkId>/ca.key` (directory 0700, file 0600). It is
+deliberately not in the network's data directory, which is bind-mounted into
+the network's root containers: a compromised relay or visa service holding the
+key could mint a certificate for any CN. The key never appears in a log, an
+error or an API response.
+
+- **The request.** `zipline register` generates the Zode's X25519 link key on
+  the device and sends only the public half. The register request is signed
+  (RSA-SHA256, PKCS#1 v1.5) with the registration key, the RSA key the Zode
+  later authenticates to the visa service with, over
+  `zipline-register\n<hostname>\n<os>\n<pubkey>\n<linkPubkey>`.
+- **The certificate.** When the user confirms the registration, the server
+  signs a certificate with CN = the Zode's name (`zode-` plus six base-36
+  characters), the link key as its SPKI, and keyUsage keyAgreement. It is
+  valid until the CA itself expires, at most ten years, and v1 has no renewal.
+  Deleting a Zode is made effective by the CN-in-topology rule above, not by
+  expiry or a revocation list.
+- **What the signature proves.** It binds the link key to the registration
+  key, so nothing on the path can swap in a link key of its own. It does not
+  prove that the device holds the X25519 private key, because X25519 cannot
+  sign. That is acceptable: a certificate for a key you don't hold cannot
+  complete a Noise handshake, so it authenticates nobody.
+- **No fallback.** A request without the link key or the signature is
+  refused, and a network with no stored CA key refuses registration with 409
+  `network_needs_upgrade`.
+
+Rejected: a one-year certificate with renewal (renewal code on both sides,
+where deleting the Zode already handles a leaked key); the server generating
+the link key (it would then hold every Zode's private key); keeping the CA key
+in the database, encrypted with a server secret (key management for a key
+that re-provisioning replaces anyway).
+([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251), gate
+g113 q3, q6 and q7; the 2026-11-13 entries in zipline's
+`docs/decisions/adapters.md`)
+
 **A joining node's bootstrap visas are requested on demand, and only by the
 relay.** Bootstrap visas let a node that has no actor yet reach VSAPI, so
 whoever carries them relays that node's traffic. `requestBootstrapVisas` is
@@ -595,6 +634,10 @@ node, or the node's to the visa service on VSS, beyond the ZPR path itself:
 Noise-keyed Zode links with CA-checked CNs, and visas the visa service
 issued. Authenticating both ends with ZIPLINE-provisioned per-customer
 certificates is [#259](https://github.com/org-zpr/zl-zipline/issues/259).
+ZIPLINE registration
+([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251)) issues
+only the link certificate; #259 will reuse its per-network CA-key store and
+signing helper for those TLS certificates (gate g113 q2).
 Rejected: letting the rebind cross a key change for node-to-VS flows only (a
 special case in J11's guard).
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252))
@@ -731,6 +774,17 @@ not read the RFCs as a description of current guarantees.
   flow across its Zode link to the relay. No flow between two Zodes has
   crossed a Zode link in a netns run yet; that is
   [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+- **ZIPLINE issues link certificates at registration**
+  ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
+  *Design decisions*, above). `zipline register` writes the Zode's link key,
+  its certificate, the CA certificate, its ZPR address and the relay's CN and
+  substrate address, and `zipline service-run` starts `ph node` with them.
+  Two pieces are still missing. The relay's topology does not list registered
+  Zodes yet, so the relay refuses their links until
+  [org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253).
+  Networks provisioned before the change have no stored CA key, so they
+  refuse registration until their cut-over,
+  [org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254).
 - **TLS on VS-API and VSS authenticates neither end.** Both are encrypted, but
   neither client verifies the server's certificate and neither presents one.
   Since the core visas carry no A2A keys (*Design decisions*, above), this is

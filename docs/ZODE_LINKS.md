@@ -715,7 +715,15 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
 - **Initial link.** `[node.initial_link]` with `addr = "IP:port"` (the relay's
   substrate address) and `cn = "<relay CN>"`, or `ph node --initial-link
   CN@IP:PORT`, which overrides the file. At most one. Validation rejects an empty
-  CN, an unspecified IP and port 0. Node only.
+  CN, an unspecified IP and port 0. Node only. On a ZIPLINE machine,
+  `zipline register` writes the initial link: the server's poll answer carries
+  the relay's CN and IPv4 substrate address, and `zipline service-run` passes
+  them as `--initial-link <relay_cn>@<relay_addr>`, beside the Zode
+  certificate (`--certificate-file`, `--private-key-file`, `--ca-file`) the
+  same registration issued. It never sets `--self-addr` or
+  `--advertised-substrate-addr` on an endpoint
+  ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
+  SECURITY_MODEL.md, *Design decisions*).
 - **Relay.** `relay = true` in `[node]`, or `ph node --relay true`. Default off.
   A relay has no initial link: setting both is a config error.
 - A Zode's own address, the one ownership compares, is `zpr_addr[0]`.

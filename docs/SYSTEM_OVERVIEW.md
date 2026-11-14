@@ -257,7 +257,7 @@ an endpoint joins. In the current implementation:
 | `fd5a:5052::1` | The visa service |
 | `fd5a:5052:90de:1::/64` | Nodes (pool-allocated) |
 | `fd5a:5052:adda:1::/64` | Adapters (pool-allocated) |
-| `fd5a:5052:8888::/64` | Static, trusted-service-granted (de facto range; see below) |
+| `fd5a:5052:8888::/64` | Static: trusted-service-granted (de facto range), and ZIPLINE's Zodes (see below) |
 | `10.192.0.0/22`, `10.128.0.0/22` | IPv4 equivalents for nodes and adapters |
 
 An endpoint may hold a static address from the network's own configuration — a
@@ -274,6 +274,26 @@ the tree's fixtures and demos is in it, and every static node address is
 outside the node pool. The
 substrate addresses that carry virtual links are ordinary IP addresses and
 are unrelated to these.
+
+**ZIPLINE gives each Zode a static address in `fd5a:5052:8888::/64`.** When a
+registration is confirmed, the ZIPLINE server allocates `fd5a:5052:8888::<n>`,
+where `n` is one more than the network's count of addresses handed out so far
+(starting at 1, written in the address's low 32 bits). The count only goes up,
+and an address is unique within its network, so a deleted Zode's address is
+never handed to another machine: DNS answers and open connections elsewhere may
+still name it. `zipline register` writes the address into the Zode's
+`zipline.toml`, and `ph node --zpr-addr` claims it. The visa service honours
+the claim only once the network's policy pins the address to the Zode's CN as
+the node's `zpr_address`, and only if it passes the static-address checks
+above. ZIPLINE does not write that pin yet: that is
+[org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253), so until
+it lands a registered Zode's address is allocated but not usable. Within a
+ZIPLINE network the counter is the only allocator in the range: ZIPLINE runs
+no trusted service that grants `device.zpr_addr`. A network that added such a
+grant inside `fd5a:5052:8888::/64` could collide with a Zode, and the visa
+service would reject whichever of the two joined second.
+([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251), gate
+g113 q5)
 
 RFC-7 describes generating topology, node numbering, and forwarding rules
 automatically from connection policy and hardware constraints — deriving the
