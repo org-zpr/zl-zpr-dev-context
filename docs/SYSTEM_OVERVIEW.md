@@ -640,9 +640,11 @@ Wi-Fi.
 ([zipline#164](https://github.com/org-zpr/zl-zipline/issues/164))
 
 **A network change is handled by the rejoin.** A Zode on a Mac (or any OS)
-with a wildcard `self_addr` and an initial link survives a change of its
-address. The keep-alive closes the initial link, the redial goes out from the
-new address, and the rejoin's `connect` or `open` reports that address
+with a wildcard `self_addr`, an initial link, no `advertised_substrate_addr`
+and no substrate address in policy survives a change of its address (an
+advertised address wins, and the visa service refuses a report that differs
+from a policy address). The keep-alive closes the initial link, the redial
+goes out from the new address, and the rejoin's `connect` or `open` reports that address
 ([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). Sends from the old
 address fail with `EADDRNOTAVAIL` on macOS (measured on 26.5.2), and are
 dropped and counted, not fatal. Verified by hand on 2026-11-14:

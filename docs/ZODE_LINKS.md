@@ -205,8 +205,10 @@ keep-alive notices, as for any dead link. After 3 missed keep-alives, about
 12 s, the laptop closes the initial link and clears its state (rule 9). Until
 then, sends from the old address fail, and each one is dropped and counted;
 none stops `ph`. The laptop keeps redialing the relay with backoff (rule 11).
-With a wildcard `self_addr`, each dial takes the local address the OS picks
-for the relay, which is the new network's. Meanwhile the relay sees a dead
+A laptop Zode has a wildcard `self_addr` and no `advertised_substrate_addr`,
+so each dial takes the local address the OS picks for the relay, which is the
+new network's. (An advertised address, or a concrete `self_addr`, is reported
+as it is and does not follow the change.) Meanwhile the relay sees a dead
 link, clears its state and waits. The new initial link goes through the join
 hand-off again (rule 11a). The laptop then reconnects its VS-API session (rule
 16), and the visa service either resumes it or demands a fresh login. Either
