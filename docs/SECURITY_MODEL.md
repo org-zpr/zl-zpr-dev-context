@@ -293,6 +293,35 @@ passes policy — in particular one that needed the logged-out user's
 attributes. What remains: a subverted Zode can still use a login of its own
 user, as any endpoint can.
 
+**Who may log in or out on a Zode.** Anyone who can open ph's control
+channel: the socket owner or the `control_group` on Linux and macOS, the
+owner, Administrators or the `control_group` on Windows (the named pipe's
+DACL). There is one logged-in user per Zode, so any such local user logs in
+or out for the whole machine. ph keeps no tokens: the refresh token stays in
+the `ph-cli auth-agent` process, and ph holds only the issuer, the login
+nonce and the expiry, and logs neither tokens nor nonces.
+([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233))
+
+**A replaced session drops the login.** Every node authentication (a VS-API
+reconnect, a visa-service restart, a rejoin, a K2 re-authentication) builds
+a new, device-only actor, and only `open` keeps the stored one, which ph does
+not use. The login cannot come back silently: a login needs a fresh
+visa-service nonce in the token, and a refresh-grant `id_token` carries none.
+So ph marks the login logged out (`SessionReplaced`) and asks a resident
+`auth-agent` for a new interactive login. A policy install's
+`requestAuthentication` for a logged-in Zode is answered with a renewal,
+which re-runs authorization under the new policy and keeps the user; it
+falls back to K2, which drops the user, only when no renewal can be had. When
+nothing renews a login, ph logs the user out itself at the expiry: the visa
+service has no expiry sweep for a node's own actor.
+
+**Known gap: live visas are not re-checked when a session replacement drops
+a login.** A node `authenticate` calls no visa revalidation, so visas granted
+on the user's attributes live until they expire. An explicit logout and the
+expiry logout do re-check them (above). Same class as "ordinary renewals with
+changed claims skip visa revalidation". A visa-service follow-up; not filed
+yet.
+
 **What this hands to an attacker, and why it is not a new threat.** The
 binding is enforced by the visa service against its own session record, and
 the only party that can present a renewal is one that can both mint a
@@ -657,9 +686,12 @@ not read the RFCs as a description of current guarantees.
   `reauthorize` gain/drop for a node's own actor are implemented in the visa
   service and unit-tested per binding row
   ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)). The
-  node and `ph-cli` side that requests the nonce and logs in is not built yet
-  ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)), so no
-  end-to-end test covers it.
+  node and `ph-cli` side is built too
+  ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)): login,
+  logout, silent renewal, logout at expiry, the session-replaced prompt and
+  the renewal answer to a policy re-authentication, unit-tested against a
+  fake visa service. No netns test covers it yet (`zode-login-test.sh` waits
+  for [zl-zipline#254](https://github.com/org-zpr/zl-zipline/issues/254)).
 
 - **Stream binding restricted to the previous hop (gap 7)**
   ([zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)): a node
