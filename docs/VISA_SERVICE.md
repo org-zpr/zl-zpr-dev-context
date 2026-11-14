@@ -351,8 +351,9 @@ one function, `accept_reported_substrate` (`vs/src/connection_control.rs`,
 [#255](https://github.com/org-zpr/zl-zipline/issues/255)). An unspecified IP or
 port 0 is a `paramError`, with no fallback. If policy declares the node's
 substrate address, the report must equal it, or the call is a `paramError`.
-Otherwise the report stands. The address is then fixed for the session: it
-changes only with a new `connect` or `open`. It decides which links the node's
+Otherwise the report stands. The address is stored on the node's actor and
+changes only with the node's next `connect` or `open`. A rejoin keeps the actor,
+so the old address stays known until then. It decides which links the node's
 peers are offered and what they dial (ZODE_LINKS.md rule 13b; ROUTING.md,
 "Substrate address changes"). Nothing checks that the address belongs to the
 node; the link's certificate check bounds what a false one can do, and whether

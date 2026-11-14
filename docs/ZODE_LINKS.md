@@ -136,8 +136,11 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     and the Zode keeps no other retry logic.
 13b. **The visa service proposes a direct link only when it can work.** It needs a known substrate address for the peer the owner must dial, from policy or reported by that peer. No address means no direct link, and traffic goes through the relay. The visa service never asks a Zode to make a connection it can't possibly make. *(Operator, 2026-11-12; #255 drops visaservice#65's `[::]:0` fallback.)* In detail (gate g115 q2-q4):
     - A node's **known address** is its policy substrate address (DNS-resolved).
-      Failing that, it is the address the node reported in the `connect` or `open`
-      of its VS-API session. Nothing else counts, and nothing is guessed.
+      Failing that, it is the address the node reported in its last `connect` or
+      `open`, stored on its node actor. Nothing else counts, and nothing is
+      guessed. Only the node's next `connect` or `open` replaces a reported
+      address; a rejoin keeps the actor, so the old address stays known until
+      then (see "Known limit" under "Links from known addresses (#255)").
     - A **relay link**, one end of which is the relay, is always proposed: the
       endpoint dials its configured initial link, and the relay must hold the
       joiner's CN before the joiner connects (rule 4, J2). `peer` is the other
@@ -148,8 +151,10 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
       service does not work out which end owns the link: that stays the Zodes' rule.
     - When a node's VS-API session starts, its address may just have become known,
       so the visa service sends `setTopology` to each of its policy peers that has
-      a live VSS connection. Nothing is sent when a session ends: the next topology
-      built for any reason leaves out what can no longer work.
+      a live VSS connection. Nothing is sent when a session ends. Once a node
+      has disconnected and its actor is gone, the next topology built for any
+      reason leaves out its direct links; within a rejoin, its old address may
+      still be proposed until the new `connect` or `open`.
     - Whether a Zode can misuse the address it reports is
       [#264](https://github.com/org-zpr/zl-zipline/issues/264). A wrong address
       only steers where a peer dials: the link still needs the reporter's CA-signed

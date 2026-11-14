@@ -418,7 +418,11 @@ it.
 - otherwise the reported address stands.
 
 A node's **known address** is its policy address, DNS-resolved, or failing that
-the address of its VS-API session. The visa service puts it in `Link.peer` and
+the address it reported in its last `connect` or `open`, stored on its node
+actor. Only the node's next `connect` or `open` replaces it: a rejoin keeps the
+actor, so until then a direct peer may be proposed the old address, and the
+pair falls to rule 13a if the dial fails (ZODE_LINKS.md, "Links from known
+addresses (#255)"). The visa service puts it in `Link.peer` and
 decides from it which links to propose (ZODE_LINKS.md rule 13b,
 `vss_worker::proposed_links`). A relay link is always proposed, with `peer`
 unset when the address is unknown. A direct link is proposed only when both
