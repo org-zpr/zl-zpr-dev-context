@@ -890,8 +890,10 @@ hand-off, none of whose IDs is the other's, holds only those before it
 authenticates, joins fully and pings the visa service.
 `zode-wrong-ca-test.sh` has a Zode in the policy whose certificate comes
 from another CA: the relay refuses it in the handshake, it never links, gets
-a hand-off or registers, and a joiner beside it is unaffected. Neither, nor
-`zode-line-test.sh`, refuses a Stream ID Request.
+a hand-off or registers, and a joiner beside it is unaffected. No Zode in
+either script refuses a Stream ID Request. In `zode-line-test.sh` that holds
+for every Zode with the relay's `forwarding` on; with it off, the relay
+refuses the forward-only binds by design, so only zb and zc are checked.
 
 **Deviations** (each is flagged inline above):
 
