@@ -1081,6 +1081,23 @@ reconnect-looping, so a re-prompt costs one login per genuine link flap.
 ([zipline#157](https://github.com/org-zpr/zl-zipline/issues/157),
 [zipline#166](https://github.com/org-zpr/zl-zipline/issues/166))
 
+**A Zode's own login rides on the VS-API session, not on a link.** The login
+is a `reauthorize` of the node's own actor over its VS-API session. It does
+not use `startLink`, a link's `ActorAuthorization` or the ZDP renewal
+exchange, which the one-mode change
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234)) removes.
+It reuses what stays: the `AuthAgent` capability and its bridge,
+`AuthFailureReason`, the renewal-deadline helpers and the provider list the
+node already holds. Decided with it (gate g116): a replaced session marks the
+login logged out and prompts a resident agent rather than only reporting it
+(q2); a policy re-authentication of a logged-in Zode is answered with a
+renewal, not K2, which would log every Zode user out at every policy install
+(q3); when a resident agent exits the login is kept until it expires, as
+after `connect` (q5). Keeping the login across a session change would need a
+visa-service change (keeping the user namespace on a node re-authentication,
+or resuming with `open`); that was not taken.
+([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233))
+
 
 ## Implementation status
 
@@ -1186,13 +1203,45 @@ what the *Credential lifetimes and re-authentication* section above describes.
   assertions, and refresh legs covering the authority-collision regression
   recorded under `docs/VISA_SERVICE.md`'s *Design decisions*.
 
-**A Zode's own login (Zodes epic):** the visa service implements a node's
-own user login and logout through `reauthorize`, with the `getLoginNonce`
-nonce ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)).
-The node and `ph-cli` side — fetching the nonce, passing it as the
-authorization request's `nonce`, and sending the login — is not built yet
-([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)); until
-then this works only in visa-service unit tests.
+**A Zode's own login (Zodes epic):** built end to end. The visa service
+implements a node's own user login and logout through `reauthorize`, with the
+`getLoginNonce` nonce ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)).
+ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233),
+`adapter/ph/src/zode_login.rs`):
+
+- **CLI.** On a Zode, `ph-cli connect` and `ph-cli auth-agent` take no link
+  id: they call the admin RPC `login` with the interactive `CliAuthAgent`.
+  `connect` exits with the usual exit codes; `auth-agent` stays resident.
+  `ph-cli logout` and `ph-cli login-status` are new. A second login while
+  logged in is refused. In adapter mode the three RPCs refuse.
+- **Login.** ph picks the first advertised OIDC provider, calls
+  `getLoginNonce`, asks the agent interactively for a token bound to that
+  nonce, and sends `reauthorize` with the device leg plus the OIDC blob. The
+  device leg is signed inside libnode2's `VSConn` with the key it already
+  holds. The wait for the user is bounded by
+  `min(OIDC_USER_INTERACTION_TIMEOUT, nonce expiry)`. A
+  `temporarilyUnavailable` answer is retried once with a new nonce.
+- **Renewal.** A timer renews silently ahead of expiry
+  (`renewal_deadline`, the adapter's renewal lead) with a non-interactive
+  agent request and the login's nonce, which the renewal arm ignores.
+  Overlapping renewals share one and are spaced a second apart, since
+  same-second refresh tokens can share an `iat`. A failed renewal is retried
+  until the expiry; **at the expiry ph logs the user out itself** (`[SS]`
+  only), and retries a refused logout, so no stale user authority stays on
+  the actor.
+- **Logout** sends the device leg alone. The machine stays connected.
+- **Session replaced.** After every successful node authentication (a VS-API
+  reconnect, a visa-service restart, a rejoin, a K2 re-authentication) ph
+  marks the login `SessionReplaced`, because the visa service built a new,
+  device-only actor; a resident `auth-agent` is asked for a new interactive
+  login with a new nonce.
+- **Policy re-authentication.** A `requestAuthentication` for the node's own
+  address while logged in is answered with a renewal, which stamps the new
+  `zpr.vinst` and keeps the user; K2 runs only when no renewal can be had.
+
+Covered by unit tests against a fake visa service (`fake_vs.rs`). The netns
+script `zode-login-test.sh` is not in yet; it waits for the Zode netns
+helpers of [zl-zipline#254](https://github.com/org-zpr/zl-zipline/issues/254).
 
 **Implemented (silent re-authentication, umbrella zipline#40):**
 
