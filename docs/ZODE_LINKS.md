@@ -152,9 +152,16 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     - When a node's VS-API session starts, its address may just have become known,
       so the visa service sends `setTopology` to each of its policy peers that has
       a live VSS connection. Nothing is sent when a session ends. Once a node
-      has disconnected and its actor is gone, the next topology built for any
-      reason leaves out its direct links; within a rejoin, its old address may
-      still be proposed until the new `connect` or `open`.
+      with no policy address has disconnected and its actor is gone, the next
+      topology built for any reason leaves out its direct links; within a
+      rejoin, its old address may still be proposed until the new `connect` or
+      `open`. A node with a policy address keeps its direct links whether or not
+      it has a session: its address is known from policy.
+    - As built, "can work" means a **known, dialable** address: a specific IP
+      and a non-zero port, from policy or from a report. The visa service cannot
+      check that the address is reachable. An unreachable or stale address (the
+      retained address above) gives a failed dial, and the pair falls to rule
+      13a.
     - Whether a Zode can misuse the address it reports is
       [#264](https://github.com/org-zpr/zl-zipline/issues/264). A wrong address
       only steers where a peer dials: the link still needs the reporter's CA-signed
