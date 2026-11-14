@@ -1007,8 +1007,8 @@ and the pair falls to rule 13a, which that next session start clears (a
 A Zode survives a change of its own substrate address by the rejoin above:
 rules 11, 11a and 16, with the keep-alive as the detector (gate g114 q2).
 There is no new protocol and no visa-service change. Built in zl-zpr-core#119
-(Windows pktinfo, which lets a Windows Zode bind the wildcard) and the core PR
-for p39's merge set B.
+(Windows pktinfo, which lets a Windows Zode bind the wildcard) and
+zl-zpr-core#123.
 
 | Concern | Location |
 |---|---|
