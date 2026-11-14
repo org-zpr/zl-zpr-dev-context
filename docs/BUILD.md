@@ -139,7 +139,14 @@ adding the g100 fix: no session keys on a node's core visas) and
 `v0.22.0-zodes.5` (`0fc740e`, adding the g101 fix: a policy pass never
 waits on a node's VSS). Core's #252 PR points `VISA_SERVICE_RELEASE` at the
 latest of them. Once #252's merge set C has merged, the next pre-release is
-cut from the merged commit and core moves to it.
+cut from the merged commit and core moves to it: `v0.22.0-zodes.6` is
+`e1dd1c7`, the merge of visaservice#67. For #255/#256 (pd plan p37),
+`v0.22.0-zodes.7` is `8429505`, the head of org-zpr/zl-zpr-visaservice#68,
+cut **before it merged** so that core's PR in the same merge set could run CI.
+It enforces `transitNodes` and loads only zplc 0.21.x policies, so core's PR
+moves to it together with its `.bin2` files rebuilt by zplc 0.21.0. Once the
+set has merged, `v0.22.0-zodes.8` is cut from the merged commit and a one-line
+core PR moves `VISA_SERVICE_RELEASE` to it.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
@@ -478,7 +485,10 @@ Two consequences worth knowing:
    compiler move to it together in #250. The fourth is `zl-v0.32.0-zodes.4`
    (org-zpr/zl-zipline#252, `BootstrapVisas`, `Link` without `visas`,
    `updateSubstrateAddr` gone); core, visaservice and compiler move to it
-   together in #252. It is on common `bdbcc18`. All three consumers (`zl-zpr-core`,
+   together in #252. It is on common `bdbcc18`. The fifth is
+   `zl-v0.32.0-zodes.5` (org-zpr/zl-zipline#255, `Link.peer` optional), on
+   common `f75533a`; core, visaservice and compiler move to it together in
+   #255's merge set. All three consumers (`zl-zpr-core`,
    `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
@@ -553,13 +563,21 @@ PR moves it. The per-repository rules:
    match, not a floor: the container's **major must equal** the minimum's, the
    **minor must equal** it too, and the **patch must be greater than or
    equal**. The minimum is `POLICY_MIN_COMPILER_{MAJOR,MINOR,PATCH}`
-   (`zl-zpr-visaservice/vs/src/config.rs:29-31`).
+   (`zl-zpr-visaservice/vs/src/config.rs:34-36`).
 
    So: bump the compiler's **minor** when the container's meaning or format
    changes, and move `POLICY_MIN_COMPILER_*` with it **in the same build set**.
    **Never move the minor for a non-policy reason** — doing so makes the visa
    service reject policy at runtime for a reason unrelated to policy. Patch
    bumps are free: an old minimum accepts a newer patch.
+
+   **On `feature/zodes` the set is zplc 0.21.0 and a minimum of 0.21.0**
+   (org-zpr/zl-zipline#256, merged with #255). zl-zpr-compiler#27 re-lands
+   0.21.0 as a revert of compiler#24, and zl-zpr-visaservice#68 moves the
+   minimum, so the visa service refuses a 0.20.x policy. Every committed
+   `.bin2` that a visa service loads was rebuilt with zplc 0.21.0 in the same
+   set: core's `integration-test/pregen/*.bin2` and `libnode2/test-data/test.bin2`,
+   and the visa service's `integration-test/pregen/zpt-test*.bin2`.
 
 3. **`zl-zpr-common`, and the `zl-zpr-vsapi` / `zl-zpr-policy` submodules it
    carries: unchanged from consequence 2 above** — tag the crate, then bump

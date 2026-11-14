@@ -21,7 +21,7 @@ evaluation. Changes to issuance behavior should also be read against
 | Source | Status |
 |---|---|
 | *ZPR Visa Service Specification / Design Document* (2025-09-03) | The design intent. Explicitly work-in-progress, and parts are marked sketchy or TODO by its authors. |
-| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.18.0. |
+| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.22.0 on `feature/zodes`. |
 | `zl-zpr-visaservice/admin-http-api.txt` | The admin API, current as of 2026-09-15 and changing frequently. |
 | `zl-zpr-visaservice/libeval/README.md` | The evaluator's API and staging model. |
 
@@ -256,8 +256,15 @@ restart there are none, and the node asks again.
 
 A policy is required at startup; later updates arrive over the admin API. The
 policy carries a compiler version and the visa service rejects versions it does
-not support — this build requires **compiler 0.17.0 or later**
-(`vs/src/config.rs`, `POLICY_MIN_COMPILER_MINOR`).
+not support. On `feature/zodes` it requires **compiler 0.21.x**: the major and
+minor must equal `POLICY_MIN_COMPILER_*` (0.21.0) and the patch must be at least
+its patch (`vs/src/config.rs`; BUILD.md, "Versions and tags"). 0.21 is the
+compatibility boundary set together with routing's enforcement of
+`Policy.transitNodes`
+([#256](https://github.com/org-zpr/zl-zipline/issues/256),
+[#255](https://github.com/org-zpr/zl-zipline/issues/255)), so a 0.20.x policy
+is refused. A policy without that list would load with no transit-capable
+node, and every multi-hop route would be denied `NoRoute`.
 
 A policy can be **tested without loading it**: the service reports which
 existing visas the proposed policy would deny. That is only possible because it
@@ -337,6 +344,20 @@ is logged and the address keeps its static source. Diagnostics carry the
 address source — a rejected pin reads "static", a rejected grant reads
 "granted" — so the log tells the two apart
 (`vs/src/connection_control.rs`, `authorize_connection`).
+
+A node also reports its **substrate address**, the address its peers dial, in
+the `substrate_addr` parameter of `connect` and `open`. Both record it through
+one function, `accept_reported_substrate` (`vs/src/connection_control.rs`,
+[#255](https://github.com/org-zpr/zl-zipline/issues/255)). An unspecified IP or
+port 0 is a `paramError`, with no fallback. If policy declares the node's
+substrate address, the report must equal it, or the call is a `paramError`.
+Otherwise the report stands. The address is stored on the node's actor and
+changes only with the node's next `connect` or `open`. A rejoin keeps the actor,
+so the old address stays known until then. It decides which links the node's
+peers are offered and what they dial (ZODE_LINKS.md rule 13b; ROUTING.md,
+"Substrate address changes"). Nothing checks that the address belongs to the
+node; the link's certificate check bounds what a false one can do, and whether
+that is enough is [#264](https://github.com/org-zpr/zl-zipline/issues/264).
 
 The visa service's own adapter is the one address neither source supplies: it
 is fixed by configuration, so an actor whose *authenticated* CN is `vs.zpr` is
@@ -598,7 +619,7 @@ policy that assumes these values:
 | Visa service link-key CN | `vs.zpr` |
 | VS-API port (nodes → VS) | 5002 |
 | Admin HTTPS port | 8182 |
-| Minimum policy compiler version | 0.15.0 |
+| Minimum policy compiler version | 0.21.0 (minor must match) |
 
 Other operational bounds: 4-hour default authentication lifetime (the
 fallback where no authority sets one — bootstrap authentication itself does
@@ -1125,7 +1146,11 @@ No tracker issues are filed for these unless linked.
   `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   including the failed-pair rule 13a; Zodes accept links by `peerCn` and send
   `reportLinkStates` ([#250](https://github.com/org-zpr/zl-zipline/issues/250),
-  [ZODE_LINKS.md](ZODE_LINKS.md)).
+  [ZODE_LINKS.md](ZODE_LINKS.md)). Since
+  [#255](https://github.com/org-zpr/zl-zipline/issues/255) `Link.peer` is the
+  peer's policy address or the address it reported, or unset on a relay link
+  when neither is known, and a direct link is offered only when both ends'
+  addresses are known (ZODE_LINKS.md rule 13b).
 
 ---
 
@@ -1139,7 +1164,9 @@ No tracker issues are filed for these unless linked.
 | Per-request path | `vs/src/visareq_worker.rs` |
 | Policy lifecycle | `vs/src/policy_mgr.rs`, `visa_reconciler.rs` |
 | Connection admission | `vs/src/connection_control.rs`, `auth.rs`, `login_nonce.rs` |
-| Routing | `vs/src/topology_mgr.rs`, `router.rs` |
+| Routing, transit | `vs/src/topology_mgr.rs`, `router.rs`; `libeval/src/policy.rs` (`transitNodes`) |
+| A node's reported substrate address (`accept_reported_substrate`) | `vs/src/connection_control.rs` |
+| Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`) |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
