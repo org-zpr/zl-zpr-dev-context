@@ -259,11 +259,12 @@ policy carries a compiler version and the visa service rejects versions it does
 not support. On `feature/zodes` it requires **compiler 0.21.x**: the major and
 minor must equal `POLICY_MIN_COMPILER_*` (0.21.0) and the patch must be at least
 its patch (`vs/src/config.rs`; BUILD.md, "Versions and tags"). 0.21 is the
-minor whose policies carry `Policy.transitNodes`, which routing enforces
+compatibility boundary set together with routing's enforcement of
+`Policy.transitNodes`
 ([#256](https://github.com/org-zpr/zl-zipline/issues/256),
-[#255](https://github.com/org-zpr/zl-zipline/issues/255)). A 0.20.x policy is
-refused rather than loaded, because loaded it would deny every multi-hop route
-as `NoRoute`.
+[#255](https://github.com/org-zpr/zl-zipline/issues/255)), so a 0.20.x policy
+is refused. A policy without that list would load with no transit-capable
+node, and every multi-hop route would be denied `NoRoute`.
 
 A policy can be **tested without loading it**: the service reports which
 existing visas the proposed policy would deny. That is only possible because it

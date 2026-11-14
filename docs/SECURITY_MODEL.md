@@ -658,10 +658,13 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, visa-service half** — path computation passes only through
   nodes listed in `Policy.transitNodes`, and an unset or empty list means none
   ([zipline#255](https://github.com/org-zpr/zl-zipline/issues/255)). A policy
-  that takes a node off the list revokes the visas through it, before any step
-  of the policy pass that can fail, and startup does the same for restored
-  visas, so a pass cut short by a restart leaves no visa through the node. A
-  policy entry that is not an IP address fails the policy load. See
+  that takes a node off the list stops new routes through it at once, before
+  any step of the policy pass that can fail. The visas already through it are
+  then marked for revocation, and VSS housekeeping revokes them on the nodes,
+  so they stay usable until that reaches them; a failed revocation write is
+  quarantined and retried. Startup marks restored visas the same way, so a
+  pass cut short by a restart does not leave them unrevoked. A policy entry
+  that is not an IP address fails the policy load. See
   ROUTING.md, "Path computation" and "Transit changes".
 - **A reported substrate address is checked, and steers only dials** — a
   Zode's `connect` or `open` reports the substrate address its peers should

@@ -704,12 +704,15 @@ endpoint to have a policy address (an endpoint that changes networks cannot
 have one), and leaving the link out until a follow-up (no such endpoint could
 join).
 
-**A reported address counts only while its session is live, and a session
-start re-proposes the node's links** (gate g115 q3). An address changes only
-by a rejoin (rule 13a), so a session start is the one moment a peer's link can
+**A reported address comes from the node's session, and a session start
+re-proposes the node's links** (gate g115 q3). An address changes only by a
+rejoin (rule 13a), so a session start is the one moment a peer's link can
 become possible. The visa service then sends `setTopology` to the node's policy
 peers that have a live VSS connection. This replaces what visaservice#65 did
-with `updateSubstrateAddr`. Nothing is sent when a session ends.
+with `updateSubstrateAddr`. Nothing is sent when a session ends. The address is
+stored on the node's actor, which a rejoin keeps, so after a rejoin ends a
+session the old address stays known until the next `connect` or `open`
+replaces it (see "Known limit" under "Links from known addresses (#255)").
 
 **Relay links are always proposed; direct links need both addresses** (gate
 g115 q4). The relay link is the joiner's way in, so it cannot wait for an
