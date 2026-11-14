@@ -199,14 +199,22 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
 
 ## Walkthroughs
 
-**Laptop switches networks.** The initial link drops. The laptop clears that
-link's state (rule 9) and keeps redialing the relay with backoff (rule 11).
-Meanwhile the relay sees a dead link, clears its state and waits. When the new
-network comes up, the laptop's initial link comes back, and it goes through the
-join hand-off again (rule 11a). The laptop then reconnects its VS-API session
-(rule 16), and the visa service either resumes it or demands a
-fresh login. Topology arrives again. Direct links that were up before are
-attempted once by their owners (rule 13).
+**Laptop switches networks.** The laptop's old address goes away, so its
+initial link stops working. There is no network-change listener: the
+keep-alive notices, as for any dead link. After 3 missed keep-alives, about
+12 s, the laptop closes the initial link and clears its state (rule 9). Until
+then, sends from the old address fail, and each one is dropped and counted;
+none stops `ph`. The laptop keeps redialing the relay with backoff (rule 11).
+With a wildcard `self_addr`, each dial takes the local address the OS picks
+for the relay, which is the new network's. Meanwhile the relay sees a dead
+link, clears its state and waits. The new initial link goes through the join
+hand-off again (rule 11a). The laptop then reconnects its VS-API session (rule
+16), and the visa service either resumes it or demands a fresh login. Either
+way, the `connect` or `open` reports the initial link's new local address as
+the laptop's substrate address. Policy gives a laptop no substrate address, so
+the visa service keeps the reported one (rule 13b), and the relay's next
+topology carries it. Topology arrives again. Direct links that
+were up before are attempted once by their owners (rule 13).
 
 **Two reachable Zodes get a direct link.** Both receive `setTopology` naming each
 other. The lower ZPR address dials (rules 1 and 6), the higher one accepts it (rule
@@ -993,6 +1001,34 @@ address it reported stays known until its next `connect` or `open` replaces it.
 In that window a direct peer may be proposed the old address. The dial fails
 and the pair falls to rule 13a, which that next session start clears (a
 `ponytail` note on `known_substrate_addr`).
+
+### Network change (#230)
+
+A Zode survives a change of its own substrate address by the rejoin above:
+rules 11, 11a and 16, with the keep-alive as the detector (gate g114 q2).
+There is no new protocol and no visa-service change. Built in zl-zpr-core#119
+(Windows pktinfo, which lets a Windows Zode bind the wildcard) and the core PR
+for p39's merge set B.
+
+| Concern | Location |
+|---|---|
+| The reported substrate address: `advertised_substrate_addr` if set, else a concrete `self_addr`, else, for a Zode with a wildcard `self_addr` and an initial link, the initial link's current local address with `self_addr`'s port. A wildcard relay with no advertised address is a startup error (`ReportedSubstrateAddr`) | `zl-zpr-core/adapter/ph/src/config.rs` |
+| The initial link's local address (`initial_link_local_addr`) | `zl-zpr-core/adapter/ph/src/zode_links.rs` |
+| `connect` and `open` read the address at each call, not once at startup (`SubstrateAddrSource`) | `zl-zpr-core/libnode2/src/vsconn.rs`, wired in `adapter/ph/src/main.rs` |
+| A send error from a vanished source address is dropped, counted in `OutPacksDrop` and logged at most once per interval, instead of stopping `ph` (`is_network_change_send_error`): network or host unreachable, network down, address not available, and `EINVAL` for a send that named its source (Linux IPv6). Every other send error is still fatal | `zl-zpr-core/adapter/ph/src/fastpath_io.rs` |
+| Detection: the keep-alive closes the initial link after `KEEP_ALIVE_MAX_MISSES`. A comment there notes that OS address or route notifications could detect it sooner | `zl-zpr-core/adapter/ph/src/link_state.rs` |
+| netns scenario 8: zb, with a wildcard `self_addr` and no advertised address, moves to another subnet. It keeps running, drops its sends from the old address, rejoins with a new hand-off, and the relay's next topology carries zb's new address | `zl-zpr-core/integration-test/zode-link-test.sh` |
+
+A concrete `self_addr` is still allowed for a Zode with a static address, and
+does not follow a network change (gate g114 q5). Detection takes up to about
+12 s, plus the redial backoff (at most 30 s) after a long outage. Direct links
+to a Zode at its new address need peers to receive the new `Link.peer`, which
+the visa service sends with the topology it re-proposes on that Zode's session
+start (#255). Windows and macOS were checked by hand: a Zode with a wildcard
+`self_addr` and no advertised address starts, joins through the relay and
+reports its real local address (`windows-node-test.md` and
+`macos-node-test.md`, section 6). Network-change runs on those two hosts are
+[zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263).
 
 ### What waits for which issue
 
