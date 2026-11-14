@@ -282,10 +282,16 @@ where `n` is one more than the network's count of addresses handed out so far
 and an address is unique within its network, so a deleted Zode's address is
 never handed to another machine: DNS answers and open connections elsewhere may
 still name it. `zipline register` writes the address into the Zode's
-`zipline.toml`, `ph node --zpr-addr` claims it, and the network's policy pins it
-to the Zode's CN as the node's `zpr_address`
-([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)). Being
-outside the pools, it is accepted as a static address by the rule above.
+`zipline.toml`, and `ph node --zpr-addr` claims it. The visa service honours
+the claim only once the network's policy pins the address to the Zode's CN as
+the node's `zpr_address`, and only if it passes the static-address checks
+above. ZIPLINE does not write that pin yet: that is
+[org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253), so until
+it lands a registered Zode's address is allocated but not usable. Within a
+ZIPLINE network the counter is the only allocator in the range: ZIPLINE runs
+no trusted service that grants `device.zpr_addr`. A network that added such a
+grant inside `fd5a:5052:8888::/64` could collide with a Zode, and the visa
+service would reject whichever of the two joined second.
 ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251), gate
 g113 q5)
 
