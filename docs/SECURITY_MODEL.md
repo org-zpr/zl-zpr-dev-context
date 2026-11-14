@@ -517,7 +517,9 @@ it: payloads are protected only link by link today (A2A confidentiality is not
 implemented, below), so a relay can read what it forwards. The primary check
 belongs in the visa service: path computation must never route through a node
 that policy does not list as transit-capable (`Policy.transitNodes`). That check
-is not built yet (*Implementation status*, below). The node's check is its `forwarding`
+is built ([zipline#255](https://github.com/org-zpr/zl-zipline/issues/255),
+*Implementation status*, below), and it fails closed: an unset or empty list
+means no node may carry other nodes' traffic. The node's check is its `forwarding`
 setting (`[node] forwarding`, `ph node --forwarding`, default off). With it off,
 the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
@@ -653,6 +655,27 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, node half** — a node with `forwarding` off refuses
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
+- **Non-transit, visa-service half** — path computation passes only through
+  nodes listed in `Policy.transitNodes`, and an unset or empty list means none
+  ([zipline#255](https://github.com/org-zpr/zl-zipline/issues/255)). A policy
+  that takes a node off the list stops new routes through it at once, before
+  any step of the policy pass that can fail. The visas already through it are
+  then marked for revocation, and VSS housekeeping revokes them on the nodes,
+  so they stay usable until that reaches them; a failed revocation write is
+  quarantined and retried. Startup marks restored visas the same way, so a
+  pass cut short by a restart does not leave them unrevoked. A policy entry
+  that is not an IP address fails the policy load. See
+  ROUTING.md, "Path computation" and "Transit changes".
+- **A reported substrate address is checked, and steers only dials** — a
+  Zode's `connect` or `open` reports the substrate address its peers should
+  dial. An unspecified IP or port 0 is refused, and so is any address other
+  than the one policy declares for the node; with none declared, the report
+  stands (`accept_reported_substrate`,
+  [zipline#255](https://github.com/org-zpr/zl-zipline/issues/255)). The address
+  only goes into peers' `Link.peer`: the link still needs the node's CA-signed
+  certificate with the CN policy gives it. Whether a Zode can misuse the address
+  it reports, for example to make peers dial a third party, is
+  [zipline#264](https://github.com/org-zpr/zl-zipline/issues/264).
 - **A Zode's own login, visa-service half** — `getLoginNonce` and the
   `reauthorize` gain/drop for a node's own actor are implemented in the visa
   service and unit-tested per binding row
@@ -689,12 +712,6 @@ not read the RFCs as a description of current guarantees.
 - **`over`-clause path constraints.** Link constraints are recorded in policy
   and routability is checked by the topology manager, but route-aware
   evaluation in `libeval` is a scaffold.
-- **Non-transit, visa-service half.** Policy can list the transit-capable
-  nodes (`Policy.transitNodes`), but path computation does not read the list
-  yet and may route through any node
-  ([zipline#227](https://github.com/org-zpr/zl-zipline/issues/227)). Until it
-  does, keeping traffic off an endpoint rests on that endpoint's `forwarding`
-  setting being off, which a subverted endpoint controls.
 - **Reverse binding for symmetric visas** stays undefined
   ([zipline#246](https://github.com/org-zpr/zl-zipline/issues/246)): the
   previous-hop rule (under *Implemented*) refuses a `Stream ID Request` from a

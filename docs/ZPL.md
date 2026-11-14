@@ -303,7 +303,7 @@ suggested order:
 
 | Block | Purpose |
 |---|---|
-| `[nodes.<ID>]` | Node identity, `zpr_address`, provider attributes, optional substrate addresses (a node without them may still be a link peer; the visa service is meant to fill in the address the node reports, which is not implemented yet: until [#227](https://github.com/org-zpr/zl-zipline/issues/227) such a link end gets no substrate address), and `transit = true` for a node that may carry other nodes' traffic (default false) |
+| `[nodes.<ID>]` | Node identity, `zpr_address`, provider attributes, optional substrate addresses (a node without them may still be a link peer: the visa service uses the address the node reports when it connects, [#255](https://github.com/org-zpr/zl-zipline/issues/255); see ROUTING.md, "Substrate address changes"), and `transit = true` for a node that may carry other nodes' traffic (default false; the visa service routes through no other node, [#255](https://github.com/org-zpr/zl-zipline/issues/255)) |
 | `[links.<ID>]` | Topology, plus the link `attributes` an `over` clause matches. A tag is a `#`-prefixed key with an empty value |
 | `[trusted_services.<NAME>]` | Where attributes come from: `file` (local JSON), `oidc` (an OpenID Connect identity provider), or `zpr-attr/1` (networked attribute service); any other `api` is a configuration error. `default` is special — it is ZPR's own trusted service, the visa service itself verifying bootstrap (RSA) authentications against the policy's `[bootstrap]` keys |
 | `[bootstrap]` | Maps a Noise CN to an RSA public key, for self-authentication before trusted services are reachable |
