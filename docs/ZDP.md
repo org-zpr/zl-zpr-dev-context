@@ -364,7 +364,7 @@ Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
 5 s, and a node drops an adapter dock whose keying does not finish within
 `NODE_KEYING_TIMEOUT = 60 s` (zipline#173). A Zode link is bounded tighter,
-on both ends, so an attempt ends inside the owner's 5-second link-up window:
+on both ends, so an attempt ends inside the owner's 10-second link-up window:
 `ZODE_KEYING_TIMEOUT = 2 s` and `ZODE_HELLO_TIMEOUT = 2 s`.
 
 ### Zode links
@@ -562,8 +562,8 @@ link revoking its visas locally, and `down`/`failed` reported before any visa
 request that follows. **`Stream ID Withdrawal` (5) and `Unbind Egress Stream`
 (13) are docking-session only** (F5): a Zode never sends one on a Zode link and
 refuses one that arrives there, which closes the link. It is covered by unit
-tests and core CI; no flow between two Zodes has crossed a Zode link in a
-netns run yet. That is [#254](https://github.com/org-zpr/zl-zipline/issues/254).
+tests and core CI, and in netns by `zode-line-test.sh` and
+`zode-reroute-test.sh` ([#254](https://github.com/org-zpr/zl-zipline/issues/254)).
 
 **`Bootstrap Visas` (146) is implemented**
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)): the codec and the
@@ -571,7 +571,8 @@ joiner's checks in zl-zpr-core#111 (merged), the relay's request and hand-off
 in zl-zpr-core#113 (#252 merge set C). Check 8, the reverse visa's `prevHop`,
 is zl-zpr-core#115 ([#253](https://github.com/org-zpr/zl-zipline/issues/253)).
 `zode-link-test.sh` runs the hand-off in netns: a joiner's first join, a
-restart and a rejoin after a forced link drop.
+restart and a rejoin after a forced link drop. `zode-join-test.sh` runs two
+joiners at once, each with its own hand-off (#254).
 
 Specified, not implemented:
 

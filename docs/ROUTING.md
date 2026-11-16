@@ -243,7 +243,7 @@ its links up, and what it reports when, is
   its current topology, plus its initial link, that has an outcome
   (ZODE_LINKS.md "Reporting summary" and "Reporting contract"):
   - the owner of a topology link lists it `up`, `down` once an up link is lost,
-    or `failed` once a 5-second link-up window ends without the link coming
+    or `failed` once a 10-second link-up window ends without the link coming
     up. It lists nothing during the first window, or while a new
     `setTopology` retries a `failed` link. A link retried from `down` stays
     listed `down` during its window;
@@ -604,12 +604,13 @@ bootstrap visas (see "Bootstrap routing"). Forwarding over a Zode link is
 implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251),
 ZODE_LINKS.md "Forwarding over Zode links"): a visa's next hop resolves to the
 up Zode link whose peer has that topology address, and an intermediary node
-binds a `forwardOnly` visa from one Zode link to the next. It is covered by unit
-tests and core CI only. With the relay join
+binds a `forwardOnly` visa from one Zode link to the next. With the relay join
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)) every Zode gets its
 own VS-API session, and a joiner's VS-API flow crosses its link to the relay
-in netns; a flow between two Zodes across a Zode link is
-[#254](https://github.com/org-zpr/zl-zipline/issues/254).
+in netns. Since [#254](https://github.com/org-zpr/zl-zipline/issues/254),
+flows between two Zodes run in netns too: `zode-line-test.sh` (zb - relay -
+zc, the relay on `forwardOnly` visas, with its `forwarding` on and off) and
+`zode-reroute-test.sh` (a direct zb-zc link, then the relay once it drops).
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -629,12 +630,12 @@ no CN in policy — no node join policy pins that address together with a
 `device.zpr.adapter.cn`, or two pin it with different CNs — is left out of the
 topology message, with a warning.
 
-The consequence is worth stating plainly: **the control plane computes
-multi-hop routes that no netns run has carried end to end yet.** Everything
-above — Dijkstra, all-paths DFS, path orientation, per-role visa actualization —
-is built, tested, and exercised by unit tests, and the data plane can forward
-over Zode links (#251, unit-tested), while no `zl-zpr-core` integration test
-runs a flow across a Zode link (that is #254). `zl-zpr-demo/multinode-demo`
+Everything above — Dijkstra, all-paths DFS, path orientation, per-role visa
+actualization — is built and unit-tested, and the data plane forwards over
+Zode links (#251). In netns, `zode-line-test.sh` carries a three-Zode route
+(zb - relay - zc) end to end, and `zode-reroute-test.sh` a direct route that
+moves onto the relay when its link drops (#254). Longer routes and more
+than one transit node have not run end to end. `zl-zpr-demo/multinode-demo`
 is the two-node deployment being built out against this gap.
 
 ---
@@ -984,7 +985,7 @@ Implemented on `feature/zodes`:
   reports its own links. Bootstrap visas are requested on demand (see
   "Bootstrap routing"), `Link.visas` is gone, and a policy pass sends nothing
   to a node it cut off. `zode-link-test.sh` runs the join and the rejoin in
-  netns.
+  netns, and `zode-join-test.sh` two joiners at once (#254).
 - **Non-transit routing in the visa service**
   ([#255](https://github.com/org-zpr/zl-zipline/issues/255)). Routes pass only
   through nodes in `Policy.transitNodes` (see "Path computation"). A policy pass
@@ -995,16 +996,16 @@ Implemented on `feature/zodes`:
   policy address is kept, and its link uses the address the node reported in
   `connect` or `open` (see "Substrate address changes", ZODE_LINKS.md rule 13b).
   `zode-link-test.sh` joins a Zode that has no policy address.
+- **Paths through an intermediary node, end to end.** `forwardOnly` visas
+  install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
+  forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
+  and since [#254](https://github.com/org-zpr/zl-zipline/issues/254)
+  `zode-line-test.sh` runs zb - relay - zc in netns: with the relay's
+  `forwarding` on the flow crosses it on `forwardOnly` visas, and with it off
+  the relay refuses them.
 
 Specified or designed, not working:
 
-- **Paths through an intermediary node, end to end.** `forwardOnly` visas
-  install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
-  and forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
-  but only unit tests and core CI exercise it: no such path has run end to
-  end in a netns run. The relay join it needed is in place
-  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)); the scenario is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
 - **Route constraints** (`over`) are compiled and never enforced.
 - **Next-hop selection modes** from ZRFC 6.4 §5.11.2 — a visa specifying an
   exact next hop, or a constrained set of permissible next hops, versus leaving
@@ -1013,9 +1014,10 @@ Specified or designed, not working:
 - **Link/route liveness.** The visa service acts on `reportLinkStates` (see
   "Link-state reports"; [#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   and Zodes send it ([#250](https://github.com/org-zpr/zl-zipline/issues/250));
-  `zode-link-test.sh` checks both ends' reports in netns. The end-to-end
-  check — block a direct link, the flow moves to the relay — is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254), and the demo
+  `zode-link-test.sh` checks both ends' reports in netns, and
+  `zode-reroute-test.sh` the end-to-end check: block a direct link, and the
+  flow moves to the relay
+  ([#254](https://github.com/org-zpr/zl-zipline/issues/254)). The demo
   integration test
   ([#222](https://github.com/org-zpr/zl-zipline/issues/222),
   [#231](https://github.com/org-zpr/zl-zipline/issues/231)). ZRFC 6.4 §5.12
