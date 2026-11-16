@@ -150,7 +150,7 @@ core PR moves `VISA_SERVICE_RELEASE` to it. It is `3a9596e`, which also
 carries the #262 by-ID fetch fix (org-zpr/zl-zpr-visaservice#69).
 `v0.22.0-zodes.9` is `65fe475`, the merge of org-zpr/zl-zpr-visaservice#71
 (#268: a direct link reported `down` is proposed again once), cut after it
-merged; core moves to it with the `zode-reroute-test.sh` change that asserts
+merged; core moves to it (org-zpr/zl-zpr-core#126) with the `zode-reroute-test.sh` change that asserts
 the re-proposal.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
