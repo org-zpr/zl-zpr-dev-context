@@ -691,6 +691,11 @@ its *Design decisions*; the trust consequence is in
 [SECURITY_MODEL.md](SECURITY_MODEL.md).
 ([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229))
 
+On ZIPLINE each network is now two containers ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
+`zipline-relay-<id>` (the relay Zode, valkey and the visa service) and
+`zipline-dns-<id>` (CoreDNS behind the `dns.zpr` Zode, linked to the relay).
+The third, separate visa-service container and its `vs.zpr` adapter are gone.
+
 ### Deferred
 
 Out-of-scope items from the Windows and macOS adapter and node plans, each

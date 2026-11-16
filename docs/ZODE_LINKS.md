@@ -689,8 +689,14 @@ one TUN. There is no `ph adapter` for `vs.zpr`.
   on the TUN. The relay's VS-API connection retries until the visa service
   listens (`run_with_reconnect`). In netns, `ph` applies both addresses and the
   harness waits for `vs.zpr` on `tun0` before it starts the visa service.
-  ZIPLINE pre-creates a persistent TUN with both addresses, so restarting `ph`
-  never takes `vs.zpr` away from a running visa service.
+  ZIPLINE's relay container (`zipline-relay-<id>`, [org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252))
+  pre-creates a persistent TUN with both addresses, so restarting `ph` never
+  takes `vs.zpr` away from a running visa service. Then it starts `ph node
+  --relay true --forwarding true`, valkey (127.0.0.1 only) and, once valkey
+  answers PING, the visa service. If the visa service is not listening on
+  `vs.zpr` (VS-API 5002, admin 8182) within 30 s, the container exits and
+  Docker restarts it: the interim answer to
+  [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266).
 - **A relay refuses an adapter-docked visa service.** On a relay, an adapter
   whose verified certificate carries the visa service's DN is closed at keying,
   and no special-peer name is assigned (gate g117 q4). Nodes that are not relays
@@ -958,6 +964,11 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
   declares a link from the relay to every registered Zode, so the push that
   enrols a machine already holds its relay link. Deleting the machine removes
   that link, and the relay refuses its still-valid certificate from then on.
+  The network's own `dns.zpr` Zode is in that topology too ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
+  ZIPLINE's dns container runs CoreDNS behind a `ph node` named `dns.zpr`,
+  with `--initial-link node.zpr.org@<relay dock address>`, a server-generated
+  link certificate and RSA key, and its fixed address `fd5a:5052:90de::2`. It
+  links to the relay only; no rule gives it a direct link.
   Direct links follow the network's allow rules (ROUTING.md, "Implementation
   status"; [org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
 - A Zode's own address, the one ownership compares, is `zpr_addr[0]`. It must

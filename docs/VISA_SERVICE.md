@@ -125,6 +125,12 @@ The visa service authenticates itself at startup, and the relay authenticates
 to it over VS-API as above. The adapter-docked layout above remains for nodes
 that are not relays (the `one-node-*` tests) until #234. See "The relay hosts
 the visa service, with no adapter" under *Design decisions*, and ZODE_LINKS.md.
+ZIPLINE runs it this way ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)): each network's
+`zipline-relay-<id>` container holds the relay's `ph node`, valkey and the
+visa service, and its policy has no `vs.zpr` bootstrap key or rule. The visa
+service needs neither: it authenticates itself by construction
+(`authenticate_visa_service`), and `approve_connection` approves an actor
+that matches no join policy.
 
 A trusted service can only join through a node once a visa service is
 docked — nodes cannot authenticate connections by themselves. Each time a new
