@@ -312,6 +312,13 @@ local-compute/test-dns.sh` stands up node + VS + web + client + resolver and
 exercises resolution, liveness, both policy hops, machine names and aliases,
 and the collision / precedence / invalid-name controls.
 
+On ZIPLINE the resolver runs behind a Zode named `dns.zpr` ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
+a `ph node` with an initial link to the relay, a server-generated link
+certificate and RSA key, and its address `fd5a:5052:90de::2` pinned by its
+`[nodes]` entry in policy. It links to the relay only, and endpoint queries
+reach it through the relay. The `addresses` file trusted service that used to
+grant that address is gone.
+
 Not built, in rough order of likely demand:
 
 - **Client stub-resolver configuration** by the endpoint daemon (above).
