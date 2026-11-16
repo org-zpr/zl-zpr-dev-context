@@ -643,13 +643,16 @@ docking. Docking still needs a CA-signed link certificate, and the docked actor
 authenticates itself.
 ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253))
 
-**A direct link is proposed only between Zodes that policy lets talk.**
-ZIPLINE derives each direct link from an `allow` rule (ROUTING.md,
-"Implementation status"). A link carries nothing without a visa, so one link
-too many grants no access. What a link does disclose is each end's substrate
-address to the other (`Link.peer`). Deriving links from rules limits that
-disclosure to pairs policy lets talk. Meshing every endpoint was rejected
-because every endpoint would then learn every other's address.
+**A direct link is proposed only between Zodes that an `allow` rule selects.**
+ZIPLINE derives each direct link from the selectors of an `allow` rule
+(ROUTING.md, "Implementation status"). A link carries nothing without a visa,
+so one link too many grants no access. What a link does disclose is each end's
+substrate address to the other (`Link.peer`). Deriving links from `allow`
+selectors limits that disclosure to the pairs those selectors name. It is not
+limited to pairs that may actually talk: `never` rules are ignored, so a pair
+that an `allow` rule selects learns each other's address even when a `never`
+rule denies all of its traffic. Meshing every endpoint was rejected because
+every endpoint would then learn every other's address.
 ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253))
 
 **A joining node's bootstrap visas are requested on demand, and only by the
@@ -866,11 +869,11 @@ not read the RFCs as a description of current guarantees.
   *Design decisions*, above). `zipline register` writes the Zode's link key,
   its certificate, the CA certificate, its ZPR address and the relay's CN and
   substrate address, and `zipline service-run` starts `ph node` with them.
-  Two pieces are still missing. The relay's topology does not list registered
-  Zodes yet, so the relay refuses their links until
-  [org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253).
-  Networks provisioned before the change have no stored CA key, so they
-  refuse registration until their cut-over,
+  The network's generated policy lists every registered Zode in the relay's
+  topology and pins its address
+  ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
+  One piece is still missing: networks provisioned before the change have no
+  stored CA key, so they refuse registration until their cut-over,
   [org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254).
 - **TLS on VS-API and VSS authenticates neither end.** Both are encrypted, but
   neither client verifies the server's certificate and neither presents one.
