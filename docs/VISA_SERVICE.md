@@ -252,6 +252,21 @@ per actor session (`LOGIN_NONCE_MAX_PER_ACTOR`; `getLoginNonce` answers
 and a mint also drops the node's entries from an earlier session. After a
 restart there are none, and the node asks again.
 
+**A node `authenticate` replaces the actor, and the login with it.** Every
+node authentication -- a VS-API reconnect (`HasState`), a reset, a
+visa-service restart, a rejoin, the K2 in-place re-authentication -- builds
+a new, RSA-only actor and stamps a new session (`authenticate_node`), so a
+user who was logged in is gone on the visa-service side. Only `open`
+(`resume_node_actor_for_open`) keeps the stored actor, and ph does not use
+it. ph knows this and marks its login `SessionReplaced`, prompting a
+resident `ph-cli auth-agent` for a new login
+([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)). The
+visa service does not re-check live visas on that path, so visas granted on
+the dropped user's attributes live until they expire (*Known gap* in
+[SECURITY_MODEL.md](SECURITY_MODEL.md)). A policy install's
+`requestAuthentication` to a logged-in Zode is answered with a `reauthorize`
+renewal, which keeps the user, instead of K2.
+
 ### Loading policy
 
 A policy is required at startup; later updates arrive over the admin API. The
