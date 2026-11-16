@@ -318,9 +318,10 @@ service has no expiry sweep for a node's own actor.
 **Known gap: live visas are not re-checked when a session replacement drops
 a login.** A node `authenticate` calls no visa revalidation, so visas granted
 on the user's attributes live until they expire. An explicit logout and the
-expiry logout do re-check them (above). Same class as "ordinary renewals with
-changed claims skip visa revalidation". A visa-service follow-up; not filed
-yet.
+expiry logout do re-check them (above); `zode-login-test.sh` sees a logout
+revoke the user flow's visa. Same class as "ordinary renewals with
+changed claims skip visa revalidation". A visa-service follow-up:
+[zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265).
 
 **What this hands to an attacker, and why it is not a new threat.** The
 binding is enforced by the visa service against its own session record, and
@@ -713,8 +714,9 @@ not read the RFCs as a description of current guarantees.
   ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)): login,
   logout, silent renewal, logout at expiry, the session-replaced prompt and
   the renewal answer to a policy re-authentication, unit-tested against a
-  fake visa service. No netns test covers it yet (`zode-login-test.sh` waits
-  for [zl-zipline#254](https://github.com/org-zpr/zl-zipline/issues/254)).
+  fake visa service, and end to end in netns by `zode-login-test.sh`. The
+  visa service does not re-check live visas when a session replacement drops
+  a login ([zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265)).
 
 - **Stream binding restricted to the previous hop (gap 7)**
   ([zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)): a node

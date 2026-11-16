@@ -1242,9 +1242,11 @@ ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl
   address while logged in is answered with a renewal, which stamps the new
   `zpr.vinst` and keeps the user; K2 runs only when no renewal can be had.
 
-Covered by unit tests against a fake visa service (`fake_vs.rs`). The netns
-script `zode-login-test.sh` is not in yet; it waits for the Zode netns
-helpers of [zl-zipline#254](https://github.com/org-zpr/zl-zipline/issues/254).
+Covered by unit tests against a fake visa service (`fake_vs.rs`), and end to
+end by the netns script `zode-login-test.sh` (core CI runs it as its own
+job): logged out, then `connect`, `logout`, a policy install answered by a
+renewal, silent renewal past the login's lifetime, and a visa-service
+restart that drops the login and prompts the resident agent again.
 
 **Implemented (silent re-authentication, umbrella zipline#40):**
 
