@@ -1154,7 +1154,7 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
 - **#234** retiring adapters: the `one-node-*` scripts still dock the visa
   service as an adapter on a node that is not a relay, and the relay's unused
   self-granted VS-API pair (#229) goes then.
-- **A visa-service follow-up (not filed yet):** the visa service should exit
+- **#266** (visa service): the visa service should exit
   when a listener cannot bind `vs_addr`. Today it keeps running without
   VS-API, which is why the relay's startup order matters.
 - **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), background

@@ -1079,7 +1079,7 @@ to be set. The relay's held-back `ConnectRequest` for the adapter
 (`deferred_vs_connect`) was a second registration of `vs.zpr`; without an
 adapter there is none, and nothing in the visa service depended on it.
 
-**Follow-up, not filed yet:** the visa service should exit when a listener
+**Follow-up, [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266):** the visa service should exit when a listener
 cannot bind `vs_addr`, instead of running without VS-API.
 ([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229))
 
