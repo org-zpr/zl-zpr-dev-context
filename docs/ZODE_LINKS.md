@@ -890,7 +890,8 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   CN, an unspecified IP and port 0. Node only.
 - **Relay.** `relay = true` in `[node]`, or `ph node --relay true`. Default off.
   A relay has no initial link: setting both is a config error.
-- A Zode's own address, the one ownership compares, is `zpr_addr[0]`.
+- A Zode's own address, the one ownership compares, is `zpr_addr[0]`. It must
+  be IPv6, because the VS-API session to `vs.zpr` leaves from it (#229).
 - **The relay hosts the visa service** (#229, gate g117 q2). A relay lists
   `fd5a:5052::1` (`vs.zpr`) in `zpr_addr`, and not first. No address may be
   listed twice, and a node that is not a relay never lists `vs.zpr`.
