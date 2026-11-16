@@ -618,6 +618,40 @@ that re-provisioning replaces anyway).
 g113 q3, q6 and q7; the 2026-11-13 entries in zipline's
 `docs/decisions/adapters.md`)
 
+**On ZIPLINE an endpoint is a node, and the node role gives it nothing an
+adapter didn't have** (Zodes plan §7 check 4). Every ZIPLINE machine
+authenticates as a node, so it matches its own node join policy. An adapter
+matches every join policy except the ones flagged node.
+`Policy::join_services_for_role` gives a node all of them, and only while it
+still matches its node join policy. So what a Zode gains over an adapter with
+the same CN and tags is exactly what its node join policy grants (compiler
+`set_connects` and `add_node`):
+- `/zpr/<cn>`, a placeholder service on TCP port 1. No communication policy
+  grants it, and no ZPL statement can name it.
+- `zpr/<cn>/vss`, the node's visa support service. The compiler's only rule for
+  it is the built-in "allow visa service to access node visa support", so only
+  the visa service reaches it.
+
+The node join policy also pins the CN to the node's `zpr_address`, so the visa
+service refuses a Zode that asks for another address. The compiler flags every
+node join policy `vsdock` (its TODO "Not all nodes are VS docks"), but the visa
+service only parses that flag and never acts on it. A ZIPLINE compile test pins
+all of this against the compiled policy with zpdump. The node role also enables
+things that aren't services: node authentication, a self-renewing `reauthorize`
+(zl-zipline#232), a router vertex (never transit unless listed) and adapter
+docking. Docking still needs a CA-signed link certificate, and the docked actor
+authenticates itself.
+([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253))
+
+**A direct link is proposed only between Zodes that policy lets talk.**
+ZIPLINE derives each direct link from an `allow` rule (ROUTING.md,
+"Implementation status"). A link carries nothing without a visa, so one link
+too many grants no access. What a link does disclose is each end's substrate
+address to the other (`Link.peer`). Deriving links from rules limits that
+disclosure to pairs policy lets talk. Meshing every endpoint was rejected
+because every endpoint would then learn every other's address.
+([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253))
+
 **A joining node's bootstrap visas are requested on demand, and only by the
 relay.** Bootstrap visas let a node that has no actor yet reach VSAPI, so
 whoever carries them relays that node's traffic. `requestBootstrapVisas` is

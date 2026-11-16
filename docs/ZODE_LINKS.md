@@ -814,6 +814,13 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   SECURITY_MODEL.md, *Design decisions*).
 - **Relay.** `relay = true` in `[node]`, or `ph node --relay true`. Default off.
   A relay has no initial link: setting both is a config error.
+- **The relay's topology on ZIPLINE.** Rule 4 needs every joiner's CN in the
+  relay's topology before the joiner connects. ZIPLINE's generated policy
+  declares a link from the relay to every registered Zode, so the push that
+  enrols a machine already holds its relay link. Deleting the machine removes
+  that link, and the relay refuses its still-valid certificate from then on.
+  Direct links follow the network's allow rules (ROUTING.md, "Implementation
+  status"; [org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
 - A Zode's own address, the one ownership compares, is `zpr_addr[0]`.
 
 ### Wire
