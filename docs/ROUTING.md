@@ -1003,6 +1003,26 @@ Implemented on `feature/zodes`:
   `zode-line-test.sh` runs zb - relay - zc in netns: with the relay's
   `forwarding` on the flow crosses it on `forwardOnly` visas, and with it off
   the relay refuses them.
+- **ZIPLINE generates the topology**
+  ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)). The
+  orchestrator's policy render (`packages/orchestrator/src/policy.ts`
+  `renderNetworkPolicy`) declares:
+  - every registered Zode as a node, with its CN as provider, its ZPR address
+    as `zpr_address`, and no `substrate_addrs` (it reports its own);
+  - the relay as the only node with `transit = true`;
+  - a link from the relay to every Zode;
+  - a direct link for each pair of Zodes that an `allow` rule lets talk
+    (`zode-links.ts` `zodeLinkPairs`): each Zode the rule's subject selects
+    paired with each Zode its service's host selects. A link is undirected,
+    and ports, direction and `never` rules don't affect it.
+
+  Platform rules (DNS, VisaService) make no direct link, and neither does an
+  ejected network's hand-written ZPL, which gets relay links only. A rule edit
+  pushes the new topology through ZIPLINE's compile-checked policy push. A tag
+  edit pushes only when it moves a tag rule's link. The render has no
+  `[visa_service] dock_node`: zplc 0.21.0 warns that it "is not enforced",
+  which fails ZIPLINE's `--Werror` compile gate. ZIPLINE's own decision record
+  is the 2026-11-16 entry in `docs/decisions/policy.md`.
 
 Specified or designed, not working:
 

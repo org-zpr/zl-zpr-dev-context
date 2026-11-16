@@ -286,9 +286,8 @@ still name it. `zipline register` writes the address into the Zode's
 `zipline.toml`, and `ph node --zpr-addr` claims it. The visa service honours
 the claim only once the network's policy pins the address to the Zode's CN as
 the node's `zpr_address`, and only if it passes the static-address checks
-above. ZIPLINE does not write that pin yet: that is
-[org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253), so until
-it lands a registered Zode's address is allocated but not usable. Within a
+above. ZIPLINE's generated policy writes that pin for every registered Zode
+([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)). Within a
 ZIPLINE network the counter is the only allocator in the range: ZIPLINE runs
 no trusted service that grants `device.zpr_addr`. A network that added such a
 grant inside `fd5a:5052:8888::/64` could collide with a Zode, and the visa
