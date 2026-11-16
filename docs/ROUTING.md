@@ -610,7 +610,9 @@ own VS-API session, and a joiner's VS-API flow crosses its link to the relay
 in netns. Since [#254](https://github.com/org-zpr/zl-zipline/issues/254),
 flows between two Zodes run in netns too: `zode-line-test.sh` (zb - relay -
 zc, the relay on `forwardOnly` visas, with its `forwarding` on and off) and
-`zode-reroute-test.sh` (a direct zb-zc link, then the relay once it drops).
+`zode-reroute-test.sh` (a direct zb-zc link, then the relay once it drops,
+then the link again for new flows once it is back,
+[#231](https://github.com/org-zpr/zl-zipline/issues/231)).
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -634,7 +636,8 @@ Everything above — Dijkstra, all-paths DFS, path orientation, per-role visa
 actualization — is built and unit-tested, and the data plane forwards over
 Zode links (#251). In netns, `zode-line-test.sh` carries a three-Zode route
 (zb - relay - zc) end to end, and `zode-reroute-test.sh` a direct route that
-moves onto the relay when its link drops (#254). Longer routes and more
+moves onto the relay when its link drops (#254), and new flows back onto
+the link once it is up again (#231). Longer routes and more
 than one transit node have not run end to end. `zl-zpr-demo/multinode-demo`
 is the two-node deployment being built out against this gap.
 
@@ -1017,10 +1020,19 @@ Specified or designed, not working:
   `zode-link-test.sh` checks both ends' reports in netns, and
   `zode-reroute-test.sh` the end-to-end check: block a direct link, and the
   flow moves to the relay
-  ([#254](https://github.com/org-zpr/zl-zipline/issues/254)). The demo
-  integration test
-  ([#222](https://github.com/org-zpr/zl-zipline/issues/222),
-  [#231](https://github.com/org-zpr/zl-zipline/issues/231)). ZRFC 6.4 §5.12
+  ([#254](https://github.com/org-zpr/zl-zipline/issues/254)). The same
+  script is the demo integration test
+  ([#231](https://github.com/org-zpr/zl-zipline/issues/231)). A bulk
+  transfer leaves the relay's received bytes flat over the direct link and
+  raises them through the relay. Once the block is lifted, the link comes
+  back and new flows go direct again. **As built, a link reported `down`
+  comes back only on a `setTopology` push** (ZODE_LINKS.md rules 10 and 13):
+  a policy install, or a peer's VS-API session starting. The test
+  re-installs the policy to get one.
+  [#268](https://github.com/org-zpr/zl-zipline/issues/268) has the visa
+  service re-propose a `down` link after a short delay. Flows that moved to
+  the relay stay there until their visas expire, because only new visas
+  take the direct link (Zodes plan §5.8). ZRFC 6.4 §5.12
   sends these reports to the admin service and §5.11 re-heralds a visa onto a
   new path; the implementation folds the first into the visa service and
   replaces the second with revoke-and-re-request.
