@@ -102,8 +102,10 @@ entirely statically authenticated ZPRnet.
 
 Bootstrap configuration maps Common Names from ZPR link keys to RSA public key
 files; that list is exactly the set of adapters permitted to authenticate
-statically, and it must include the visa service adapter. The visa service
-reserves the link key name **`vs.zpr`**.
+statically, and in the adapter-docked layout it must include the visa service
+adapter. The visa service reserves the link key name **`vs.zpr`**. On a relay
+Zode that hosts the visa service there is no such adapter: see the next
+section.
 
 The protocol: the adapter signs challenge data from the node with its RSA
 private key, the node forwards the adapter CN and the signature to the visa
@@ -115,6 +117,14 @@ The visa service activates by docking with a node through its adapter. The
 adapter establishes a link with its designated CN, the node identifies the visa
 service by that CN, and the node then authenticates to the visa service over
 the VS-API using its own private RSA key.
+
+**On a relay Zode there is no visa-service adapter** (zl-zipline#229). The
+visa service runs beside the relay's `ph node`, `vs.zpr` is a second address on
+the relay's TUN, and the relay refuses a dock from the visa service's adapter.
+The visa service authenticates itself at startup, and the relay authenticates
+to it over VS-API as above. The adapter-docked layout above remains for nodes
+that are not relays (the `one-node-*` tests) until #234. See "The relay hosts
+the visa service, with no adapter" under *Design decisions*, and ZODE_LINKS.md.
 
 A trusted service can only join through a node once a visa service is
 docked — nodes cannot authenticate connections by themselves. Each time a new
