@@ -966,7 +966,25 @@ zb and zc bring up a direct link and ping across it with no forward-only
 visa on the relay; the zb-zc substrate is blocked, both ends report the link
 down, the visa service stops routing over it, and zb's next echo re-requests
 and comes back through the relay on forward-only visas (rules 9, 10, 14, 15;
-F3, F4, F6). `zode-line-test.sh` runs a flow between two Zodes through the
+F3, F4, F6). Since [#231](https://github.com/org-zpr/zl-zipline/issues/231)
+the same script is the netns Zodes demo. A bulk transfer leaves the relay's
+received bytes (`br0`'s RX counter in its namespace) flat over the direct
+link and raises them through the relay. Then the block is lifted, and new
+flows go direct again. *As built:*
+- **A `down` link comes back only on a `setTopology` push.** The owner does
+  not redial (rule 10), and nothing re-proposes the link by itself (rule 13).
+  The test re-installs the policy to retry the link.
+  [#268](https://github.com/org-zpr/zl-zipline/issues/268) has the visa
+  service send the pair new topology a short delay after a `down` report.
+  The owner then makes one attempt, and a `failed` report falls to rule 13a,
+  so the retries are bounded.
+- **Flows that moved to the relay stay there** until their visas expire.
+  Only new visas take the link (Zodes plan §5.8). A TCP client visa
+  wildcards the source port, and every echo request between two addresses
+  shares one ICMP visa, so a new connection or ping between the same pair
+  is not a new flow. The test's new flow is zc -> zb.
+
+`zode-line-test.sh` runs a flow between two Zodes through the
 relay with its `forwarding` on and off (F1, F2, F8).
 
 | Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
