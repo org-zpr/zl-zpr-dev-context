@@ -39,8 +39,10 @@ handling.
 - Reaching a Zode that can't be dialed (NAT traversal, ZBOLT, rendezvous). That is
   v2. **In v1 a direct (non-relay) link exists only between two Zodes that can each
   reach the other.** Everything else goes through the relay.
-- Background retries of direct links. A failed direct link stays down until the
-  visa service sends new topology.
+- Unbounded background retries of direct links. A direct link reported `down`
+  gets **one** re-proposal from the visa service (rules 10, 13 and 13a,
+  zl-zipline#268). If that attempt fails, the link stays down until something
+  about the pair changes. The Zode itself never retries a topology link.
 - Preserving link or stream state across a link loss.
 - Backwards compatibility. Old or legacy values and formats are rejected, not
   tolerated (operator rule for all Zodes work).
@@ -117,7 +119,11 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
    link**: streams bound over it, visas learned over it (including VS-API and
    bootstrap visas carried over an initial link), and pending requests.
    Re-requesting visas afterwards is harmless. Nothing about the old link survives.
-10. For a topology link, each side reports `down`. The owner does **not** redial.
+10. For a topology link, each side reports `down`. The owner does **not** redial:
+    the Zode keeps no retry logic. Instead, the visa service sends `setTopology`
+    to both ends again `LINK_REPROPOSE_DELAY` (5 s) after the first `down` report,
+    and the owner retries under rule 13 (zl-zipline#268; see rule 13a for the
+    bound).
 11. For the initial link, the endpoint redials with backoff until it comes back.
     The relay does nothing except clear the state, per rule 9.
 11a. **Every return to the relay is a join.** Each new initial link goes through the
@@ -132,8 +138,11 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
 12. A link removed from `setTopology` is closed, and its state cleared per rule 9.
     It is no longer reported.
 13. **Every `setTopology` retries** each `failed` or `down` link it still contains:
-    the owner makes one more attempt under rule 6. Links that are up are untouched,
-    and the Zode keeps no other retry logic.
+    the owner makes one more attempt under rule 6. Links that are up, or still in
+    their link-up window, are untouched, and the Zode keeps no other retry logic.
+    Such a `setTopology` comes from a policy install, a peer's VS-API session
+    start, or, since zl-zipline#268, the visa service's re-proposal of a link
+    reported `down` (rule 13a).
 13b. **The visa service proposes a direct link only when it can work.** It needs a known substrate address for the peer the owner must dial, from policy or reported by that peer. No address means no direct link, and traffic goes through the relay. The visa service never asks a Zode to make a connection it can't possibly make. *(Operator, 2026-11-12; #255 drops visaservice#65's `[::]:0` fallback.)* In detail (gate g115 q2-q4):
     - A node's **known address** is its policy substrate address (DNS-resolved).
       Failing that, it is the address the node reported in its last `connect` or
@@ -174,8 +183,25 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     rejoin's `connect` or `open`. (`updateSubstrateAddr` was removed from the
     schema in #252, after #223 was closed.) A `failed` report never itself causes a topology send,
     so the two can't loop. Dropping the link from topology closes it under rule 12.
+    A policy install is not a pair change: it keeps the marks.
     This is also the v2 hook: once both sides have holes open, the visa service just
     proposes the link again.
+
+    **A `down` report gets one re-proposal** (zl-zipline#268, visaservice#71).
+    When either end of a direct link newly reports it `down` (its previous
+    snapshot did not list the peer as `down`), the visa service waits
+    `LINK_REPROPOSE_DELAY` (5 s) and then sends `setTopology` to **both** ends.
+    The other end's `down`, and any repeated `down`, within the delay coalesce
+    into that one send. When the delay ends, the visa service checks again and
+    sends nothing if the pair has been marked failed, the link is up again, policy
+    no longer declares it, or either end has no live VSS connection (that end is
+    rejoining, and its session start proposes its links anyway). Relay links are
+    left out: the endpoint redials its initial link itself (rule 11).
+
+    **The bound.** Each re-proposal needs a new `down`, and a link reports `down`
+    only after it was `up`. A failed attempt ends in `failed`, which marks the
+    pair, and then nothing is proposed again. So one real `up` buys at most one
+    retry, and the Zode and the visa service cannot loop.
 
 ### Routing on link state
 
@@ -230,7 +256,23 @@ duplicate is possible.
 **A direct link can't come up** (a firewall, say). After 10 seconds the owner
 reports `failed` (rule 6). Traffic goes through the relay. The visa service stops
 proposing that link (rule 13a) until something about the pair changes. When it does
-propose the link again, the owner tries once more (rule 13).
+propose the link again, the owner tries once more (rule 13). If the link was up and
+then went `down` behind a lasting block, the visa service proposes it once more
+after `LINK_REPROPOSE_DELAY`; that attempt fails, and the pair stays on the relay
+from then on, as above. A policy install does not bring it back; a restart or
+rejoin of either end does. `zode-reroute-test.sh` steps 3 and 4 run this case.
+
+**A direct link blips.** The substrate between two Zodes drops for a few seconds.
+Keep-alive gives up after about 9-12 s, and both ends report the link `down` (rule
+10). The visa service revokes the visas over it (rule 15), and their flows
+re-request through the relay. `LINK_REPROPOSE_DELAY` (5 s) after the first `down`
+report, the visa service sends `setTopology` to both ends (rule 13a). The owner
+redials about once a second for its 10 s window (rule 6). If the outage has cleared,
+the link comes back, both report `up`, and new flows take it again (rule 14). No
+policy install or restart is needed. This works for an outage that clears within
+about `LINK_REPROPOSE_DELAY` + `LINK_UP_WINDOW` (15 s) of the first `down`. A longer
+one ends in `failed`, as in the walkthrough above. `zode-reroute-test.sh` step 5
+runs this case.
 
 **The owner restarts.** It dials again. The non-owner's old link is replaced by
 the new one (rule 5), and both report `up`.
@@ -856,6 +898,7 @@ see "Relay join (#252)" below.
 | Recognising an inbound Zode handshake | `zl-zpr-core/adapter/ph/src/mgmt/dispatch.rs`, `km_noise.rs` (`ZODE_HANDSHAKE_MARKER`) |
 | `reportLinkStates` RPC; per-link `setTopology` decoding | `zl-zpr-core/libnode2/src/vsconn.rs`, `libnode2/src/vss.rs` (`decode_topology_links`) |
 | Rule 14 (`end_agrees`), rule 13a (failed pairs, `record_failures`, `clear_failed_pairs_for`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
+| The re-proposal after a `down` report (rules 10, 13 and 13a; zl-zipline#268, visaservice#71): newly-down detection and the pending marks (`LinkStateTable::newly_down`, `mark_repropose`, `take_repropose`), `TopologyMgr::record_link_states`; scheduling and the delayed send (`schedule_link_repropose`, `repropose_link_after_down`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
 | netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology; since #252 also the join, restart and rejoin (see "Relay join (#252)"); since #229 the relay hosts the visa service, with §7 check 1 asserted at the end of scenario 1 | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
 | The relay hosts the visa service (#229): the relay's `zpr_addr` rules (`check_node_zpr_addrs`); the VS-API connection binds `zpr_addr[0]` (`VSConn::new`, `connect_from`); a relay refuses the visa service's adapter at keying (`process_keying_done`) | `zl-zpr-core/adapter/ph/src/config.rs`, `libnode2/src/vsconn.rs`, `adapter/ph/src/link_state.rs` |
 | netns tests (#254): two joiners at once; zb - relay - zc with the relay's forwarding on and off; a direct link that drops and re-routes through the relay; a Zode in the policy with a certificate from another CA | `zl-zpr-core/integration-test/zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh`, `zode-wrong-ca-test.sh` |
@@ -881,6 +924,18 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   owner also closes any attempt still in flight.
 - `REPORT_COALESCE` = 100 ms: report requests that close together go out as one
   snapshot, `zode_links.rs`.
+
+In `zl-zpr-visaservice/vs/src/config.rs`:
+
+- `LINK_REPROPOSE_DELAY` = 5 s, from the first `down` report of a direct link
+  to its re-proposal (rule 13a, zl-zipline#268, gate g149). A silent link is
+  reported only after keep-alive gives up (about 9-12 s), but a closed
+  connection is reported at once, so the wait keeps the retry from landing in
+  the same instant as the fault. The two ends detect a silent link up to one
+  3 s keep-alive period apart, so the second end's `down` coalesces into the
+  pending re-proposal. With the owner's 10 s window, an outage that clears
+  within about 15 s of the first `down` heals by itself. Much longer would
+  only keep the pair on the relay for no benefit.
 
 ### Configuration
 
@@ -971,13 +1026,15 @@ the same script is the netns Zodes demo. A bulk transfer leaves the relay's
 received bytes (`br0`'s RX counter in its namespace) flat over the direct
 link and raises them through the relay. Then the block is lifted, and new
 flows go direct again. *As built:*
-- **A `down` link comes back only on a `setTopology` push.** The owner does
-  not redial (rule 10), and nothing re-proposes the link by itself (rule 13).
-  The test re-installs the policy to retry the link.
-  [#268](https://github.com/org-zpr/zl-zipline/issues/268) has the visa
-  service send the pair new topology a short delay after a `down` report.
-  The owner then makes one attempt, and a `failed` report falls to rule 13a,
-  so the retries are bounded.
+- **A `down` link is proposed again once.** The owner does not redial (rule
+  10). Since [#268](https://github.com/org-zpr/zl-zipline/issues/268), the
+  visa service sends the pair new topology `LINK_REPROPOSE_DELAY` after a
+  `down` report. The owner then makes one attempt, and a `failed` report
+  falls to rule 13a, so the retries are bounded. The test's long block
+  outlasts that attempt, so it asserts one re-proposal and then `failed`;
+  it then restarts zc, a pair change, to bring the link back, because a
+  policy install keeps the failed mark. A last step blocks the link only
+  until both ends report it `down`, and the link comes back by itself.
 - **Flows that moved to the relay stay there** until their visas expire.
   Only new visas take the link (Zodes plan §5.8). A TCP client visa
   wildcards the source port, and every echo request between two addresses
@@ -1231,13 +1288,15 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
 - **#266** (visa service): the visa service should exit
   when a listener cannot bind `vs_addr`. Today it keeps running without
   VS-API, which is why the relay's startup order matters.
-- **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), background
-  retries of direct links, more than one relay, and relays that don't host the
-  visa service.
+- **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), unbounded
+  background retries of direct links, more than one relay, and relays that
+  don't host the visa service. The bounded retry, one re-proposal per `down`
+  report, is in v1 (zl-zipline#268, visaservice#71, visa service
+  `v0.22.0-zodes.9`).
 
 ## Related
 
 - #251 node-to-node forwarding, #252 relay join, #253 gap 7, #254 netns
   scripts. These build on this lifecycle.
 - #242 (removing "never reported = up") is folded into rule 14.
-- v2: dialing a Zode that can't be reached, ZBOLT and rendezvous, retries.
+- v2: dialing a Zode that can't be reached, ZBOLT and rendezvous, unbounded retries.
