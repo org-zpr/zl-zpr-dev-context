@@ -430,6 +430,17 @@ A visa whose path has fewer than two nodes has no `prevHop`. Core enforces it
 since [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253), so a
 copy without `prevHop` is never bound from a Zode link.
 
+A node that gets a `Stream ID Request` for a visa it does not hold fetches it
+by ID (`visaRequestById`). The visa service returns that node's own copy,
+actualized for it, of each requested visa that is still grantable to it, when
+the VSS push would deliver that copy now or already has
+(`VisaMgr::visas_for_node_by_ids`,
+[#262](https://github.com/org-zpr/zl-zipline/issues/262)). So it never hands
+out an ingress copy that ingress-last delivery still holds back, nor a copy
+off the node's path, revoked or quarantined. The fetch is read-only: it never
+marks a copy installed, and the later VSS push of the same copy is a no-op on
+the node.
+
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
 
@@ -1068,6 +1079,39 @@ g101; `vs/src/event_mgr.rs`):
   for the policy pass, a disconnect and a rejoin's teardown alike. No lock is
   held across a VSS call.
 
+### A by-ID fetch returns the node's pending copy
+
+[#262](https://github.com/org-zpr/zl-zipline/issues/262): a joining or
+restarted Zode refused its first `Stream ID Request`s for a few seconds. The
+cause was not ingress-last delivery, which holds back only an ingress copy. For
+every on-demand visa the requester is the ingress: it gets its copy in the
+reply and starts traffic at once, while every other hop gets its copy by a
+background VSS push. A Zode whose VSS connection is not up yet (it starts
+`VSS_START_DELAY` after registration, and a restart starts a new one) is asked
+for a stream before that push can reach it. It fetches the visa by ID, and
+`visaRequestById` returned only copies already recorded `Installed`, so the
+answer was empty and the Zode refused the request. The schema already said
+that an empty answer means the visa does not exist for that node; only the
+filter disagreed. The decisions (gate g121):
+
+- **The fetch returns every copy the push would deliver now, or already has**
+  (`VisaMgr::visas_for_node_by_ids`): the node's own copy, still grantable,
+  under the same ingress-last rule as the push. It does not widen what a node
+  can learn, and the ordering guarantee holds: an ingress copy is fetchable
+  only once every other hop has acked. A quarantined copy, even an `Installed`
+  one, is no longer returned.
+- **The fetch is read-only** (q3). It does not mark the copy `Installed`. The
+  VSS push stays the only acknowledged delivery, so ingress-last waits on real
+  acks. The cost is one redundant push per fetched copy, a no-op on the node
+  (`insert_visa` of a held ID).
+- **Rejected:** answering "pending" and having core retry (b), which needs a
+  schema round and a core retry loop and adds latency to wait for a copy the
+  visa service already has; and core treating the refusal as retryable (c),
+  which masks the bug and adds a retry path to the security-critical bind.
+- **Not done:** in a restart, a `Stream ID Request` that reaches the Zode
+  before its new VS-API session is up still fails, because there is no
+  session to fetch over. It was not seen in the logs or the acceptance runs.
+
 ### Deferred
 
 No tracker issues are filed for these unless linked.
@@ -1168,7 +1212,7 @@ No tracker issues are filed for these unless linked.
 | A node's reported substrate address (`accept_reported_substrate`) | `vs/src/connection_control.rs` |
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
-| A node's core visas (J5a, J5b, J9), ingress-last delivery | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`) |
+| A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
 | State | `vs/src/db/` |
