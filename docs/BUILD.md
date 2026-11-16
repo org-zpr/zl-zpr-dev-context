@@ -146,7 +146,8 @@ cut **before it merged** so that core's PR in the same merge set could run CI.
 It enforces `transitNodes` and loads only zplc 0.21.x policies, so core's PR
 moves to it together with its `.bin2` files rebuilt by zplc 0.21.0. Once the
 set has merged, `v0.22.0-zodes.8` is cut from the merged commit and a one-line
-core PR moves `VISA_SERVICE_RELEASE` to it.
+core PR moves `VISA_SERVICE_RELEASE` to it. It is `3a9596e`, which also
+carries the #262 by-ID fetch fix (org-zpr/zl-zpr-visaservice#69).
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and

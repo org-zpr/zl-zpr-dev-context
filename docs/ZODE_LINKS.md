@@ -697,8 +697,10 @@ worker re-send the current state at its next heartbeat.
   only at an adapter or local-actor ingress, and its `Stream ID Request` is
   checked at the next hop against the new visa's `prev_hop`.
 - **The visa-by-ID fetch runs before the check**: `prev_hop` is in the visa.
-  The cost is bounded: the visa service returns only copies installed on
-  this Zode, and the requestor's transaction IDs bound its open requests.
+  The cost is bounded: the visa service returns only this Zode's own copy
+  of a visa on its path, when the VSS push would deliver it now or already
+  has ([#262](https://github.com/org-zpr/zl-zipline/issues/262)), and the
+  requestor's transaction IDs bound its open requests.
 - **A refusal keeps the link open**: it is an error `Stream ID Response`,
   not the handler-error path F5 uses.
 - **One counter for every refusal** (g106 q3): `StreamIdRequestRejected`
@@ -936,7 +938,7 @@ merge set C, which merges together with this document.
 | J11 supersede in the visa table (`insert_superseding`, `commit_supersede`, `has_same_session_keys`) | `zl-zpr-core/adapter/ph/src/visa_table.rs` |
 | J11 rebind at the ingress (`rebind_stream`, counted `RebindFailed`), started by `visa_mgmt.rs::insert_visa`; the in-place PFT swap | `zl-zpr-core/adapter/ph/src/mgmt/node.rs`, `forwarding_tables.rs` |
 | `requestBootstrapVisas`: the handler, the rule (`request_bootstrap_visas`), the rejoin teardown (`end_previous_join`), the sweep recheck (`bootstrap_visa_authorized`) | `zl-zpr-visaservice/vs/src/vsapi_worker.rs`, `vs/src/visa_bootstrap.rs` |
-| The bootstrap mint (`mint_bootstrap_visa`), ingress-last delivery (`deliverable_visas_for_node`), no keys on node-to-VS flows (`session_key_for`, `is_node_vs_flow`), a rejoin's re-push (`forget_installs_on_node`) | `zl-zpr-visaservice/vs/src/visa_mgr.rs` |
+| The bootstrap mint (`mint_bootstrap_visa`), ingress-last delivery (`deliverable_visas_for_node`), the by-ID fetch (`visas_for_node_by_ids`), no keys on node-to-VS flows (`session_key_for`, `is_node_vs_flow`), a rejoin's re-push (`forget_installs_on_node`) | `zl-zpr-visaservice/vs/src/visa_mgr.rs` |
 | J5a, J5b, J9 (`issue_vsapi_visas`, `issue_vss_visa`, `renew_core_visas`); the issuance lock and its lock order (`lock_issuance`); a join's core-visa revocation (`revoke_previous_join`) | `zl-zpr-visaservice/vs/src/core_visas.rs` |
 | The policy pass's pushes (`push_policy_to_nodes`) and the cut-off rule (`nodes_cut_off`); stopping a VSS worker without waiting (`ConnectionControl::stop_vss_worker`) | `zl-zpr-visaservice/vs/src/event_mgr.rs`, `vs/src/connection_control.rs` |
 | Topology without visas (`topology_links`) | `zl-zpr-visaservice/vs/src/vss_worker.rs` |
