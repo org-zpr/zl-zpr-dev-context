@@ -361,12 +361,14 @@ Adapter lifecycle: create fresh, delete on graceful exit, and reap any stale
 adapter with our name at startup.
 ([zipline#130](https://github.com/org-zpr/zl-zipline/issues/130))
 
-**Windows batch_io is a `windows_unbatched` engine with no pktinfo.**
-Non-blocking `recv_from`/`send_to` on the socket side, Wintun ring
-send/receive on the TUN side. No `WSARecvMsg`/`IP_PKTINFO`: an end-user
-adapter is single-homed for our purposes and `self_addr` is configured or
-discovered once at start — the ceiling is stated in code, and multi-homing is
-deferred ([zipline#150](https://github.com/org-zpr/zl-zipline/issues/150)).
+**Windows batch_io is a `windows_unbatched` engine with pktinfo.**
+Non-blocking, one datagram per call: `WSARecvMsg`/`WSASendMsg` with
+`IP_PKTINFO`/`IPV6_PKTINFO` on the socket side, Wintun ring send/receive on
+the TUN side. Each received datagram carries its destination address, and a
+send can name its source, as on the unix engines, so a wildcard `self_addr`
+works. (Originally no pktinfo, with multi-homing deferred;
+[zipline#150](https://github.com/org-zpr/zl-zipline/issues/150) added it in
+zl-zpr-core#119.)
 `BorrowedFd` in the `BatchIoImpl` trait became the `Waitable` handle type,
 and raw `libc::c_int` send flags a `SendFlags` newtype.
 ([zipline#131](https://github.com/org-zpr/zl-zipline/issues/131))
@@ -463,12 +465,15 @@ Decisions carried over from the Windows node plan (umbrella
 `git show cc02abd:docs/plans/2026-10-01-win-node.md`). The user-facing
 walkthrough is `zl-zpr-core/docs/SETUP.md` "Windows".
 
-**A dev/demo node: single-homed, concrete `self_addr`, elevated console,
-single worker.** Adapters and the visa service stay on Linux. A Windows node
-must be given a concrete `self_addr` (or `advertised_substrate_addr`); the
-wildcard-bind rejection stands by design and
-[zipline#150](https://github.com/org-zpr/zl-zipline/issues/150) keeps
-multi-homing. No service wrapper
+**A dev/demo node: elevated console, single worker.** Adapters and the visa
+service stay on Linux. The plan made a Windows node single-homed, with a
+concrete `self_addr` and the wildcard bind refused.
+[zipline#150](https://github.com/org-zpr/zl-zipline/issues/150) (done,
+zl-zpr-core#119) lifted that: the engine uses `WSARecvMsg`/`WSASendMsg` with
+pktinfo, and a wildcard `self_addr` is allowed. A node that adapters dock to
+still needs `advertised_substrate_addr` with a wildcard. A Zode with an
+initial link needs neither: it reports its initial link's local address
+([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). No service wrapper
 ([zipline#147](https://github.com/org-zpr/zl-zipline/issues/147)).
 Functional parity with Linux is the bar; throughput through one unbatched
 socket was measured and recorded, not fixed (findings below).
@@ -498,8 +503,8 @@ arm was rejected to keep macOS from redoing it.
 `windows_unbatched::recv_from_batch` treats `ConnectionReset` as "no
 datagram". A node talks to many adapters, any of which can exit, so the
 `WSAECONNRESET` after an ICMP port unreachable would otherwise panic the
-fastpath routinely. A wildcard bind now fails as a logged startup error
-naming the fix instead of a panic.
+fastpath routinely. (This change also made a wildcard bind a logged startup
+error; zipline#150 later allowed the wildcard.)
 ([zipline#160](https://github.com/org-zpr/zl-zipline/issues/160))
 
 **Verification is a hand-run test document plus unit tests; no new CI tier.**
@@ -543,9 +548,9 @@ walkthrough is `zl-zpr-core/docs/SETUP.md` "macOS".
 
 **A dev/demo node: `sudo`, single worker, adapters and visa service on
 Linux.** Apple Silicon and Intel, no OS floor beyond what the macOS adapter
-port already needed. Unlike the Windows node, wildcard and multi-homed binds
-are allowed — the unix `posix_unbatched` engine has pktinfo — so the Linux
-integration topology applies unchanged. Functional parity is the bar;
+port already needed. Wildcard and multi-homed binds are allowed — the unix
+`posix_unbatched` engine has pktinfo (the Windows node, at first, did not;
+zipline#150) — so the Linux integration topology applies unchanged. Functional parity is the bar;
 single-worker throughput was measured and recorded, not fixed (findings
 below). No launchd service.
 ([zipline#158](https://github.com/org-zpr/zl-zipline/issues/158))
@@ -635,6 +640,22 @@ route or interface. Measured single-worker numbers: flood-ping loss 0 %
 Wi-Fi.
 ([zipline#164](https://github.com/org-zpr/zl-zipline/issues/164))
 
+**A network change is handled by the rejoin.** A Zode on a Mac (or any OS)
+with a wildcard `self_addr`, an initial link, no `advertised_substrate_addr`
+and no substrate address in policy survives a change of its address (an
+advertised address wins, and the visa service refuses a report that differs
+from a policy address). The keep-alive closes the initial link, the redial
+goes out from the new address, and the rejoin's `connect` or `open` reports that address
+([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). Sends from the old
+address fail with `EADDRNOTAVAIL` on macOS (measured on 26.5.2), and are
+dropped and counted, not fatal. Verified by hand on 2026-11-14:
+`macos-node-test.md` section 6, where such a Zode starts, joins through a
+relay on Linux and reports its real LAN address. The network switch itself
+was checked in netns on Linux, not on the Mac.
+([zl-zipline#230](https://github.com/org-zpr/zl-zipline/issues/230);
+moving the Mac's address by hand is
+[zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263))
+
 ### The relay Zode hosts the visa service on one TUN
 
 The relay's `ph node` carries both its own ZPR address and `vs.zpr` on one TUN,
@@ -660,8 +681,6 @@ with an open issue unless noted:
   [zipline#147](https://github.com/org-zpr/zl-zipline/issues/147)
 - Packet capture to a file via `DuplicateHandle` —
   [zipline#148](https://github.com/org-zpr/zl-zipline/issues/148)
-- pktinfo / multi-homed hosts and address change while running —
-  [zipline#150](https://github.com/org-zpr/zl-zipline/issues/150)
 - Npcap SDK for `ph-cli` filter compilation —
   [zipline#151](https://github.com/org-zpr/zl-zipline/issues/151)
 - A Windows integration test tier —
