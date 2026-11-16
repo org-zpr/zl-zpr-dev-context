@@ -168,11 +168,12 @@ Two parts of `policy.capnp` exist for Zodes (see "Design decisions" and
   not transit-capable, and an unset or empty list means no node is.
 
 In the `.zplc`, a node with no `substrate_addrs` may still be a link peer, and
-the compiler leaves its end of the `Peering` unset. Filling that end from the
-address the node reports is not implemented yet (see "Implementation status"). A peer on such a node must
-not name an `interface`. `transit = true` on `[nodes.<ID>]` puts the node in
-`transitNodes`; the compiler writes the list sorted, and leaves it unset when no
-node is marked (`zl-zpr-compiler/README_ZPLC.md`).
+the compiler leaves its end of the `Peering` unset. The visa service then uses
+the address the node reports when its VS-API session starts (see "Substrate
+address changes"). A peer on such a node must not name an `interface`.
+`transit = true` on `[nodes.<ID>]` puts the node in `transitNodes`; the
+compiler writes the list sorted, and leaves it unset when no node is marked
+(`zl-zpr-compiler/README_ZPLC.md`).
 
 A `PolicySnapshot` additionally caches `resolved_peers_by_node`: the same peer
 list with hostnames already resolved to `SocketAddr`. Resolution happens once,
@@ -242,7 +243,7 @@ its links up, and what it reports when, is
   its current topology, plus its initial link, that has an outcome
   (ZODE_LINKS.md "Reporting summary" and "Reporting contract"):
   - the owner of a topology link lists it `up`, `down` once an up link is lost,
-    or `failed` once a 5-second link-up window ends without the link coming
+    or `failed` once a 10-second link-up window ends without the link coming
     up. It lists nothing during the first window, or while a new
     `setTopology` retries a `failed` link. A link retried from `down` stays
     listed `down` during its window;
@@ -337,12 +338,28 @@ its links up, and what it reports when, is
   going down: the policy sweep alone would miss a visa committed under the new
   policy just before the link went down, because its generation gate counts
   that visa as current.
+- **Transit changes.** A policy pass first takes transit away from every node
+  the new policy no longer lists, under a short topology guard of its own and
+  before any step that can fail: an error later in the pass ends it with no
+  retry, so the router would otherwise keep routing through that node. It then
+  revokes every live visa whose recorded path passes through a node that is
+  not transit-capable. Transit the policy grants waits until the pass has
+  reconciled the links, because the new policy may remove a link of that
+  node; it is applied before the cut-off check below. The revocation checks
+  every visa against the transit set as it is, not against what changed, so a
+  later run finds whatever an earlier one missed. Startup runs it after
+  restoring the topology: a service that stopped between a policy install and
+  its pass restores a router with the new transit set, so no pass would see
+  the change (`restore_topology`,
+  `visa_reconciler::revoke_visas_through_non_transit`;
+  [#255](https://github.com/org-zpr/zl-zipline/issues/255)).
 - **A node the pass cut off gets nothing.** A policy pass pushes each node's
   topology, services and re-authentication request from a detached task of
   its own, so a slow node never delays the pass or the install queued behind
-  it. A node at the end of a link the pass took down, with no route left from
-  the node the visa service docks on (`event_mgr::nodes_cut_off`), is sent
-  nothing: its VSS worker is stopped, and the node rejoins through its relay
+  it. A node at the end of a link the pass took down, or a node with a link up
+  that a transit withdrawal left unreachable, with no route left from the node
+  the visa service docks on (`event_mgr::nodes_cut_off`), is sent nothing:
+  its VSS worker is stopped, and the node rejoins through its relay
   (ZODE_LINKS.md J10). Pushing to it would only wait out each call's timeout
   over a link that is gone (gate g101,
   [#252](https://github.com/org-zpr/zl-zipline/issues/252); VISA_SERVICE.md,
@@ -380,16 +397,40 @@ its links up, and what it reports when, is
 ### Substrate address changes
 
 A node's substrate address — the address peers dial, as in the
-`substrate_addr` connect parameter — is fixed for the life of its VS-API
-session. An endpoint that changes networks loses its initial link, redials
-from the new network and rejoins (ZODE_LINKS.md rule 11a), and the new session
-carries the new address in its `connect` or `open`. There is no call to change
-it inside a session: `VSHandle.updateSubstrateAddr` was removed from the
-schema in [#252](https://github.com/org-zpr/zl-zipline/issues/252), after the
-node side ([#223](https://github.com/org-zpr/zl-zipline/issues/223)) was
-closed without it. Proposing links to a peer at the address it reported,
-rather than one from policy, is
-[#255](https://github.com/org-zpr/zl-zipline/issues/255).
+`substrate_addr` connect parameter — comes from its VS-API session and is fixed
+for the life of that session. An endpoint that changes networks loses its
+initial link, redials from the new network and rejoins (ZODE_LINKS.md rule
+11a), and the new session carries the new address in its `connect` or `open`.
+There is no call to change it inside a session: `VSHandle.updateSubstrateAddr`
+was removed from the schema in
+[#252](https://github.com/org-zpr/zl-zipline/issues/252), after the node side
+([#223](https://github.com/org-zpr/zl-zipline/issues/223)) was closed without
+it.
+
+`connect` and `open` both record the reported address through one rule,
+`accept_reported_substrate`
+([#255](https://github.com/org-zpr/zl-zipline/issues/255)):
+
+- an unspecified IP or port 0 is refused with `paramError`; there is no
+  fallback;
+- if policy declares the node's address, the report must equal it, or the call
+  is refused with `paramError`;
+- otherwise the reported address stands.
+
+A node's **known address** is its policy address, DNS-resolved, or failing that
+the address it reported in its last `connect` or `open`, stored on its node
+actor. Only the node's next `connect` or `open` replaces it: a rejoin keeps the
+actor, so until then a direct peer may be proposed the old address, and the
+pair falls to rule 13a if the dial fails (ZODE_LINKS.md, "Links from known
+addresses (#255)"). The visa service puts it in `Link.peer` and
+decides from it which links to propose (ZODE_LINKS.md rule 13b,
+`vss_worker::proposed_links`). A relay link is always proposed, with `peer`
+unset when the address is unknown. A direct link is proposed only when both
+ends' addresses are known. If a lookup fails, the send fails and the topology
+is sent again later: no address is guessed. When a node's session starts,
+its policy peers that have a live VSS connection get a new `setTopology`
+(`vsapi_worker::repropose_links_to_peers`). Whether a node can misuse the
+address it reports is [#264](https://github.com/org-zpr/zl-zipline/issues/264).
 
 ---
 
@@ -426,6 +467,18 @@ This is the expensive one and it carries the interesting machinery:
 
 `route_to_path(route, starting_node)` converts a link list into the ordered node
 list, using the starting node to fix the direction.
+
+**Only transit-capable nodes are passed through**
+([#255](https://github.com/org-zpr/zl-zipline/issues/255)). The router holds a
+transit set, the nodes policy lists in `Policy.transitNodes`. Both queries reach
+any node, so any node can start or end a route, but they leave a node again only
+if it is the route's start or in the set. A route through a node policy does not
+list does not exist, and the request is denied `NoRoute`. The set starts empty, so
+a router nobody has told about transit routes only over single links (fail
+closed). Changing it recomputes the best routes and flushes the route cache under
+the same write lock (`Router::set_transit_nodes`). The commit-time route check
+(`route_matches`, through `route_still_valid`) also refuses a recorded path with
+an interior node that is no longer transit-capable.
 
 ---
 
@@ -551,12 +604,13 @@ bootstrap visas (see "Bootstrap routing"). Forwarding over a Zode link is
 implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251),
 ZODE_LINKS.md "Forwarding over Zode links"): a visa's next hop resolves to the
 up Zode link whose peer has that topology address, and an intermediary node
-binds a `forwardOnly` visa from one Zode link to the next. It is covered by unit
-tests and core CI only. With the relay join
+binds a `forwardOnly` visa from one Zode link to the next. With the relay join
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)) every Zode gets its
 own VS-API session, and a joiner's VS-API flow crosses its link to the relay
-in netns; a flow between two Zodes across a Zode link is
-[#254](https://github.com/org-zpr/zl-zipline/issues/254).
+in netns. Since [#254](https://github.com/org-zpr/zl-zipline/issues/254),
+flows between two Zodes run in netns too: `zode-line-test.sh` (zb - relay -
+zc, the relay on `forwardOnly` visas, with its `forwarding` on and off) and
+`zode-reroute-test.sh` (a direct zb-zc link, then the relay once it drops).
 
 **`Link.peerCn`.** Each `Link` in `setTopology` also carries `peerCn`: the CN
 on the peer's CA-signed link certificate
@@ -576,12 +630,12 @@ no CN in policy — no node join policy pins that address together with a
 `device.zpr.adapter.cn`, or two pin it with different CNs — is left out of the
 topology message, with a warning.
 
-The consequence is worth stating plainly: **the control plane computes
-multi-hop routes that no netns run has carried end to end yet.** Everything
-above — Dijkstra, all-paths DFS, path orientation, per-role visa actualization —
-is built, tested, and exercised by unit tests, and the data plane can forward
-over Zode links (#251, unit-tested), while no `zl-zpr-core` integration test
-runs a flow across a Zode link (that is #254). `zl-zpr-demo/multinode-demo`
+Everything above — Dijkstra, all-paths DFS, path orientation, per-role visa
+actualization — is built and unit-tested, and the data plane forwards over
+Zode links (#251). In netns, `zode-line-test.sh` carries a three-Zode route
+(zb - relay - zc) end to end, and `zode-reroute-test.sh` a direct route that
+moves onto the relay when its link drops (#254). Longer routes and more
+than one transit node have not run end to end. `zl-zpr-demo/multinode-demo`
 is the two-node deployment being built out against this gap.
 
 ---
@@ -904,6 +958,17 @@ every multi-hop path gets `NoRoute`. So the compiler minor and
 `POLICY_MIN_COMPILER_*` move together in
 [#227](https://github.com/org-zpr/zl-zipline/issues/227).
 ([org-zpr/zl-zipline#226](https://github.com/org-zpr/zl-zipline/issues/226))
+They did, in [#256](https://github.com/org-zpr/zl-zipline/issues/256): zplc
+0.21.0 and a visa-service minimum of 0.21.0, together with the enforcement
+([#255](https://github.com/org-zpr/zl-zipline/issues/255)).
+
+**A policy pass withdraws transit at once and grants it late.** Taking transit
+away can only remove routes, so it is applied first, before anything in the
+pass can fail. Granting it before the links are reconciled could build a route
+through the node over a link the new policy has removed, so a grant waits for
+the reconciliation. Until then the node stays non-transit, which fails closed.
+([#255](https://github.com/org-zpr/zl-zipline/issues/255), visaservice#68
+review)
 
 ---
 
@@ -920,21 +985,27 @@ Implemented on `feature/zodes`:
   reports its own links. Bootstrap visas are requested on demand (see
   "Bootstrap routing"), `Link.visas` is gone, and a policy pass sends nothing
   to a node it cut off. `zode-link-test.sh` runs the join and the rejoin in
-  netns.
+  netns, and `zode-join-test.sh` two joiners at once (#254).
+- **Non-transit routing in the visa service**
+  ([#255](https://github.com/org-zpr/zl-zipline/issues/255)). Routes pass only
+  through nodes in `Policy.transitNodes` (see "Path computation"). A policy pass
+  and startup revoke the visas through a node that is not transit-capable (see
+  "Policy changes" and "Transit changes" under "Link-state reports").
+- **Peerings without a substrate address, and reported addresses**
+  ([#255](https://github.com/org-zpr/zl-zipline/issues/255)). A peer with no
+  policy address is kept, and its link uses the address the node reported in
+  `connect` or `open` (see "Substrate address changes", ZODE_LINKS.md rule 13b).
+  `zode-link-test.sh` joins a Zode that has no policy address.
+- **Paths through an intermediary node, end to end.** `forwardOnly` visas
+  install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
+  forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
+  and since [#254](https://github.com/org-zpr/zl-zipline/issues/254)
+  `zode-line-test.sh` runs zb - relay - zc in netns: with the relay's
+  `forwarding` on the flow crosses it on `forwardOnly` visas, and with it off
+  the relay refuses them.
 
 Specified or designed, not working:
 
-- **Paths through an intermediary node, end to end.** `forwardOnly` visas
-  install and bind on a node with `forwarding` on ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)),
-  and forwarding over Zode links is implemented ([#251](https://github.com/org-zpr/zl-zipline/issues/251)),
-  but only unit tests and core CI exercise it: no such path has run end to
-  end in a netns run. The relay join it needed is in place
-  ([#252](https://github.com/org-zpr/zl-zipline/issues/252)); the scenario is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254).
-- **Non-transit routing in the visa service.** Path computation does not read
-  `Policy.transitNodes` yet (see the `transitNodes` item below), so it may route through any
-  node. Until it does, a node with `forwarding` off refusing `forwardOnly` visas
-  is the only guard. See [SECURITY_MODEL.md](SECURITY_MODEL.md).
 - **Route constraints** (`over`) are compiled and never enforced.
 - **Next-hop selection modes** from ZRFC 6.4 §5.11.2 — a visa specifying an
   exact next hop, or a constrained set of permissible next hops, versus leaving
@@ -943,9 +1014,10 @@ Specified or designed, not working:
 - **Link/route liveness.** The visa service acts on `reportLinkStates` (see
   "Link-state reports"; [#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   and Zodes send it ([#250](https://github.com/org-zpr/zl-zipline/issues/250));
-  `zode-link-test.sh` checks both ends' reports in netns. The end-to-end
-  check — block a direct link, the flow moves to the relay — is
-  [#254](https://github.com/org-zpr/zl-zipline/issues/254), and the demo
+  `zode-link-test.sh` checks both ends' reports in netns, and
+  `zode-reroute-test.sh` the end-to-end check: block a direct link, and the
+  flow moves to the relay
+  ([#254](https://github.com/org-zpr/zl-zipline/issues/254)). The demo
   integration test
   ([#222](https://github.com/org-zpr/zl-zipline/issues/222),
   [#231](https://github.com/org-zpr/zl-zipline/issues/231)). ZRFC 6.4 §5.12
@@ -957,20 +1029,6 @@ Specified or designed, not working:
 - **Multi-homed nodes**, and equal-cost multipath (a tie picks one route
   deterministically; see "Path computation").
 - **`FwdPep.symmetric`** — always `OneWay`.
-- **Peerings without a substrate address, and `Policy.transitNodes`**: the
-  compiler emits both on `feature/zodes`
-  ([#226](https://github.com/org-zpr/zl-zipline/issues/226)), and the visa
-  service does not use them yet. Since the `zl-zpr-common` pin move
-  ([#238](https://github.com/org-zpr/zl-zipline/issues/238)) it decodes an
-  unset end as `None` and skips that peer with a WARN, so the link gets no
-  substrate address until the visa service fills it from the node's report. It
-  does not read `transitNodes`, so path computation still routes through any
-  node ([#227](https://github.com/org-zpr/zl-zipline/issues/227)).
-- **A node's own substrate address**, reported in `connect` or `open`, is not
-  used for its links yet
-  ([#255](https://github.com/org-zpr/zl-zipline/issues/255)); see "Substrate
-  address changes". `updateSubstrateAddr` was removed from `vs.capnp` in
-  [#252](https://github.com/org-zpr/zl-zipline/issues/252).
 
 Also note that ZRFC 6.4 assigns route generation to the **Admin Service**, which
 distributes `(egress address, next hop)` routes to docks and forwarders as a
@@ -989,7 +1047,10 @@ distributes next hops **per visa** instead. Nodes hold no routing table at all.
 | Peer table, link attributes, `describe_link`, default cost | `zl-zpr-visaservice/libeval/src/policy.rs` |
 | Route and predicate types | `libeval/src/route.rs` |
 | Route-constraint evaluator (unimplemented) | `libeval/src/eval_route.rs` |
-| Graph, Dijkstra, all-paths DFS, route cache, link up/down flag | `zl-zpr-visaservice/vs/src/router.rs` |
+| Graph, Dijkstra, all-paths DFS, route cache, link up/down flag, transit set | `zl-zpr-visaservice/vs/src/router.rs` |
+| `Policy.transitNodes` loaded (`is_transit_node`) | `zl-zpr-visaservice/libeval/src/policy.rs` |
+| Transit in a policy pass (`withdraw_policy_transit`, `apply_policy_transit`) and at startup (`restore_topology`); revoking visas through a non-transit node | `vs/src/event_mgr.rs`, `vs/src/main.rs`, `vs/src/visa_reconciler.rs` (`revoke_visas_through_non_transit`) |
+| A reported substrate address (`accept_reported_substrate`); known addresses and which links are proposed (`proposed_links`); re-proposal on session start | `vs/src/connection_control.rs`, `vs/src/vss_worker.rs`, `vs/src/vsapi_worker.rs` (`repropose_links_to_peers`) |
 | Link-state snapshots, the both-ends rule, failed pairs (rule 13a) | `vs/src/link_state.rs` (`end_agrees`, `record_failures`), `vs/src/topology_mgr.rs` (`clear_failed_pairs_for`), `vs/src/vss_worker.rs` (`topology_links`); applied by `vs/src/topology_mgr.rs`, handled in `vs/src/vsapi_worker.rs` (`report_link_states`), revocation in `vs/src/visa_reconciler.rs` (`revoke_visas_over_link`) |
 | Live graph, persistence, policy revalidation | `vs/src/topology_mgr.rs`, `vs/src/db/link.rs` |
 | DNS resolution of substrate hostnames | `vs/src/policy_mgr.rs` (`PolicyResolver`) |

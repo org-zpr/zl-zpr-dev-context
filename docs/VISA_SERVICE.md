@@ -21,7 +21,7 @@ evaluation. Changes to issuance behavior should also be read against
 | Source | Status |
 |---|---|
 | *ZPR Visa Service Specification / Design Document* (2025-09-03) | The design intent. Explicitly work-in-progress, and parts are marked sketchy or TODO by its authors. |
-| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.18.0. |
+| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.22.0 on `feature/zodes`. |
 | `zl-zpr-visaservice/admin-http-api.txt` | The admin API, current as of 2026-09-15 and changing frequently. |
 | `zl-zpr-visaservice/libeval/README.md` | The evaluator's API and staging model. |
 
@@ -256,8 +256,15 @@ restart there are none, and the node asks again.
 
 A policy is required at startup; later updates arrive over the admin API. The
 policy carries a compiler version and the visa service rejects versions it does
-not support — this build requires **compiler 0.17.0 or later**
-(`vs/src/config.rs`, `POLICY_MIN_COMPILER_MINOR`).
+not support. On `feature/zodes` it requires **compiler 0.21.x**: the major and
+minor must equal `POLICY_MIN_COMPILER_*` (0.21.0) and the patch must be at least
+its patch (`vs/src/config.rs`; BUILD.md, "Versions and tags"). 0.21 is the
+compatibility boundary set together with routing's enforcement of
+`Policy.transitNodes`
+([#256](https://github.com/org-zpr/zl-zipline/issues/256),
+[#255](https://github.com/org-zpr/zl-zipline/issues/255)), so a 0.20.x policy
+is refused. A policy without that list would load with no transit-capable
+node, and every multi-hop route would be denied `NoRoute`.
 
 A policy can be **tested without loading it**: the service reports which
 existing visas the proposed policy would deny. That is only possible because it
@@ -338,6 +345,20 @@ address source — a rejected pin reads "static", a rejected grant reads
 "granted" — so the log tells the two apart
 (`vs/src/connection_control.rs`, `authorize_connection`).
 
+A node also reports its **substrate address**, the address its peers dial, in
+the `substrate_addr` parameter of `connect` and `open`. Both record it through
+one function, `accept_reported_substrate` (`vs/src/connection_control.rs`,
+[#255](https://github.com/org-zpr/zl-zipline/issues/255)). An unspecified IP or
+port 0 is a `paramError`, with no fallback. If policy declares the node's
+substrate address, the report must equal it, or the call is a `paramError`.
+Otherwise the report stands. The address is stored on the node's actor and
+changes only with the node's next `connect` or `open`. A rejoin keeps the actor,
+so the old address stays known until then. It decides which links the node's
+peers are offered and what they dial (ZODE_LINKS.md rule 13b; ROUTING.md,
+"Substrate address changes"). Nothing checks that the address belongs to the
+node; the link's certificate check bounds what a false one can do, and whether
+that is enough is [#264](https://github.com/org-zpr/zl-zipline/issues/264).
+
 The visa service's own adapter is the one address neither source supplies: it
 is fixed by configuration, so an actor whose *authenticated* CN is `vs.zpr` is
 assigned `fd5a:5052::1` before policy is consulted, with no pin and regardless
@@ -408,6 +429,17 @@ visa names the joiner, and the joiner's copy of the reverse visa names the relay
 A visa whose path has fewer than two nodes has no `prevHop`. Core enforces it
 since [zipline#253](https://github.com/org-zpr/zl-zipline/issues/253), so a
 copy without `prevHop` is never bound from a Zode link.
+
+A node that gets a `Stream ID Request` for a visa it does not hold fetches it
+by ID (`visaRequestById`). The visa service returns that node's own copy,
+actualized for it, of each requested visa that is still grantable to it, when
+the VSS push would deliver that copy now or already has
+(`VisaMgr::visas_for_node_by_ids`,
+[#262](https://github.com/org-zpr/zl-zipline/issues/262)). So it never hands
+out an ingress copy that ingress-last delivery still holds back, nor a copy
+off the node's path, revoked or quarantined. The fetch is read-only: it never
+marks a copy installed, and the later VSS push of the same copy is a no-op on
+the node.
 
 The service records active visas and the requests that created them — the state
 that makes policy testing possible.
@@ -598,7 +630,7 @@ policy that assumes these values:
 | Visa service link-key CN | `vs.zpr` |
 | VS-API port (nodes → VS) | 5002 |
 | Admin HTTPS port | 8182 |
-| Minimum policy compiler version | 0.15.0 |
+| Minimum policy compiler version | 0.21.0 (minor must match) |
 
 Other operational bounds: 4-hour default authentication lifetime (the
 fallback where no authority sets one — bootstrap authentication itself does
@@ -1047,6 +1079,41 @@ g101; `vs/src/event_mgr.rs`):
   for the policy pass, a disconnect and a rejoin's teardown alike. No lock is
   held across a VSS call.
 
+### A by-ID fetch returns the node's pending copy
+
+[#262](https://github.com/org-zpr/zl-zipline/issues/262): a joining or
+restarted Zode refused its first `Stream ID Request`s for a few seconds. The
+cause was not ingress-last delivery, which holds back only an ingress copy. For
+every on-demand visa the requester is the ingress: it gets its copy in the
+reply and starts traffic at once, while every other hop gets its copy by a
+background VSS push. A Zode whose VSS connection is not up yet (it starts
+`VSS_START_DELAY` after registration, and a restart starts a new one) is asked
+for a stream before that push can reach it. It fetches the visa by ID, and
+`visaRequestById` returned only copies already recorded `Installed`, so the
+answer was empty and the Zode refused the request. The schema already said
+that an empty answer means the visa does not exist for that node; only the
+filter disagreed. The decisions (gate g121):
+
+- **The fetch returns every copy the push would deliver now, or already has**
+  (`VisaMgr::visas_for_node_by_ids`): the node's own copy, still grantable,
+  under the same ingress-last rule as the push. It does not widen what a node
+  can learn, and the ordering guarantee holds: a `PendingInstall` ingress copy
+  is fetchable only once every other hop has acked, exactly as the push
+  delivers it. An `Installed` copy has already been delivered, so it is
+  returned whatever the other hops' state. A quarantined copy, even an
+  `Installed` one, is no longer returned.
+- **The fetch is read-only** (q3). It does not mark the copy `Installed`. The
+  VSS push stays the only acknowledged delivery, so ingress-last waits on real
+  acks. The cost is one redundant push per fetched copy, a no-op on the node
+  (`insert_visa` of a held ID).
+- **Rejected:** answering "pending" and having core retry (b), which needs a
+  schema round and a core retry loop and adds latency to wait for a copy the
+  visa service already has; and core treating the refusal as retryable (c),
+  which masks the bug and adds a retry path to the security-critical bind.
+- **Not done:** in a restart, a `Stream ID Request` that reaches the Zode
+  before its new VS-API session is up still fails, because there is no
+  session to fetch over. It was not seen in the logs or the acceptance runs.
+
 ### Deferred
 
 No tracker issues are filed for these unless linked.
@@ -1125,7 +1192,11 @@ No tracker issues are filed for these unless linked.
   `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   including the failed-pair rule 13a; Zodes accept links by `peerCn` and send
   `reportLinkStates` ([#250](https://github.com/org-zpr/zl-zipline/issues/250),
-  [ZODE_LINKS.md](ZODE_LINKS.md)).
+  [ZODE_LINKS.md](ZODE_LINKS.md)). Since
+  [#255](https://github.com/org-zpr/zl-zipline/issues/255) `Link.peer` is the
+  peer's policy address or the address it reported, or unset on a relay link
+  when neither is known, and a direct link is offered only when both ends'
+  addresses are known (ZODE_LINKS.md rule 13b).
 
 ---
 
@@ -1139,9 +1210,11 @@ No tracker issues are filed for these unless linked.
 | Per-request path | `vs/src/visareq_worker.rs` |
 | Policy lifecycle | `vs/src/policy_mgr.rs`, `visa_reconciler.rs` |
 | Connection admission | `vs/src/connection_control.rs`, `auth.rs`, `login_nonce.rs` |
-| Routing | `vs/src/topology_mgr.rs`, `router.rs` |
+| Routing, transit | `vs/src/topology_mgr.rs`, `router.rs`; `libeval/src/policy.rs` (`transitNodes`) |
+| A node's reported substrate address (`accept_reported_substrate`) | `vs/src/connection_control.rs` |
+| Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
-| A node's core visas (J5a, J5b, J9), ingress-last delivery | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`) |
+| A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
 | State | `vs/src/db/` |
