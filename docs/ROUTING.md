@@ -293,8 +293,30 @@ its links up, and what it reports when, is
   Today that is the node (re)connecting its VS-API session (`authenticate` and
   `open`), and the other end of each cleared pair is sent `setTopology` again.
   A changed substrate address also arrives only that way (see "Substrate
-  address changes"). The marks live in
+  address changes"). A policy install keeps the marks. The marks live in
   memory: a restart forgets them, so every link is proposed again.
+- **A `down` report re-proposes the link once (rules 10 and 13a).** Since
+  [#268](https://github.com/org-zpr/zl-zipline/issues/268) (visaservice#71,
+  release `v0.22.0-zodes.9`), a direct link that an end **newly** reports
+  `down` is proposed to both ends again. Newly means that the reporter's
+  previous snapshot did not list that peer as `down`
+  (`LinkStateTable::newly_down`); the CN is resolved to a peer as for `failed`.
+  Either end's report is enough, because one `down` already makes the link
+  unusable. `report_link_states` marks the pair as pending under the topology
+  guard it already holds (`TopologyMgr::mark_repropose`), and a second report
+  for a pair already pending, from either end, adds nothing. For each new mark
+  it spawns `repropose_link_after_down`, which sleeps `LINK_REPROPOSE_DELAY`
+  (5 s, `vs/src/config.rs`) holding no lock. It then takes the guard, clears the
+  mark (`take_repropose`), and sends nothing if the pair is failed (rule 13a),
+  the link is up again, or policy no longer declares it. It drops the guard
+  before it sends, and sends nothing unless both ends have a live VSS worker.
+  Otherwise it calls `send_topology_to` for both ends, and the owner makes one
+  more attempt (ZODE_LINKS.md rule 13). A link with the relay at either end is
+  never scheduled: its endpoint redials the initial link itself, and the rejoin
+  proposes its links again. Each re-proposal needs a new `down`, and a new
+  `down` needs the link to have been `up`. A failed attempt ends in `failed`,
+  which marks the pair, so one real `up` buys at most one retry. A `failed`
+  report still never sends topology itself.
 - **What a change does.** A link that is not usable stays in the graph and in
   persisted state with its id, attributes and cost; both route queries simply
   skip it, so policy revalidation does not mistake it for drift, and a policy
@@ -899,8 +921,11 @@ skip keeps persistence untouched; a policy rebuild carries the flag over.
 its visas are revoked at once and it re-requests around the failure (no
 re-heralding, ZRFC 6.4 §5.11, in v1). A flow on the relay path still works when
 the direct link comes back, so moving it is left to its visa's expiry or a
-later optimization.
-([#224](https://github.com/org-zpr/zl-zipline/issues/224))
+later optimization. Since #268, a direct link reported down is also proposed
+to its ends once more after `LINK_REPROPOSE_DELAY`, so a short outage heals
+without a policy install. Only new visas take the link when it comes back.
+([#224](https://github.com/org-zpr/zl-zipline/issues/224),
+[#268](https://github.com/org-zpr/zl-zipline/issues/268))
 
 **An unreported link counts as down.** #224 let an end that had never reported
 agree, so that links kept working until nodes reported (operator decision on
@@ -1045,12 +1070,12 @@ Specified or designed, not working:
   ([#231](https://github.com/org-zpr/zl-zipline/issues/231)). A bulk
   transfer leaves the relay's received bytes flat over the direct link and
   raises them through the relay. Once the block is lifted, the link comes
-  back and new flows go direct again. **As built, a link reported `down`
-  comes back only on a `setTopology` push** (ZODE_LINKS.md rules 10 and 13):
-  a policy install, or a peer's VS-API session starting. The test
-  re-installs the policy to get one.
-  [#268](https://github.com/org-zpr/zl-zipline/issues/268) has the visa
-  service re-propose a `down` link after a short delay. Flows that moved to
+  back and new flows go direct again. **A link reported `down` is proposed
+  again once** (ZODE_LINKS.md rules 10, 13 and 13a;
+  [#268](https://github.com/org-zpr/zl-zipline/issues/268)). The test's long
+  block outlasts that one attempt, so the link ends `failed`, and zc
+  restarts to bring it back: a policy install keeps the failed mark. A short
+  blip heals by itself, with no install or restart. Flows that moved to
   the relay stay there until their visas expire, because only new visas
   take the direct link (Zodes plan §5.8). ZRFC 6.4 §5.12
   sends these reports to the admin service and §5.11 re-heralds a visa onto a
