@@ -962,8 +962,11 @@ and `vs.zpr` on one TUN, RFC 6724 source selection has nothing that prefers
 alternative was to mark the relay's own address not-for-automatic-selection
 (Linux `preferred_lft 0`). Binding wins because it works on any platform and
 does not depend on how a separate process (`ph`) configures the TUN.
-`vs_addr` is always local at run time, since the VS-API listener already
-binds it at startup. The fix is on the visa service side because the node's
+`vs_addr` is local whenever the visa service is serving: VSS connections
+exist only once a node has connected over VS-API, and the VS-API listener binds
+`vs_addr`. If that bind fails, the listener task ends while the process keeps
+running (see "Configuration" above), and with no VS-API there are no VSS
+connections to bind. The fix is on the visa service side because the node's
 VSS listener does not check the peer address; only the relay's visa table
 would drop the traffic.
 ([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
