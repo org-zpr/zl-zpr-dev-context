@@ -1097,9 +1097,11 @@ filter disagreed. The decisions (gate g121):
 - **The fetch returns every copy the push would deliver now, or already has**
   (`VisaMgr::visas_for_node_by_ids`): the node's own copy, still grantable,
   under the same ingress-last rule as the push. It does not widen what a node
-  can learn, and the ordering guarantee holds: an ingress copy is fetchable
-  only once every other hop has acked. A quarantined copy, even an `Installed`
-  one, is no longer returned.
+  can learn, and the ordering guarantee holds: a `PendingInstall` ingress copy
+  is fetchable only once every other hop has acked, exactly as the push
+  delivers it. An `Installed` copy has already been delivered, so it is
+  returned whatever the other hops' state. A quarantined copy, even an
+  `Installed` one, is no longer returned.
 - **The fetch is read-only** (q3). It does not mark the copy `Installed`. The
   VSS push stays the only acknowledged delivery, so ingress-last waits on real
   acks. The cost is one redundant push per fetched copy, a no-op on the node
