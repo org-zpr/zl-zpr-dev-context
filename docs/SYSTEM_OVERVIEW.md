@@ -181,7 +181,8 @@ The visa service reserves the name `vs.zpr`.
 handshake, exchanging certificates signed by the deployment's CA. A node
 recognizes the visa service's adapter only when it presents a CA-verified
 certificate claiming `vs.zpr` — without that, the visa service connects as an
-ordinary adapter and nothing routes to it.
+ordinary adapter and nothing routes to it. A relay Zode refuses that dock: it
+hosts the visa service itself, on its own TUN (see *Design decisions*).
 
 **4. An endpoint joins.** The visa service authenticates the endpoint via
 trusted services, which return tokens carrying policy-specified attributes.
@@ -673,6 +674,22 @@ was checked in netns on Linux, not on the Mac.
 ([zl-zipline#230](https://github.com/org-zpr/zl-zipline/issues/230);
 moving the Mac's address by hand is
 [zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263))
+
+### The relay Zode hosts the visa service on one TUN
+
+The relay's `ph node` carries both its own ZPR address and `vs.zpr` on one TUN,
+and the visa service runs in the same network namespace, as a local actor of
+the relay. There is no visa-service adapter and no second namespace. The
+earlier layout kept the visa service in its own namespace, docked as an
+adapter, partly so that loopback between the relay and `vs.zpr` could not
+happen (ZIPLINE's M4 note). That reason is gone: loopback between the relay and
+`vs.zpr` is now the intended in-host path for the relay's own sessions with
+the visa service, and every client on the host binds its source address. The
+details, the startup order and the decisions of gate g117 are in
+[ZODE_LINKS.md](ZODE_LINKS.md), "The relay hosts the visa service (#229)" and
+its *Design decisions*; the trust consequence is in
+[SECURITY_MODEL.md](SECURITY_MODEL.md).
+([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229))
 
 ### Deferred
 

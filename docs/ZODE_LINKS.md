@@ -400,8 +400,10 @@ J1. **The link comes up.** The joiner dials its configured relay (an initial
     link). The relay verifies the joiner's certificate and accepts the link only
     if that CN is in its topology (rule 4). The joiner starts with an empty VS-API
     visa table. *Built:* the relay, which has no initial link, keeps its
-    self-granted VS-API pair (IDs 1 and 2) to reach its local visa service
-    (`VisaTable::initial_for_node`).
+    self-granted VS-API pair (IDs 1 and 2) (`VisaTable::initial_for_node`).
+    Since #229 the relay's session to its own visa service runs over `lo`, so
+    this pair matches no packet; it is kept on purpose (gate g117 q5, see "The
+    relay hosts the visa service (#229)").
 J2. **The relay requests the bootstrap visas.** Once the link is up, the relay
     asks over its own VS-API session for joiner ↔ visa service:VSAPI, in both
     directions. The request names the joiner by its **link-verified CN**. The
@@ -608,6 +610,58 @@ gate g89) answered them, along with the choices the code forced:
   visaservice PR's head while the set is open (BUILD.md).
 - **q10, J11 per hop:** only the ingress swaps its forwarding entry (see J11).
 
+## The relay hosts the visa service (#229)
+
+The relay Zode and the visa service share one host, one network namespace and
+one TUN. There is no `ph adapter` for `vs.zpr`.
+
+- **One TUN, two addresses.** The relay's `zpr_addr` lists its own address
+  first and `vs.zpr` (`fd5a:5052::1`) after it. `zpr_addr[0]` stays the
+  relay's own address everywhere: its VS-API session and the source of that
+  session, its VSS listener, and link ownership. `ph node` applies every
+  `zpr_addr` entry to the TUN at startup if it is missing
+  (`Assembly::ensure_local_zpr_addrs_on_tun`), and it never removes them at
+  exit.
+- **The visa service is a local actor of the relay.** Every `zpr_addr` entry
+  is a local-actor address, so flows between `vs.zpr` and a Zode enter and
+  leave at the relay's local actor, the way the relay's own flows do (F8).
+  Endpoints reach the visa service through the relay: a packet from zb to
+  `vs.zpr` reaches the relay's local actor, and the relay writes it to the TUN.
+- **The relay's sessions with the visa service stay in the host** (Zodes plan
+  §7 check 1). `vs.zpr` is a local address, so the kernel routes the relay's
+  VS-API session to `vs.zpr`, and the visa service's VSS session to the relay,
+  over `lo`. Those packets never reach the TUN or `ph`. The visa service's VSS
+  sessions to other Zodes leave from `vs.zpr` (VISA_SERVICE.md, "Outbound VSS
+  connections bind `vs_addr`") and go out through the relay's TUN.
+- **Every client on the relay host binds its source.** With two addresses on
+  one interface, the kernel picks `vs.zpr` as the source of an unbound
+  connection to `vs.zpr` (RFC 6724 rule 1), and the address added last for
+  other destinations. So the relay's VS-API connection binds `zpr_addr[0]`
+  (`VSConn`, every `ph node`, gate g117 q3), the visa service's VSS and proxied
+  JWKS connections bind `vs_addr`, and a future ZPRnet client on the relay
+  host must bind too. `ph` does not deprecate `vs.zpr` (`preferred_lft 0`).
+- **Startup order.** The TUN carries both addresses, then `ph node` starts,
+  then valkey and the visa service. The visa service's VS-API and admin
+  listeners bind `vs_addr`. If `vs_addr` is not local, the listener task logs
+  an error and ends, but the process keeps running, so `vs.zpr` must already be
+  on the TUN. The relay's VS-API connection retries until the visa service
+  listens (`run_with_reconnect`). In netns, `ph` applies both addresses and the
+  harness waits for `vs.zpr` on `tun0` before it starts the visa service.
+  ZIPLINE pre-creates a persistent TUN with both addresses, so restarting `ph`
+  never takes `vs.zpr` away from a running visa service.
+- **A relay refuses an adapter-docked visa service.** On a relay, an adapter
+  whose verified certificate carries the visa service's DN is closed at keying,
+  and no special-peer name is assigned (gate g117 q4). Nodes that are not relays
+  (the `one-node-*` layouts) still accept it until #234.
+- **The relay's own VS-API visas.** The self-granted pair (IDs 1 and 2), and
+  the J5a and J9 visas that supersede it, match no packet, because the session
+  runs over `lo`. They stay (gate g117 q5): an insert supersedes, there is no
+  live stream to rebind, and the J10 relay path that #252 stabilised stays
+  untouched. Removing them waits for #234.
+- **The visa service needs no change.** It authenticates itself at startup.
+  With no adapter, the first node to authenticate becomes the node the
+  `vs.zpr` actor docks on (VISA_SERVICE.md), and that is always the relay.
+
 ## Left to the builder
 
 - The link-up timeout: 10 s is the default. It is a constant with a comment.
@@ -754,6 +808,35 @@ are VS docks" TODO in `policybuilder.rs`), so using it would make every link a
 relay link. `visa_bootstrap::is_relay` is the test `requestBootstrapVisas`
 already uses (visaservice#68).
 
+Decisions of gate g117 (pd plan p41,
+[#229](https://github.com/org-zpr/zl-zipline/issues/229)):
+
+**The relay lists `vs.zpr` explicitly** (q2). A relay must list
+`fd5a:5052::1` in `zpr_addr` after its own address. Startup refuses a relay
+without it, a relay that lists it first, a duplicate address, and a node that
+is not a relay but lists it. Each refusal names the fix. Rejected: deriving
+`vs.zpr` from `relay = true`, which hides the TUN's second address behind a
+flag. ZIPLINE writes the address into the config, so the addressing is
+visible there.
+
+**Every node binds its own address for VS-API** (q3). One code path, and the
+session always comes from the address the node claims. If the address is not
+on the TUN yet, the dial fails and `VSConn` retries; there is no fallback to an
+unbound connect. Rejected: binding only on a relay, a special case that leaves
+joiners with a kernel-chosen source.
+
+**The adapter-docked visa service is retired on a relay** (q4). A relay closes
+a dock from the visa service's adapter, and every Zode netns script runs the
+co-located relay, with J7 tested by stopping the visa service (SIGSTOP and
+SIGCONT). The adapter-docked `one-node-*` scripts stay until #234.
+
+**The relay's self-granted VS-API pair stays** (q5). Rejected: dropping it on a
+relay, which would be half done, because the visa service would still mint J5a
+and J9 visas for the relay unless the visa service changed too.
+
+**Bind, never deprecate.** Following #228, `ph` does no `preferred_lft`
+handling on the relay's TUN; every client that matters binds its source.
+
 ## Implementation status
 
 Built on `feature/zodes` in three core PRs (zl-zpr-core#105 keying and
@@ -773,7 +856,8 @@ see "Relay join (#252)" below.
 | Recognising an inbound Zode handshake | `zl-zpr-core/adapter/ph/src/mgmt/dispatch.rs`, `km_noise.rs` (`ZODE_HANDSHAKE_MARKER`) |
 | `reportLinkStates` RPC; per-link `setTopology` decoding | `zl-zpr-core/libnode2/src/vsconn.rs`, `libnode2/src/vss.rs` (`decode_topology_links`) |
 | Rule 14 (`end_agrees`), rule 13a (failed pairs, `record_failures`, `clear_failed_pairs_for`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
-| netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology; since #252 also the join, restart and rejoin (see "Relay join (#252)") | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
+| netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology; since #252 also the join, restart and rejoin (see "Relay join (#252)"); since #229 the relay hosts the visa service, with §7 check 1 asserted at the end of scenario 1 | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
+| The relay hosts the visa service (#229): the relay's `zpr_addr` rules (`check_node_zpr_addrs`); the VS-API connection binds `zpr_addr[0]` (`VSConn::new`, `connect_from`); a relay refuses the visa service's adapter at keying (`process_keying_done`) | `zl-zpr-core/adapter/ph/src/config.rs`, `libnode2/src/vsconn.rs`, `adapter/ph/src/link_state.rs` |
 | netns tests (#254): two joiners at once; zb - relay - zc with the relay's forwarding on and off; a direct link that drops and re-routes through the relay; a Zode in the policy with a certificate from another CA | `zl-zpr-core/integration-test/zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh`, `zode-wrong-ca-test.sh` |
 
 Everything scoped to one connection hangs off that connection's peer-table
@@ -821,7 +905,13 @@ All in `zl-zpr-core/adapter/ph/src/`, each with a comment:
   that link, and the relay refuses its still-valid certificate from then on.
   Direct links follow the network's allow rules (ROUTING.md, "Implementation
   status"; [org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
-- A Zode's own address, the one ownership compares, is `zpr_addr[0]`.
+- A Zode's own address, the one ownership compares, is `zpr_addr[0]`. It must
+  be IPv6, because the VS-API session to `vs.zpr` leaves from it (#229).
+- **The relay hosts the visa service** (#229, gate g117 q2). A relay lists
+  `fd5a:5052::1` (`vs.zpr`) in `zpr_addr`, and not first. No address may be
+  listed twice, and a node that is not a relay never lists `vs.zpr`.
+  `Config::check_valid` refuses each case and names the fix. The command
+  line's `--zpr-addr` values come before the file's.
 
 ### Wire
 
@@ -1080,6 +1170,27 @@ reports its real local address (`windows-node-test.md` and
 `macos-node-test.md`, section 6). Network-change runs on those two hosts are
 [zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263).
 
+### The relay hosts the visa service (#229)
+
+Built in zl-zpr-core#118, with no visa-service change (core CI runs visa
+service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
+(#229)" above; the code is in "Where the code lives".
+
+- The netns Zode layout (`lib/zode_funcs.sh`) has no `zpr-vs` namespace and no
+  visa-service adapter. The relay's `ph node` gets `--zpr-addr` for its own
+  address and then for `vs.zpr`, and applies both to `tun0` itself. The
+  harness waits for `vs.zpr` on `tun0`, then starts valkey and the visa
+  service in the relay's namespace, then waits for the relay to register.
+  All five Zode scripts use it.
+- `zode-link-test.sh` asserts §7 check 1 at the end of scenario 1: in the
+  relay's namespace, `ip -6 route get fd5a:5052::1` gives `dev lo`, and `ss`
+  shows the relay's VS-API connection from its own address to
+  `[fd5a:5052::1]:5002` and the visa service's VSS connection from
+  `fd5a:5052::1` to zb's `:8183`.
+- J7 (scenario 6) stops the visa service with SIGSTOP. The relay's bootstrap
+  request times out after `BOOTSTRAP_REQUEST_TIMEOUT` (5 s) and it closes zb's
+  link. SIGCONT follows at once, so the relay's own session never drops.
+
 ### What waits for which issue
 
 - **#257** a visa granted for a next hop whose link is already down: its
@@ -1096,6 +1207,12 @@ reports its real local address (`windows-node-test.md` and
   service: its core visas carry no A2A keys.
 - **#264** whether a Zode can misuse the substrate address it reports
   (rule 13b).
+- **#234** retiring adapters: the `one-node-*` scripts still dock the visa
+  service as an adapter on a node that is not a relay, and the relay's unused
+  self-granted VS-API pair (#229) goes then.
+- **#266** (visa service): the visa service should exit
+  when a listener cannot bind `vs_addr`. Today it keeps running without
+  VS-API, which is why the relay's startup order matters.
 - **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), background
   retries of direct links, more than one relay, and relays that don't host the
   visa service.
