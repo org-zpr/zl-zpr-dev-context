@@ -102,8 +102,10 @@ entirely statically authenticated ZPRnet.
 
 Bootstrap configuration maps Common Names from ZPR link keys to RSA public key
 files; that list is exactly the set of adapters permitted to authenticate
-statically, and it must include the visa service adapter. The visa service
-reserves the link key name **`vs.zpr`**.
+statically, and in the adapter-docked layout it must include the visa service
+adapter. The visa service reserves the link key name **`vs.zpr`**. On a relay
+Zode that hosts the visa service there is no such adapter: see the next
+section.
 
 The protocol: the adapter signs challenge data from the node with its RSA
 private key, the node forwards the adapter CN and the signature to the visa
@@ -115,6 +117,14 @@ The visa service activates by docking with a node through its adapter. The
 adapter establishes a link with its designated CN, the node identifies the visa
 service by that CN, and the node then authenticates to the visa service over
 the VS-API using its own private RSA key.
+
+**On a relay Zode there is no visa-service adapter** (zl-zipline#229). The
+visa service runs beside the relay's `ph node`, `vs.zpr` is a second address on
+the relay's TUN, and the relay refuses a dock from the visa service's adapter.
+The visa service authenticates itself at startup, and the relay authenticates
+to it over VS-API as above. The adapter-docked layout above remains for nodes
+that are not relays (the `one-node-*` tests) until #234. See "The relay hosts
+the visa service, with no adapter" under *Design decisions*, and ZODE_LINKS.md.
 
 A trusted service can only join through a node once a visa service is
 docked — nodes cannot authenticate connections by themselves. Each time a new
@@ -625,6 +635,13 @@ and `vs.zpr`, and the relay grants the visa service's visas only for
 `vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
 never falls back to a source the kernel picks.
 
+**`vs_addr` must be local before `vs` starts.** If it is not, the VS-API and
+admin listener tasks log an error and end, and the process keeps running
+without them (`vsapi_worker::launch`). On a relay Zode that hosts the visa
+service, start order is therefore: the TUN with both addresses, then `ph node`,
+then valkey and `vs` (ZODE_LINKS.md, "The relay hosts the visa service
+(#229)").
+
 An OIDC JWKS fetch that goes through the policy's `jwks_proxy_service` binds
 `vs_addr` too. That `CONNECT` proxy is always an actor on the ZPRnet (see
 [OIDC.md](OIDC.md)): the visa service resolves it to the providing actor's ZPR
@@ -981,8 +998,11 @@ and `vs.zpr` on one TUN, RFC 6724 source selection has nothing that prefers
 alternative was to mark the relay's own address not-for-automatic-selection
 (Linux `preferred_lft 0`). Binding wins because it works on any platform and
 does not depend on how a separate process (`ph`) configures the TUN.
-`vs_addr` is always local at run time, since the VS-API listener already
-binds it at startup. The fix is on the visa service side because the node's
+`vs_addr` is local whenever the visa service is serving: VSS connections
+exist only once a node has connected over VS-API, and the VS-API listener binds
+`vs_addr`. If that bind fails, the listener task ends while the process keeps
+running (see "Configuration" above), and with no VS-API there are no VSS
+connections to bind. The fix is on the visa service side because the node's
 VSS listener does not check the peer address; only the relay's visa table
 would drop the traffic.
 ([zl-zipline#228](https://github.com/org-zpr/zl-zipline/issues/228))
@@ -1068,6 +1088,26 @@ joiner would rejoin every 5 minutes. Visas between two nodes keep their keys.
 That traffic is protected by the VS-API and VSS TLS alone, and that TLS does
 not authenticate either end yet (SECURITY_MODEL.md, "Design decisions";
 [#259](https://github.com/org-zpr/zl-zipline/issues/259)).
+
+### The relay hosts the visa service, with no adapter
+
+From the Zodes epic ([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216)),
+pd plan p41, [zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229).
+
+**No visa-service change.** The visa service runs beside the relay's `ph node`
+on the relay's TUN, and `vs.zpr` is a local actor of the relay (ZODE_LINKS.md,
+"The relay hosts the visa service (#229)"). It authenticates itself at startup
+(`self_authorize`). With no adapter, the `vs.zpr` actor's docking node is the
+first node to authenticate (`hack_set_vs_docking_node`,
+zpr-visaservice#195). That is always the relay: a joiner can authenticate only
+over bootstrap visas the relay requested, and `is_relay` needs the docking node
+to be set. The relay's held-back `ConnectRequest` for the adapter
+(`deferred_vs_connect`) was a second registration of `vs.zpr`; without an
+adapter there is none, and nothing in the visa service depended on it.
+
+**Follow-up, [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266):** the visa service should exit when a listener
+cannot bind `vs_addr`, instead of running without VS-API.
+([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229))
 
 ### A policy pass never waits on a node's VSS
 

@@ -674,6 +674,24 @@ Rejected: letting the rebind cross a key change for node-to-VS flows only (a
 special case in J11's guard).
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252))
 
+**On the relay host, traffic between the relay and the visa service is not
+visa-enforced.** The relay hosts the visa service on its own TUN, so `vs.zpr`
+is a local address of the relay, and the kernel carries the relay's VS-API
+session and the visa service's VSS session to the relay over `lo`. Neither
+reaches `ph`, so no visa covers them. The relay host is the visa service's
+trusted base: whoever controls it controls the visa service anyway. Traffic
+between `vs.zpr` and every other Zode still crosses the relay's local actor and
+needs visas. With two addresses on one interface, the kernel may source a
+connection from the wrong one, and the wrong source has no visa (or is refused
+by the visa service). So every client on the relay host that talks to the
+ZPRnet binds its source: the relay's VS-API connection binds the node's own
+address, and the visa service's VSS and proxied JWKS connections bind
+`vs_addr`. A new client there must bind too. There is no `preferred_lft`
+handling. ([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229),
+[#228](https://github.com/org-zpr/zl-zipline/issues/228),
+[#240](https://github.com/org-zpr/zl-zipline/issues/240); ZODE_LINKS.md, "The
+relay hosts the visa service (#229)")
+
 **The visa service mints a Zode's login nonce.** Every endpoint is a node, so
 "a compromised docking node" now includes every laptop; a nonce the endpoint
 mints itself cannot stop it replaying a stolen `id_token`. The operator chose
