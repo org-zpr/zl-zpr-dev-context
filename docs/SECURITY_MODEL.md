@@ -606,8 +606,11 @@ error or an API response.
   sign. That is acceptable: a certificate for a key you don't hold cannot
   complete a Noise handshake, so it authenticates nobody.
 - **No fallback.** A request without the link key or the signature is
-  refused, and a network with no stored CA key refuses registration with 409
-  `network_needs_upgrade`.
+  refused. Every network has a stored CA key: one provisioned before the
+  change got one at the Zodes flag day
+  ([org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254)), so a
+  missing key at registration is a server fault (a logged 500), not a client
+  error.
 
 Rejected: a one-year certificate with renewal (renewal code on both sides,
 where deleting the Zode already handles a leaked key); the server generating
@@ -890,9 +893,15 @@ not read the RFCs as a description of current guarantees.
   The network's generated policy lists every registered Zode in the relay's
   topology and pins its address
   ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
-  One piece is still missing: networks provisioned before the change have no
-  stored CA key, so they refuse registration until their cut-over,
-  [org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254).
+  Networks provisioned before the change were cut over at the Zodes flag day
+  ([org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254)): at
+  the web server's first start after the upgrade, such a network gets a new
+  CA (a stored one is kept) and a new data dir and containers, keeping its
+  id, DNS zone, port and policy rows. Its machines, which had no Zode
+  identity, were removed with the rules and services pinned to them, and
+  register again as Zodes (`zipline register --force`). Every ZIPLINE machine
+  is now a Zode with a pinned address and a CA-signed link certificate, which
+  the database enforces (NOT NULL).
 - **TLS on VS-API and VSS authenticates neither end.** Both are encrypted, but
   neither client verifies the server's certificate and neither presents one.
   Since the core visas carry no A2A keys (*Design decisions*, above), this is
