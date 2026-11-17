@@ -695,6 +695,11 @@ On ZIPLINE each network is now two containers ([org-zpr/zipline#252](https://git
 `zipline-relay-<id>` (the relay Zode, valkey and the visa service) and
 `zipline-dns-<id>` (CoreDNS behind the `dns.zpr` Zode, linked to the relay).
 The third, separate visa-service container and its `vs.zpr` adapter are gone.
+Every ZIPLINE machine is a Zode linked to its network's relay; there are no
+ZIPLINE adapters. Networks and machines from before Zodes were cut over at the
+flag day ([org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254)):
+the web server re-provisioned each such network in place, and its machines
+registered again as Zodes.
 
 ### Deferred
 
