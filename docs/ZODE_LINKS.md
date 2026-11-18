@@ -1287,8 +1287,12 @@ visa service at `65fe475` (`v0.22.0-zodes.9`).
 - **Linux-Linux passed every step:** the direct link, a 256 MiB transfer that
   leaves the relay container's received bytes flat, a firewall block that
   sends the next one through the relay, and recovery.
-- **Linux-Windows passed the same steps but one.** After the recovery
-  restart, the restarted machine's DNS lookups get no answer (#271).
+- **Linux-Windows passed the same steps but one.** A Linux client
+  downloaded from a Windows server. After the recovery restart, the direct
+  link was Active on both ends again, but the restarted Linux client's DNS
+  lookups got no answer (#271), so the last download failed.
+- **Windows was not tested as the client.** It can't reach the DNS Zode
+  (#272).
 - **macOS has not been run.** The Mac was unavailable; the Linux-macOS and
   macOS-Windows pairs will be tested by hand later.
 
@@ -1300,10 +1304,11 @@ What the real machines showed beyond the netns test:
   `failed`, and rule 13a kept the pair on the relay. The MSI now installs an
   inbound rule for `ph.exe` on UDP 5000, on every profile
   (org-zpr/zipline#268; SECURITY_MODEL.md, *Implementation status*).
-- **Recovery after a long block needs a reconnect.** A block outlasts the
-  one re-proposal (about 15 s, `LINK_REPROPOSE_DELAY` plus the owner's
-  `LINK_UP_WINDOW`), so the pair is marked failed until either end
-  reconnects (rule 13a). The demo restarts one Zode. A policy push does not
+- **Recovery after a long block needs a reconnect.** A silent block is
+  reported `down` only after keep-alive gives up (about 9-12 s). A block
+  that then outlasts the one re-proposal (about 15 s from that first `down`
+  report: `LINK_REPROPOSE_DELAY` plus the owner's `LINK_UP_WINDOW`) leaves
+  the pair marked failed until either end reconnects (rule 13a). The demo restarts one Zode. A policy push does not
   clear the mark.
 - **Block inbound only.** A host firewall that drops a Zode's *outgoing*
   substrate UDP makes the kernel fail `ph`'s send with EPERM, and `ph`
