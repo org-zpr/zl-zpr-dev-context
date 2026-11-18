@@ -45,7 +45,7 @@ together, and landed in stages:
 | B4 | §6 `unit` tier | implemented |
 | B5 | §6 `netns` and `docker` tiers | implemented — including the netns tier's container fallback (zipline#92/#93) and its unprivileged user-namespace host route (zipline#192) |
 
-### 1.3 Out of scope (recorded, not scheduled; see §10.4)
+### 1.3 Out of scope (recorded, not scheduled; see §10.5)
 
 No `[patch]` or path override of `zl-zpr-common`; no container build; no CI
 wiring; no `target/` reuse across builds; no signing or publishing; no
@@ -144,7 +144,7 @@ checkout:
 - **No fetch, ever.** Resolution runs against whatever the local checkout
   already has; `zpr-dev` treats a fetch as a mutation (spec-001 §5.1), and
   `--dry-run` must not perform one. A tag pushed but never fetched therefore
-  fails as an unknown ref; an opt-in `--fetch` is recorded in §10.4,
+  fails as an unknown ref; an opt-in `--fetch` is recorded in §10.5,
   not part of this spec.
 - An unknown ref is an error naming **both** the repository and the ref. A
   repository directory that is missing, or is not a Git repository, is an
@@ -365,7 +365,7 @@ risk. Everything is a release build. The table is in claim order:
 | Tier | What runs | Prerequisites | Default |
 |---|---|---|---|
 | `unit` | `make test` in each built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | run |
-| `netns` | the seventeen `zl-zpr-core/integration-test/` scripts | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
+| `netns` | the listed `zl-zpr-core/integration-test/` scripts (`NETNS_SCRIPTS`) | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
 | `docker` | `dns-demo` deploy, `test-dns.sh`, `docker compose down -v` | `docker`, `docker compose` | `--test docker` |
 
 - A tier that was asked for and cannot run is an error under `--test all`; a
@@ -380,14 +380,27 @@ risk. Everything is a release build. The table is in claim order:
   in the run list (`NETNS_SCRIPTS`) nor deliberately excluded with a reason
   (`NETNS_EXCLUDED`). Only the top level is judged — `lib/` and
   `unused_or_outdated/` are invisible, matching the Makefile's own
-  `$(wildcard *-test.sh)`. A listed script that only a feature branch carries
-  (`NETNS_SCRIPTS_IF_PRESENT`, today the six Zode scripts from
-  `feature/zodes`: `zode-link-test.sh` from zl-zipline#250,
-  `zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh` and
-  `zode-wrong-ca-test.sh` from zl-zipline#254, and `zode-login-test.sh` from
-  zl-zipline#233) runs only when the worktree has it;
+  `$(wildcard *-test.sh)`. A listed script that only one core branch
+  carries (`NETNS_SCRIPTS_IF_PRESENT`) runs only when the worktree has it;
   otherwise the tier records it as `skipped: not in this zl-zpr-core
-  revision`. Every other listed script must exist.
+  revision`. Every other listed script must exist. Until zl-zipline#237
+  merges `feature/zodes` into `zipline`, the optional scripts are:
+  - on `zipline` only, the adapter-docked scripts that zl-zipline#234
+    deletes on `feature/zodes`: `one-node-test.sh`, `one-node-v6-test.sh`,
+    `one-node-oidc-test.sh`, `one-node-oidc-renewal-test.sh`,
+    `one-node-policy-reauth-test.sh`, `node-restart-test.sh` and
+    `capture-test.sh`;
+  - on `feature/zodes` only, the Zode scripts: `zode-link-test.sh`
+    (zl-zipline#250); `zode-join-test.sh`, `zode-line-test.sh`,
+    `zode-reroute-test.sh` and `zode-wrong-ca-test.sh` (zl-zipline#254);
+    `zode-login-test.sh` (zl-zipline#233); `zode-rejoin-test.sh`
+    (zl-zipline#271); and #234's ports of the adapter-docked scripts,
+    `zode-ping-test.sh`, `zode-oidc-test.sh` and
+    `zode-policy-reauth-test.sh`.
+
+  `a2a-pubkey-test.sh`, `attr-query-test.sh`, `oidc-file-interplay-test.sh`
+  and `fake-idp-smoke-test.sh` are on both branches (#234 rewrites the first
+  three onto Zodes under the same names).
 - The netns tier selects its route **host → container → skip**
   (zipline#92/#93/#192). The host route wins whenever its own prerequisites
   — unprivileged user namespaces (the probe is `unshare -nr true`; on Ubuntu
@@ -396,7 +409,7 @@ risk. Everything is a release build. The table is in claim order:
   `python3` — all hold. The scripts need no sudo: each re-execs itself
   under `unshare -nr` and runs as that namespace's mapped root
   (zipline#189). Otherwise, when a Docker daemon is reachable (`docker info`
-  succeeds), the same seventeen scripts run as root inside the privileged
+  succeeds), the same scripts run as root inside the privileged
   container of `zl-zpr-core/integration-test/`'s `make docker-test`, one
   `make` invocation per script with `WORKSPACE=<build-dir>`. Either route
   runs up to four scripts at once (`--jobs N` overrides the width on both).
@@ -420,7 +433,12 @@ risk. Everything is a release build. The table is in claim order:
   defines `FORWARD_ENV`; an older worktree refuses the route with a reason
   naming that floor.
 - `a2a-pubkey-test.sh` needs a `ph` built with `enable-security-testing`;
-  that binary must never be staged into `dist/`.
+  that binary must never be staged into `dist/`. After the tiers, the build
+  checks the staged `ph`: it reads the run subcommand from `ph --help`
+  (`zode`, or `node` on a `zipline` core), and fails when `ph <sub> --help`
+  advertises `--security-testing-mangle-forwarded-pings`. It fails closed: a
+  `ph` that lists neither subcommand, or a `--help` that exits non-zero, is
+  not clean (§10.4).
 - The `docker` tier always runs `docker compose down -v`, pass or fail.
 ## 7. CLI surface
 
@@ -676,8 +694,10 @@ decision on the umbrella, 2026-10-13.
 **zipline keeps `/24` substrate addressing; upstream uses peer addressing.**
 A `peer` address on a veth is a `/32`, the kernel does not answer ARP for
 it on an ARP-capable device, so neighbour entries stay INCOMPLETE and no
-adapter docks. TUN devices are NOARP, so `tun0` keeps peer addressing. This
-is the one deliberate divergence of `create_network` from `main`.
+link comes up (on `zipline`, no adapter docks). TUN devices are NOARP, so
+`tun0` keeps peer addressing. This is the one deliberate divergence of
+`create_network` from `main`; `feature/zodes`'s `lib/zode_funcs.sh` gives
+its veths `/24` addresses for the same reason.
 ([zipline#190](https://github.com/org-zpr/zl-zipline/issues/190))
 
 **`pkill`/`pgrep` are scoped to the run's own user namespace.** Concurrent
@@ -712,7 +732,31 @@ left to serve; the flag is now a usage error. A blocked probe still falls
 back to the container, and the skip reason names the AppArmor sysctl.
 ([zipline#192](https://github.com/org-zpr/zl-zipline/issues/192))
 
-### 10.4 Deferred
+### 10.4 `ph zode` only (zl-zipline#234)
+
+**One script list serves both core branches until zl-zipline#237.** The
+default build set pins core `zipline`, which keeps `ph node`, `ph adapter`
+and the adapter-docked scripts, while `feature/zodes` deletes them and adds
+their Zode ports. So both sets sit in `NETNS_SCRIPTS_IF_PRESENT` and each
+core runs what it carries; a unit test pins the optional list to exactly
+the scripts one branch has and the other lacks, so a script deleted on one
+branch cannot fail that branch's tier as missing. The split goes when #237
+merges `feature/zodes` into `zipline`.
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
+
+**The dist/ `ph` check fails closed.** It ran `ph node --help`, ignored the
+exit status and grepped for the mangle flag. Once `ph node` is gone that
+command fails with clap's "unrecognized subcommand", the flag is absent,
+and the check passed whatever `ph` was staged. Now it takes the run
+subcommand from the `Commands:` section of `ph --help` — `zode` if listed,
+else `node` — and treats a `ph` that lists neither, or any `--help` that
+exits non-zero, as not clean, saying why: a check that cannot run must not
+report a pass. Supporting `node` as well is a dev-tool concession to the
+`zipline` pin, not backwards compatibility in `ph` itself (operator, gate
+g167 q12); it goes with the split above.
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
+
+### 10.5 Deferred
 
 Recorded, not scheduled; none has an open issue.
 

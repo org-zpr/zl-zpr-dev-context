@@ -746,7 +746,7 @@ pub fn run_unit(plans: &[RepoPlan], logs: &Path, quiet: bool) -> TierOutcome {
 // The netns tier (issue62 step 3)
 // ---------------------------------------------------------------------------
 
-/// The seventeen integration scripts the netns tier runs, in order. An explicit
+/// The integration scripts the netns tier runs, in order. An explicit
 /// list, never a glob: `integration-test/unused_or_outdated/` stays out, and
 /// adding a script to the set's gate is a reviewed change (zipline#62).
 /// The list is guarded against drift by [`netns_script_drift`] (zipline#103):
@@ -783,14 +783,39 @@ const NETNS_SCRIPTS: &[&str] = &[
     // A person logs in on a Zode with ph-cli, logs out, renews silently,
     // and is asked again after a visa-service restart (zl-zipline#233).
     "zode-login-test.sh",
+    // A Zode never matches a new flow to an expired visa, across a Zode
+    // restart and rejoin (zl-zipline#271).
+    "zode-rejoin-test.sh",
+    // The Zode ports of the adapter-docked scripts (zl-zipline#234): a
+    // ping mesh across a relay (one-node-test.sh), OIDC key rotation and
+    // refresh revocation on a logged-in Zode (one-node-oidc-test.sh and
+    // one-node-oidc-renewal-test.sh), and policy re-authentication
+    // (one-node-policy-reauth-test.sh).
+    "zode-ping-test.sh",
+    "zode-oidc-test.sh",
+    "zode-policy-reauth-test.sh",
 ];
 
 /// Scripts in [`NETNS_SCRIPTS`] that only some `zl-zpr-core` revisions carry:
-/// a feature branch added them, and a build set may pin a core from before
-/// that (the default build set pins `zipline`). Planned only when the
-/// worktree has them; otherwise recorded as skipped with a reason, never
-/// silently dropped. Every other listed script must exist.
+/// a feature branch added or deleted them, and a build set may pin a core
+/// on either side of that (the default build set pins `zipline`). Planned
+/// only when the worktree has them; otherwise recorded as skipped with a
+/// reason, never silently dropped. Every other listed script must exist.
+///
+/// The split between the two core branches goes when zl-zipline#237 merges
+/// `feature/zodes` into `zipline`: the adapter-docked scripts then leave
+/// [`NETNS_SCRIPTS`], and the Zode scripts stop being optional.
 const NETNS_SCRIPTS_IF_PRESENT: &[&str] = &[
+    // zipline only: the adapter-docked scripts, deleted on feature/zodes
+    // when `ph node` and `ph adapter` go (zl-zipline#234). Their Zode
+    // ports are listed below.
+    "one-node-test.sh",
+    "one-node-v6-test.sh",
+    "one-node-oidc-test.sh",
+    "capture-test.sh",
+    "one-node-oidc-renewal-test.sh",
+    "one-node-policy-reauth-test.sh",
+    "node-restart-test.sh",
     // feature/zodes only, until it merges into zipline (zl-zipline#250).
     "zode-link-test.sh",
     // feature/zodes only, likewise (zl-zipline#254).
@@ -800,6 +825,12 @@ const NETNS_SCRIPTS_IF_PRESENT: &[&str] = &[
     "zode-wrong-ca-test.sh",
     // feature/zodes only, likewise (zl-zipline#233).
     "zode-login-test.sh",
+    // feature/zodes only, likewise (zl-zipline#271).
+    "zode-rejoin-test.sh",
+    // feature/zodes only, likewise (zl-zipline#234).
+    "zode-ping-test.sh",
+    "zode-oidc-test.sh",
+    "zode-policy-reauth-test.sh",
 ];
 
 /// Top-level `integration-test/*-test.sh` scripts the netns tier
@@ -950,7 +981,7 @@ pub struct NetnsPlan {
 pub const NETNS_JOBS: usize = 4;
 
 /// Builds the netns plan against the `zl-zpr-core` worktree and `dist/`:
-/// the seventeen blessed scripts in order, each with the `*_BIN` overrides the
+/// the blessed scripts in order, each with the `*_BIN` overrides the
 /// scripts already honour pointed at `dist/` — nothing is copied into
 /// `integration-test/`. `a2a-pubkey-test.sh` alone runs the worktree-local
 /// `enable-security-testing` `ph` (a debug build that must never reach
@@ -1200,25 +1231,37 @@ pub fn run_netns(plan: &NetnsPlan, logs: &Path, quiet: bool) -> TierOutcome {
 
 /// The runtime half of the dist/ guard (zipline#62): the staged `ph`
 /// must not be an `enable-security-testing` build. A security-testing `ph`
-/// advertises `--security-testing-mangle-forwarded-pings` in `node --help`
-/// (the same detection `a2a-pubkey-test.sh` uses); a clean one does not.
-/// A missing `dist/ph` passes — there is nothing to guard, and the staging
-/// verification reports the absence separately.
+/// advertises `--security-testing-mangle-forwarded-pings` in its run
+/// subcommand's `--help` (the same detection `a2a-pubkey-test.sh` uses); a
+/// clean one does not. A missing `dist/ph` passes — there is nothing to
+/// guard, and the staging verification reports the absence separately.
+///
+/// The run subcommand is read from `ph --help` (zl-zipline#234, gate g167
+/// q12): `zode` on a `feature/zodes` core, `node` on a `zipline` core until
+/// zl-zipline#237 merges the two. The check fails closed: a `ph` that lists
+/// neither, or a `--help` that exits non-zero, is not clean, because its
+/// help text proves nothing. (Before #234 it ran `node --help` and ignored
+/// the exit status, so a `ph` without `node` passed silently.)
 pub fn dist_ph_is_clean(dist: &Path) -> Result<()> {
     let ph = dist.join("ph");
     if !ph.is_file() {
         return Ok(());
     }
-    let output = std::process::Command::new(&ph)
-        .args(["node", "--help"])
-        .output()
-        .map_err(|e| anyhow::anyhow!("cannot run {} node --help: {e}", ph.display()))?;
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
-    if text.contains("--security-testing-mangle-forwarded-pings") {
+    let top_help = ph_help_text(&ph, None)?;
+    let listed = ph_subcommands(&top_help);
+    let Some(sub) = ["zode", "node"]
+        .into_iter()
+        .find(|sub| listed.contains(sub))
+    else {
+        bail!(
+            "{} lists neither a `zode` nor a `node` subcommand (it lists: {}), \
+             so it cannot be checked for the enable-security-testing build; \
+             refusing it rather than passing it unchecked",
+            ph.display(),
+            listed.join(", ")
+        );
+    };
+    if ph_help_text(&ph, Some(sub))?.contains("--security-testing-mangle-forwarded-pings") {
         bail!(
             "{} is an enable-security-testing build; that ph is for \
              a2a-pubkey-test.sh only and must never be staged into dist/",
@@ -1226,6 +1269,46 @@ pub fn dist_ph_is_clean(dist: &Path) -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// Runs `ph [<sub>] --help` and returns its stdout and stderr together. A
+/// non-zero exit is an error naming the command: the guard must not judge a
+/// `ph` by help text it did not finish printing.
+fn ph_help_text(ph: &Path, sub: Option<&str>) -> Result<String> {
+    let command = match sub {
+        Some(sub) => format!("{} {sub} --help", ph.display()),
+        None => format!("{} --help", ph.display()),
+    };
+    let output = std::process::Command::new(ph)
+        .args(sub)
+        .arg("--help")
+        .output()
+        .map_err(|e| anyhow::anyhow!("cannot run {command}: {e}"))?;
+    if !output.status.success() {
+        bail!(
+            "{command} failed ({}), so the staged ph cannot be checked for the \
+             enable-security-testing build",
+            output.status
+        );
+    }
+    Ok(format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+/// The subcommand names in clap's top-level help: the first word of each
+/// indented line of the `Commands:` section, up to the first line that is
+/// blank or not indented. Prose elsewhere in the help (`ph`'s doc comment
+/// says `sudo ./ph node ...`) is ignored.
+fn ph_subcommands(help: &str) -> Vec<&str> {
+    help.lines()
+        .skip_while(|line| line.trim() != "Commands:")
+        .skip(1)
+        .take_while(|line| line.starts_with(char::is_whitespace) && !line.trim().is_empty())
+        .filter_map(|line| line.split_whitespace().next())
+        .collect()
 }
 
 /// [`recipes::run_command`] with per-child environment overrides: same
@@ -2356,7 +2439,7 @@ mod tests {
         }
     }
 
-    /// The plan runs exactly the seventeen blessed scripts, in order — an
+    /// The plan runs exactly the blessed scripts, in order — an
     /// explicit list, not a glob: `unused_or_outdated/` and any new script
     /// stay out until reviewed in (zipline#62, zipline#103). The order is
     /// the documented one: `attr-query-test.sh` after `a2a-pubkey-test.sh`,
@@ -2367,10 +2450,11 @@ mod tests {
     /// regression e2e (zipline#167/#170/#171) — after that (zipline#178),
     /// then `zode-link-test.sh` — the Zode link lifecycle e2e
     /// (zl-zipline#250) — the four Zode scripts of zl-zipline#254 (join,
-    /// line, reroute, wrong CA), and `zode-login-test.sh` (zl-zipline#233)
-    /// last, newest last.
+    /// line, reroute, wrong CA), `zode-login-test.sh` (zl-zipline#233),
+    /// `zode-rejoin-test.sh` (zl-zipline#271), and the three Zode ports of the adapter-docked scripts (zl-zipline#234:
+    /// ping, OIDC, policy re-auth) last, newest last.
     #[test]
-    fn netns_plan_lists_the_seventeen_scripts_in_order() {
+    fn netns_plan_lists_the_scripts_in_order() {
         let plan = netns_plan(
             Path::new("/wt/zl-zpr-core"),
             Path::new("/b/dist"),
@@ -2405,6 +2489,10 @@ mod tests {
                 "zode-reroute-test.sh",
                 "zode-wrong-ca-test.sh",
                 "zode-login-test.sh",
+                "zode-rejoin-test.sh",
+                "zode-ping-test.sh",
+                "zode-oidc-test.sh",
+                "zode-policy-reauth-test.sh",
             ]
         );
         assert_eq!(plan.dir, Path::new("/wt/zl-zpr-core/integration-test"));
@@ -2431,56 +2519,119 @@ mod tests {
         tmp
     }
 
-    /// The feature-branch scripts (zl-zipline#250, #254, #233) run only
-    /// where the core worktree carries them: a `zipline` core revision
-    /// without the six Zode scripts plans the other eleven and records each
-    /// of the six
-    /// as skipped with a reason, so the tier neither fails on a missing file
-    /// nor overstates what ran. With the scripts present they run, last.
+    /// The scripts only a `zipline` core carries: the adapter-docked
+    /// scripts that zl-zipline#234 ports onto Zodes and deletes on
+    /// `feature/zodes`.
+    const ZIPLINE_CORE_ONLY: [&str; 7] = [
+        "one-node-test.sh",
+        "one-node-v6-test.sh",
+        "one-node-oidc-test.sh",
+        "capture-test.sh",
+        "one-node-oidc-renewal-test.sh",
+        "one-node-policy-reauth-test.sh",
+        "node-restart-test.sh",
+    ];
+
+    /// The scripts only a `feature/zodes` core carries (zl-zipline#250,
+    /// #254, #233, #271, and #234's ports), in list order.
+    const ZODES_CORE_ONLY: [&str; 10] = [
+        "zode-link-test.sh",
+        "zode-join-test.sh",
+        "zode-line-test.sh",
+        "zode-reroute-test.sh",
+        "zode-wrong-ca-test.sh",
+        "zode-login-test.sh",
+        "zode-rejoin-test.sh",
+        "zode-ping-test.sh",
+        "zode-oidc-test.sh",
+        "zode-policy-reauth-test.sh",
+    ];
+
+    /// The optional list is exactly the scripts one core branch carries
+    /// and the other lacks: every listed script is either on both branches
+    /// (and must exist) or in one of the two sets above. A script deleted
+    /// on one branch but left out of `NETNS_SCRIPTS_IF_PRESENT` would fail
+    /// that branch's tier as missing, rather than skip it.
+    #[test]
+    fn netns_optional_scripts_are_the_branch_specific_ones() {
+        let mut optional: Vec<&str> = NETNS_SCRIPTS_IF_PRESENT.to_vec();
+        optional.sort();
+        let mut branch_specific: Vec<&str> = ZIPLINE_CORE_ONLY
+            .iter()
+            .chain(ZODES_CORE_ONLY.iter())
+            .copied()
+            .collect();
+        branch_specific.sort();
+        assert_eq!(optional, branch_specific);
+        for script in NETNS_SCRIPTS_IF_PRESENT {
+            assert!(
+                NETNS_SCRIPTS.contains(script),
+                "{script} is optional but not in NETNS_SCRIPTS"
+            );
+        }
+    }
+
+    /// Each core branch plans cleanly and runs what it carries
+    /// (zl-zipline#234): a `zipline` core runs the adapter-docked scripts
+    /// and skips the Zode ones; a `feature/zodes` core runs the Zode
+    /// scripts and skips the deleted adapter-docked ones. Each skip is
+    /// recorded with a reason, so the tier neither fails on a missing file
+    /// nor overstates what ran. A worktree carrying every script runs all
+    /// of them.
     #[test]
     fn netns_plan_skips_the_feature_scripts_the_worktree_lacks() {
-        let zode_scripts = [
-            "zode-link-test.sh",
-            "zode-join-test.sh",
-            "zode-line-test.sh",
-            "zode-reroute-test.sh",
-            "zode-wrong-ca-test.sh",
-            "zode-login-test.sh",
-        ];
-        let older: Vec<&str> = NETNS_SCRIPTS
+        let both: Vec<&str> = NETNS_SCRIPTS
             .iter()
             .copied()
-            .filter(|script| !zode_scripts.contains(script))
+            .filter(|script| !NETNS_SCRIPTS_IF_PRESENT.contains(script))
             .collect();
-        assert_eq!(older.len(), 11);
-        for (present, expect_run) in [(older.clone(), false), (NETNS_SCRIPTS.to_vec(), true)] {
+        for (only, lacked) in [
+            (&ZIPLINE_CORE_ONLY[..], &ZODES_CORE_ONLY[..]),
+            (&ZODES_CORE_ONLY[..], &ZIPLINE_CORE_ONLY[..]),
+        ] {
+            let present: Vec<&str> = NETNS_SCRIPTS
+                .iter()
+                .copied()
+                .filter(|script| both.contains(script) || only.contains(script))
+                .collect();
             let tmp = drift_fixture(&present);
-            let plan = netns_plan(
-                tmp.path(),
-                Path::new("/b/dist"),
-                Path::new("/usr/bin/valkey-server"),
-                false,
-                &host_runner(),
-                Path::new("/b"),
-                None,
-            )
-            .expect("both worktrees plan cleanly");
+            let plan = plan_for(tmp.path());
             let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
-            if expect_run {
-                assert_eq!(names, NETNS_SCRIPTS);
-                assert!(plan.skipped.is_empty());
-            } else {
-                assert_eq!(names, older);
-                let skipped: Vec<&str> = plan.skipped.iter().map(|(script, _)| *script).collect();
-                assert_eq!(skipped, zode_scripts);
-                for (script, reason) in &plan.skipped {
-                    assert!(
-                        reason.contains("not in this zl-zpr-core revision"),
-                        "{script}: {reason}"
-                    );
-                }
+            assert_eq!(names, present);
+            let skipped: Vec<&str> = plan.skipped.iter().map(|(script, _)| *script).collect();
+            let expected_skips: Vec<&str> = NETNS_SCRIPTS
+                .iter()
+                .copied()
+                .filter(|script| lacked.contains(script))
+                .collect();
+            assert_eq!(skipped, expected_skips);
+            for (script, reason) in &plan.skipped {
+                assert!(
+                    reason.contains("not in this zl-zpr-core revision"),
+                    "{script}: {reason}"
+                );
             }
         }
+        let tmp = drift_fixture(NETNS_SCRIPTS);
+        let plan = plan_for(tmp.path());
+        let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
+        assert_eq!(names, NETNS_SCRIPTS);
+        assert!(plan.skipped.is_empty());
+    }
+
+    /// The host-route netns plan for a fixture worktree, with the fixed
+    /// dist/ and valkey paths the planning tests share.
+    fn plan_for(worktree: &Path) -> NetnsPlan {
+        netns_plan(
+            worktree,
+            Path::new("/b/dist"),
+            Path::new("/usr/bin/valkey-server"),
+            false,
+            &host_runner(),
+            Path::new("/b"),
+            None,
+        )
+        .expect("the fixture worktree plans cleanly")
     }
 
     /// The drift guard (zipline#103): a top-level `*-test.sh` in the
@@ -2841,9 +2992,10 @@ mod tests {
         }
     }
 
-    /// The runtime guard: a `dist/ph` that advertises the security-testing
-    /// flag fails the check; one that does not passes; a missing `ph` passes
-    /// (nothing to guard).
+    /// The runtime guard on a `zipline` core's `ph`, whose only run
+    /// subcommands are `node` and `adapter`: a `dist/ph` that advertises the
+    /// security-testing flag under `node --help` fails the check; one that
+    /// does not passes; a missing `ph` passes (nothing to guard).
     #[test]
     fn dist_ph_clean_check_rejects_a_security_testing_build() {
         let tmp = tempfile::tempdir().unwrap();
@@ -2853,24 +3005,169 @@ mod tests {
         assert!(dist_ph_is_clean(dist).is_ok());
 
         // A clean ph: `node --help` does not mention the mangle flag.
-        write_fake_ph(dist, "usage: ph node [--config PATH]\n");
+        write_fake_ph(
+            dist,
+            &ph_help(&["adapter", "node"]),
+            0,
+            "node",
+            "usage: ph node [--config PATH]\n",
+            0,
+        );
         assert!(dist_ph_is_clean(dist).is_ok());
 
         // A security-testing ph: the check names the problem.
         write_fake_ph(
             dist,
+            &ph_help(&["adapter", "node"]),
+            0,
+            "node",
             "usage: ph node [--security-testing-mangle-forwarded-pings]\n",
+            0,
         );
         let error = dist_ph_is_clean(dist).unwrap_err().to_string();
         assert!(error.contains("enable-security-testing"), "{error}");
     }
 
-    /// A fake `dist/ph` that prints `help_text` for any invocation.
-    fn write_fake_ph(dist: &Path, help_text: &str) {
-        use std::os::unix::fs::PermissionsExt as _;
-        let path = dist.join("ph");
-        std::fs::write(&path, format!("#!/bin/sh\nprintf '%s' '{help_text}'\n")).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    /// zl-zipline#234: on a `feature/zodes` core `ph zode` is the only run
+    /// subcommand, so the check reads `zode --help`. A clean `ph` passes; a
+    /// security-testing one fails.
+    #[test]
+    fn dist_ph_clean_check_reads_zode_help_when_ph_has_zode() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path();
+        write_fake_ph(
+            dist,
+            &ph_help(&["zode"]),
+            0,
+            "zode",
+            "usage: ph zode [--relay]\n",
+            0,
+        );
+        dist_ph_is_clean(dist).expect("a clean ph zode must pass");
+
+        write_fake_ph(
+            dist,
+            &ph_help(&["zode"]),
+            0,
+            "zode",
+            "usage: ph zode [--security-testing-mangle-forwarded-pings]\n",
+            0,
+        );
+        let error = dist_ph_is_clean(dist).unwrap_err().to_string();
+        assert!(error.contains("enable-security-testing"), "{error}");
+    }
+
+    /// zl-zipline#234: the check fails closed. A `ph` that lists neither
+    /// `zode` nor `node` cannot be checked, so it is not clean — even when
+    /// its prose still says `ph node`, as the old help text does. Before
+    /// this, `node --help` failed silently and the check passed.
+    #[test]
+    fn dist_ph_clean_check_fails_when_ph_lists_no_run_subcommand() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path();
+        write_fake_ph(
+            dist,
+            &ph_help(&["adapter"]),
+            0,
+            "node",
+            "usage: ph node\n",
+            0,
+        );
+        let error = dist_ph_is_clean(dist)
+            .expect_err("a ph without zode or node must not pass")
+            .to_string();
+        assert!(
+            error.contains("zode") && error.contains("node"),
+            "must say which subcommands it looked for: {error}"
+        );
+    }
+
+    /// zl-zipline#234: a non-zero exit from `ph --help` or from
+    /// `ph <sub> --help` means the help text cannot be trusted, so the
+    /// check fails and names the command that failed — even though the
+    /// output does not mention the mangle flag.
+    #[test]
+    fn dist_ph_clean_check_fails_on_a_non_zero_exit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dist = tmp.path();
+
+        write_fake_ph(dist, &ph_help(&["zode"]), 1, "zode", "usage: ph zode\n", 0);
+        let error = dist_ph_is_clean(dist)
+            .expect_err("a failing ph --help must not pass")
+            .to_string();
+        assert!(
+            error.contains("--help") && error.contains("exit"),
+            "{error}"
+        );
+
+        write_fake_ph(dist, &ph_help(&["zode"]), 0, "zode", "usage: ph zode\n", 2);
+        let error = dist_ph_is_clean(dist)
+            .expect_err("a failing ph zode --help must not pass")
+            .to_string();
+        assert!(
+            error.contains("zode --help") && error.contains("exit"),
+            "{error}"
+        );
+    }
+
+    /// The listing parser reads only the `Commands:` section: prose above
+    /// it that mentions a subcommand does not count, and clap's own `help`
+    /// entry is listed like any other.
+    #[test]
+    fn ph_subcommands_reads_only_the_commands_section() {
+        assert_eq!(
+            ph_subcommands(&ph_help(&["adapter", "node"])),
+            ["adapter", "node", "help"]
+        );
+        assert!(ph_subcommands("usage: sudo ./ph node -c node.toml\n").is_empty());
+    }
+
+    /// Top-level help shaped like clap's for `ph`: prose that mentions
+    /// `ph node` (as the pre-#234 doc comment does), then a `Commands:`
+    /// section listing `subcommands` and clap's `help`, then `Options:`.
+    fn ph_help(subcommands: &[&str]) -> String {
+        let mut text = String::from(
+            "ZPR Packet Handler\n\nEg, start a node:\n   sudo ./ph node -c node_config.toml\n\n\
+             Usage: ph <COMMAND>\n\nCommands:\n",
+        );
+        for sub in subcommands {
+            text.push_str(&format!("  {sub}  Start the handler\n"));
+        }
+        text.push_str(
+            "  help  Print this message\n\nOptions:\n  -h, --help\n          Print help\n",
+        );
+        text
+    }
+
+    /// A fake `dist/ph`: `ph --help` prints `top_help` and exits
+    /// `top_exit`; `ph <sub> --help` prints `sub_help` and exits `sub_exit`;
+    /// any other subcommand is refused with exit 2, as clap does.
+    /// `dist/ph` is a symlink to the checked-in `tests/fixtures/fake-ph`,
+    /// which reads these values from data files in `dist/`: executing a
+    /// script the test has just written fails now and then with ETXTBSY
+    /// while parallel tests fork.
+    fn write_fake_ph(
+        dist: &Path,
+        top_help: &str,
+        top_exit: i32,
+        sub: &str,
+        sub_help: &str,
+        sub_exit: i32,
+    ) {
+        let ph = dist.join("ph");
+        if !ph.exists() {
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-ph");
+            std::os::unix::fs::symlink(fixture, &ph).unwrap();
+        }
+        for (name, value) in [
+            ("top-help", top_help.to_string()),
+            ("top-exit", top_exit.to_string()),
+            ("sub", sub.to_string()),
+            ("sub-help", sub_help.to_string()),
+            ("sub-exit", sub_exit.to_string()),
+        ] {
+            std::fs::write(dist.join(name), value).unwrap();
+        }
     }
 
     /// The netns runner: continues after a failing script, records each

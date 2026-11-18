@@ -1764,7 +1764,7 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         tier_results.insert("unit".to_string(), Tier::from_outcome(&outcome));
     }
 
-    // The netns tier: the seventeen integration scripts in the zl-zpr-core
+    // The netns tier: the listed integration scripts in the zl-zpr-core
     // worktree, against dist/. The stored runner decides the route
     // (zipline#92): Host runs the scripts directly, each in its own
     // unprivileged user namespace; Container runs them through `make
@@ -3986,10 +3986,16 @@ allow_pin_drift:
                 && text.contains("predates the unprivileged netns harness"),
             "{text}"
         );
-        let log =
-            std::fs::read_to_string(build_dir.join("logs").join("netns-one-node-test.sh.log"))
-                .unwrap();
-        assert!(log.contains("container ran one-node-test.sh"), "{log}");
+        let log = std::fs::read_to_string(
+            build_dir
+                .join("logs")
+                .join("netns-oidc-file-interplay-test.sh.log"),
+        )
+        .unwrap();
+        assert!(
+            log.contains("container ran oidc-file-interplay-test.sh"),
+            "{log}"
+        );
     }
 
     /// [`workspace_with_repo`] whose committed repository also carries an
@@ -4054,10 +4060,16 @@ allow_pin_drift:
         assert!(text.contains("netns:"), "{text}");
         assert!(text.contains("status: failed"), "{text}");
         assert!(text.contains("privilege: container"), "{text}");
-        // The six prep-less scripts went through make and passed; a2a failed
-        // at its host-side prep build (no cargo project in the fixture) —
-        // recorded per script, exactly as on the host route.
-        assert!(text.contains("one-node-test.sh: passed"), "{text}");
+        // The prep-less scripts every core carries went through make and
+        // passed; a2a failed at its host-side prep build (no cargo project
+        // in the fixture) — recorded per script, exactly as on the host
+        // route. The fixture carries no script file, so the optional,
+        // branch-specific ones are recorded as skipped (zl-zipline#234).
+        assert!(
+            text.contains("oidc-file-interplay-test.sh: passed"),
+            "{text}"
+        );
+        assert!(text.contains("one-node-test.sh: 'skipped: "), "{text}");
         assert!(text.contains("fake-idp-smoke-test.sh: passed"), "{text}");
         assert!(text.contains("a2a-pubkey-test.sh"), "{text}");
         assert!(text.contains("security-ph"), "{text}");
@@ -4072,11 +4084,14 @@ allow_pin_drift:
         );
         // The scripts ran through make: the per-script log carries the fake
         // target's output, proving the invocation shape end to end.
-        let log =
-            std::fs::read_to_string(build_dir.join("logs").join("netns-one-node-test.sh.log"))
-                .unwrap();
+        let log = std::fs::read_to_string(
+            build_dir
+                .join("logs")
+                .join("netns-oidc-file-interplay-test.sh.log"),
+        )
+        .unwrap();
         assert!(
-            log.contains("container ran one-node-test.sh"),
+            log.contains("container ran oidc-file-interplay-test.sh"),
             "make docker-test did not run: {log}"
         );
     }
