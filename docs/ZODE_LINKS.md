@@ -1277,6 +1277,39 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
   request times out after `BOOTSTRAP_REQUEST_TIMEOUT` (5 s) and it closes zb's
   link. SIGCONT follows at once, so the relay's own session never drops.
 
+### On real machines (org-zpr/zipline#255)
+
+The demo has run on real machines against a ZIPLINE dev server: relay and
+DNS Zodes in containers, Ubuntu and Windows Zodes on adapter 2.0.4, and the
+visa service at `65fe475` (`v0.22.0-zodes.9`).
+- **The runner and the recordings.** The runner is zipline
+  `test/manual/zodes-demo/demo.sh`, and the recordings are in its `runs/`.
+- **Linux-Linux passed every step:** the direct link, a 256 MiB transfer that
+  leaves the relay container's received bytes flat, a firewall block that
+  sends the next one through the relay, and recovery.
+- **Linux-Windows passed the same steps but one.** After the recovery
+  restart, the restarted machine's DNS lookups get no answer (#271).
+- **macOS has not been run.** The Mac was unavailable; the Linux-macOS and
+  macOS-Windows pairs will be tested by hand later.
+
+What the real machines showed beyond the netns test:
+
+- **A Windows Zode must accept inbound substrate UDP.** Under rule 1 the
+  lower ZPR address dials, so a Windows Zode registered after its peer must
+  accept the peer's dial. Windows Firewall dropped it, the attempt ended
+  `failed`, and rule 13a kept the pair on the relay. The MSI now installs an
+  inbound rule for `ph.exe` on UDP 5000, on every profile
+  (org-zpr/zipline#268; SECURITY_MODEL.md, *Implementation status*).
+- **Recovery after a long block needs a reconnect.** A block outlasts the
+  one re-proposal (about 15 s, `LINK_REPROPOSE_DELAY` plus the owner's
+  `LINK_UP_WINDOW`), so the pair is marked failed until either end
+  reconnects (rule 13a). The demo restarts one Zode. A policy push does not
+  clear the mark.
+- **Block inbound only.** A host firewall that drops a Zode's *outgoing*
+  substrate UDP makes the kernel fail `ph`'s send with EPERM, and `ph`
+  panics on it (#270). The demo's block drops only what comes in from the
+  peer, which silences the link both ways.
+
 ### What waits for which issue
 
 - **#257** a visa granted for a next hop whose link is already down: its
@@ -1293,6 +1326,19 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
   service: its core visas carry no A2A keys.
 - **#264** whether a Zode can misuse the substrate address it reports
   (rule 13b).
+- **#270** `ph` treats an EPERM from a substrate send as fatal, so a host
+  firewall that drops one peer's outgoing traffic crash-loops the Zode.
+- **#271** after an endpoint rejoins (restart, crash, or a visa-service
+  disconnect), the DNS Zode's replies stop reaching it. The reply stream
+  stays on a superseded visa. Seen on real machines (org-zpr/zipline#255).
+- **#272** a Windows Zode applies its ZPR address as a /64, not /32
+  (`add_address` ignores the prefix), so the DNS Zode at
+  `fd5a:5052:90de::2` is unreachable and names don't resolve on Windows.
+- **#273** deleting a service hosted on a Zode makes the visa service
+  disconnect that Zode ("no longer approved by policy"); it rejoins about
+  9 s later.
+- **org-zpr/zipline#278** the generated policy allows DNS on UDP 53 only, so
+  a resolver's TCP fallback is denied.
 - **#234** retiring adapters: the `one-node-*` scripts still dock the visa
   service as an adapter on a node that is not a relay, and the relay's unused
   self-granted VS-API pair (#229) goes then.

@@ -551,6 +551,11 @@ listener) is scoped to the Wintun interface, which Windows places on the
 Public profile where unsolicited inbound is dropped; the rule cannot be
 added before the node has created the adapter, and persists once created.
 ([zipline#162](https://github.com/org-zpr/zl-zipline/issues/162))
+On a ZIPLINE machine the MSI installs both:
+- "Zipline (ZPR network)", inbound to `fd5a:5052::/32`;
+- "Zipline (direct links)", `ph.exe` on UDP 5000 on every profile, which a
+  Windows Zode needs to accept a direct link
+  ([zipline#268](https://github.com/org-zpr/zipline/issues/268)).
 
 **Measured single-worker throughput.** Through one unbatched substrate
 socket with two client adapters docked: flood-ping loss 0 % (500 packets,

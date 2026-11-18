@@ -151,7 +151,9 @@ carries the #262 by-ID fetch fix (org-zpr/zl-zpr-visaservice#69).
 `v0.22.0-zodes.9` is `65fe475`, the merge of org-zpr/zl-zpr-visaservice#71
 (#268: a direct link reported `down` is proposed again once), cut after it
 merged; core moves to it (org-zpr/zl-zpr-core#126) with the `zode-reroute-test.sh` change that asserts
-the re-proposal.
+the re-proposal. zipline pins it too (`ZPR_VISASERVICE_REF`, build set
+`zodes-zipline255`, org-zpr/zipline#255): one commit after `3a9596e`, on the same
+zl-zpr-common tag, so no other pin moves with it.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and

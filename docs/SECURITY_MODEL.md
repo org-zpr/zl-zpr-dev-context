@@ -807,6 +807,21 @@ not read the RFCs as a description of current guarantees.
   certificate with the CN policy gives it. Whether a Zode can misuse the address
   it reports, for example to make peers dial a third party, is
   [zipline#264](https://github.com/org-zpr/zl-zipline/issues/264).
+- **A Windows Zode accepts direct links through Windows Firewall.** The
+  ZIPLINE MSI installs an inbound rule, "Zipline (direct links)": `ph.exe`
+  only, UDP 5000, every profile, removed with the package
+  ([zipline#268](https://github.com/org-zpr/zipline/issues/268), confirmed by
+  the #255 demo).
+  - **Why it is needed.** Without the rule, the dial from a peer with a lower
+    ZPR address was dropped and the pair stayed on the relay (ZODE_LINKS.md
+    rules 1 and 13a).
+  - **What it exposes.** Anyone on the substrate can now reach the Noise
+    handshake responder, as on Linux and macOS, where nothing filters it.
+  - **Why that is acceptable.** A link survives keying only with a
+    certificate signed by the network's CA whose CN is in the Zode's
+    current topology, and only from the link's owner (rule 3). Everything
+    else on the machine stays closed.
+  - **Every profile.** Laptops on public Wi-Fi are the common case.
 - **A Zode's own login, visa-service half** — `getLoginNonce` and the
   `reauthorize` gain/drop for a node's own actor are implemented in the visa
   service and unit-tested per binding row
