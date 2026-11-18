@@ -619,11 +619,12 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      ordinary F2 bind, a new forwarding entry beside the old one, and keeps the
      old entry until the old visa is revoked or a link it crosses drops.
      Expiry alone removes no binding at any hop (#271): an expired visa goes
-     at the ingress when a new flow matches it there, and a transit hop's
-     entry stays until revocation or link loss (see "Visa expiry at match
-     time (#271)"); the same holds for "the old binding stays until it
-     expires" above. *Built:* the rebind is
-     refused, and counted as `RebindFailed`, when the new visa's session keys
+     at the ingress when a new flow matches it there, which needs it to
+     still answer the lookup (after a partly committed supersede the lookup
+     names the successor, so a stream left on the old visa stays), and a
+     transit hop's entry stays until revocation or link loss (see "Visa
+     expiry at match time (#271)"); the same holds for "the old binding
+     stays until it expires" above. *Built:* the rebind is refused, and counted as `RebindFailed`, when the new visa's session keys
      differ from the old one's, since the requestor still holds the old keys.
      A failed rebind is not retried. When the next hop grants a rebind whose
      target a still newer visa superseded while it was in flight, the commit

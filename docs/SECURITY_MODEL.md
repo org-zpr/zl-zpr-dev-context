@@ -872,7 +872,8 @@ not read the RFCs as a description of current guarantees.
 - **Visa expiry on a timer.** Expiry is checked only when a Zode would bind
   under a visa (*Implemented*, above). No sweep removes an expired visa, so
   the streams already bound under it keep flowing until a new flow matches
-  it or a link they cross drops; the visa service, which forgets a visa at
+  it, a link they cross drops, or an R16 reset (ZODE_LINKS.md) clears the
+  table; the visa service, which forgets a visa at
   expiry, cannot revoke it
   ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
 - **Attribute lifetimes near their end.** The visa service refreshes an

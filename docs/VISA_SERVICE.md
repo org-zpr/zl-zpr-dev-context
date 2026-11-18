@@ -498,7 +498,8 @@ visa it holds is refused, and one it must fetch by ID is looked up live
 here. No hop checks again when the bind commits. (A joiner's check of its
 bootstrap hand-off, J4, is separate and older.)
 At each Zode, streams already bound under an expired visa keep forwarding
-until a new flow matches it there, or that Zode loses a link they cross (a
+until a new flow matches it there, that Zode loses a link they cross, or an
+R16 reset clears its table (ZODE_LINKS.md; a
 periodic sweep is
 [#274](https://github.com/org-zpr/zl-zipline/issues/274)). The visa service
 forgets a visa when it expires, so it never revokes an expired one; before
@@ -1264,7 +1265,8 @@ No tracker issues are filed for these unless linked.
   streams, when a new flow matches it at the ingress; a transit hop refuses
   a new `Stream ID Request` for one but keeps its existing streams. No
   timer sweeps the table, so live streams under an expired visa keep
-  flowing until an ingress match ejects it, or a link they cross drops
+  flowing until an ingress match ejects it, a link they cross drops, or an
+  R16 reset clears the table
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
   [#274](https://github.com/org-zpr/zl-zipline/issues/274); see *Expiration,
   revocation, renewal*).
