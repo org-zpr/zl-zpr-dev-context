@@ -492,8 +492,9 @@ to re-request before expiry.
 a Zode checks expiry only when it would use a visa for a new binding, with no
 timer. A new flow that matches an expired visa at its ingress Zode ejects
 that visa, withdraws its adapter streams and looks again, so it triggers a
-fresh request unless another held, unexpired visa covers the flow; a
-`Stream ID Request` for an expired visa further down the path is refused.
+fresh request unless that lookup finds a live visa. Further down the path,
+a `Stream ID Request` for an expired visa the hop holds is refused; a visa
+it does not hold is fetched by ID and bound with no expiry check.
 At each Zode, streams already bound under an expired visa keep forwarding
 until a new flow matches it there, or that Zode loses a link they cross (a
 periodic sweep is
@@ -505,8 +506,10 @@ expiry at match time (#271)".
 *Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
 visa service refreshes an attribute only once it has expired, and denies a
 visa whose lifetime would be under the 30-second minimum. So in the last 30
-seconds of an attribute's lifetime every visa request that needs it is
-denied, until the attribute expires and is refreshed. A new flow that a
+seconds of an attribute's lifetime, while it still bounds the visa's
+lifetime, every visa request that needs it is denied, until the attribute
+expires and is refreshed. A refresh of its whole source, for another
+attribute's expiry or a stale source revision, can end the window early. A new flow that a
 held, unexpired visa already covers (a wildcard port, say) does not ask,
 and is unaffected. The deny is counted and listed, with `NoReason`, by
 `GET /admin/visas/denies`; only its cause is logged, at DEBUG.

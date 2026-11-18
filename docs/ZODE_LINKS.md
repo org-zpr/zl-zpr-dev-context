@@ -909,17 +909,18 @@ binding:
   next-hop bind under it is in flight is still bound when the answer comes
   back; `VisaTable::bind` checks only that the visa is held. The window
   runs from the lookup to the commit, which includes every hop's bind
-  further down the path.
+  further down the path. A transit hop that does not hold the visa
+  fetches it by ID and binds it with no expiry check either.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
-  PFT entries, J11 indexes) and looks again. With no live match, the Zode
-  asks the visa service for a new visa (F6). The adapter streams that were
+  PFT entries, J11 indexes) and looks again. Unless that lookup finds a
+  live visa, the Zode asks the visa service for a new visa (F6). The adapter streams that were
   bound under the ejected visa are withdrawn, outside the visa-table lock,
   so the adapter's next packet binds afresh. This is the "tears down the
   tethers to its adapters" of VISA_SERVICE.md.
-- **Further down the path, a `Stream ID Request` for an expired visa is
-  refused**, and the visa is neither ejected nor fetched again by ID. Its
+- **Further down the path, a `Stream ID Request` for an expired visa the
+  hop holds is refused**, and the visa is neither ejected nor fetched again by ID. Its
   live transit streams come from an upstream Zode that no withdrawal reaches
   (F5), so freeing their stream IDs here could hand one to an unrelated
   stream while that Zode still sends on it. The visa service has forgotten
@@ -1398,8 +1399,8 @@ show it because no visa expired during a test.
 
 **The fix**, as decided above: `match_traffic` ejects an expired visa and
 looks again, and the ejected visa's adapter streams are withdrawn;
-`request_stream` refuses a `Stream ID Request` for an expired visa, without
-ejecting or fetching it. There is no sweep
+`request_stream` refuses a `Stream ID Request` for an expired visa it
+holds, without ejecting or fetching it. There is no sweep
 ([#274](https://github.com/org-zpr/zl-zipline/issues/274)). The same PR made
 a rebind superseded mid-flight an INFO line rather than a `RebindFailed`
 (J11, gate q5). On the real hosts that misleading warning had pointed the
@@ -1418,7 +1419,7 @@ service refreshes an attribute only once it has expired, and denies a visa
 whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) with `NoReason`.
 Its cause is logged only at DEBUG; the deny itself is counted and listed by
 `GET /admin/visas/denies`. So in the last 30 s of each attribute lifetime,
-every visa request that needs the attribute is denied: on ZIPLINE, a Zode's
+unless a refresh of the attribute's source intervenes, every visa request that needs the attribute is denied: on ZIPLINE, a Zode's
 DNS queries that no held visa covers, in the last 30 s of each 120 s
 `device.hostname`. A query right after a rejoin can land there.
 `zode-rejoin-test.sh` queries only after the visas expire, clear of that

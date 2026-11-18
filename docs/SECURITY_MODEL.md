@@ -768,11 +768,12 @@ not read the RFCs as a description of current guarantees.
 - **Visa expiry, when a flow is matched** — a Zode never matches a new flow
   to a visa that has already expired. At the flow's ingress the expired visa
   is ejected and its adapter streams are withdrawn, and the lookup runs
-  again: a new visa is requested unless another held, unexpired visa
-  covers the flow. Further down the path a `Stream ID Request` for an expired visa
-  is refused. Expiry is not checked again when the binding is committed, so
-  a visa that expires between the lookup and the commit (while every hop
-  further down the path binds) is still bound
+  again: a new visa is requested unless that lookup finds a live one.
+  Further down the path a `Stream ID Request` for an expired visa the hop
+  holds is refused; a visa it does not hold is fetched by ID and bound with
+  no expiry check. Expiry is not checked again when the binding is
+  committed, so a visa that expires between the lookup and the commit
+  (while every hop further down the path binds) is still bound
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
   expiry, and since the visa service never revokes an expired visa, a
@@ -873,7 +874,8 @@ not read the RFCs as a description of current guarantees.
   ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
-  seconds denies every visa request that needs it
+  seconds denies every visa request that needs it, unless a refresh of
+  the attribute's source intervenes
   ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). A flow that a
   held, unexpired visa already covers is unaffected. This fails closed, but
   quietly: the deny is counted and listed, with `NoReason`, by
