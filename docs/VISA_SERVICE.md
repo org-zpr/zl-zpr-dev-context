@@ -503,10 +503,12 @@ expiry at match time (#271)".
 
 *Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
 visa service refreshes an attribute only once it has expired, and denies a
-visa whose lifetime would be under the 30-second minimum with `NoReason`,
-logged at DEBUG only. So in the last 30 seconds of an attribute's lifetime
-every new flow that needs it is denied, silently, until the attribute
-expires and is refreshed.
+visa whose lifetime would be under the 30-second minimum. So in the last 30
+seconds of an attribute's lifetime every visa request that needs it is
+denied, until the attribute expires and is refreshed. A new flow that a
+held, unexpired visa already covers (a wildcard port, say) does not ask,
+and is unaffected. The deny is counted and listed, with `NoReason`, by
+`GET /admin/visas/denies`; only its cause is logged, at DEBUG.
 
 Revocation is different — it is an administrative action or a push from a
 trusted service. Installing a policy can revoke visas by newly disallowing a
@@ -1260,7 +1262,8 @@ No tracker issues are filed for these unless linked.
   [#274](https://github.com/org-zpr/zl-zipline/issues/274); see *Expiration,
   revocation, renewal*).
 - **Attributes are refreshed only after they expire**, so the visa service
-  silently denies new visas that need an attribute in its last 30 seconds
+  denies every visa request that needs an attribute in its last 30 seconds,
+  with `NoReason` and the cause logged only at DEBUG
   ([#275](https://github.com/org-zpr/zl-zipline/issues/275)).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.

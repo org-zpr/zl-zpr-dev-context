@@ -620,13 +620,14 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      old entry until the old visa expires or is revoked. *Built:* the rebind is
      refused, and counted as `RebindFailed`, when the new visa's session keys
      differ from the old one's, since the requestor still holds the old keys.
-     A failed rebind is not retried. A rebind whose target a still newer visa
-     superseded while it was in flight is refused too, but it is **not a
-     failure**: the newer visa's own rebind, started when that visa arrived,
-     moves the stream. It is logged at INFO and not counted (#271, gate q5).
-     A refused rebind with no newer successor still warns ("stays on visa")
-     and counts `RebindFailed`. The supersede of the bootstrap visas by
-     the J5a visas, and of the relay's own pair by its J5a visas, runs in netns
+     A failed rebind is not retried. When the next hop grants a rebind whose
+     target a still newer visa superseded while it was in flight, the commit
+     is refused, but it is **not a failure**: the newer visa's own rebind,
+     started when that visa arrived, moves the stream. It is logged at INFO
+     and not counted (#271, gate q5). A refused commit with no newer
+     successor, and a next hop that refuses the rebind itself, still warn
+     ("stays on visa") and count `RebindFailed`. The supersede of the
+     bootstrap visas by the J5a visas, and of the relay's own pair by its J5a visas, runs in netns
      in `zode-link-test.sh` (join, restart and forced-drop rejoin), which also
      checks that no rebind fails. `zode-rejoin-test.sh` (#271) sends two
      concurrent queries per round to a UDP service, whose reply visas
@@ -904,6 +905,10 @@ forgets a visa when it expires, so no revocation can reach an expired copy
 afterwards. The fix checks expiry where a Zode uses a visa for a new
 binding:
 
+- **Expiry is checked at the lookup only.** A visa that expires while a
+  next-hop bind under it is in flight is still bound when the answer comes
+  back; `VisaTable::bind` checks only that the visa is held. The window is
+  one round trip.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
@@ -1409,12 +1414,14 @@ triage at J11.
 **Known gap in the visa service**
 ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). The visa
 service refreshes an attribute only once it has expired, and denies a visa
-whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) with `NoReason`,
-logged at DEBUG only. So in the last 30 s of each attribute lifetime, every
-new flow that needs the attribute is denied: on ZIPLINE, a Zode's new DNS
-queries in the last 30 s of each 120 s `device.hostname`. A query right
-after a rejoin can land there. `zode-rejoin-test.sh` queries only after the
-visas expire, clear of that window.
+whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) with `NoReason`.
+Its cause is logged only at DEBUG; the deny itself is counted and listed by
+`GET /admin/visas/denies`. So in the last 30 s of each attribute lifetime,
+every visa request that needs the attribute is denied: on ZIPLINE, a Zode's
+DNS queries that no held visa covers, in the last 30 s of each 120 s
+`device.hostname`. A query right after a rejoin can land there.
+`zode-rejoin-test.sh` queries only after the visas expire, clear of that
+window.
 
 ### What waits for which issue
 
@@ -1442,8 +1449,8 @@ visas expire, clear of that window.
   streams are still live, stays in the table until a link it crosses
   drops.
 - **#275** (visa service) attributes are refreshed only after they expire,
-  so a new flow that needs one is denied, silently, in the attribute's last
-  30 s (see "Visa expiry at match time (#271)").
+  so a visa request that needs one is denied in the attribute's last 30 s
+  (see "Visa expiry at match time (#271)").
 - **org-zpr/zipline#278** the generated policy allows DNS on UDP 53 only, so
   a resolver's TCP fallback is denied.
 - **#234** retiring adapters: the `one-node-*` scripts still dock the visa
