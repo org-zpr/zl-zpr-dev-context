@@ -511,11 +511,41 @@ collide on every platform unless `--control-path` is given — is deferred as
 **The node applies its own ZPR address through `TunCtl`, on every platform.**
 Before the `local_zpr_addrs_missing_from_tun` check, the node adds each
 missing local ZPR address and makes the visa-service address reachable
-through the TUN (on Windows an explicit /128 route, since `netsh add address`
-ignores the prefix). Idempotent, so hand-configured setups and the
+through the TUN (on Windows also an explicit /128 route, see the next
+entry). Idempotent, so hand-configured setups and the
 integration scripts' out-of-band `ip addr add` are untouched; a Windows-only
 arm was rejected to keep macOS from redoing it.
 ([zipline#159](https://github.com/org-zpr/zl-zipline/issues/159))
+
+**Windows applies the prefix length of a TUN address.** Until
+[zl-zipline#272](https://github.com/org-zpr/zl-zipline/issues/272) the
+Windows `add_address` dropped `prefix_len` and ran `netsh interface ipv6 add
+address <if> <addr>`, and netsh applied its default /64. The /128
+visa-service route above was added on the false premise that netsh takes no
+prefix, and nothing else outside the address's own /64 was on-link. On real
+machines this meant a Windows Zode could not reach the DNS Zode
+`fd5a:5052:90de::2`, so no name resolved (org-zpr/zipline#255).
+- **The fix.** `add_address` and `add_authentication_address` now pass
+  `<addr>/<len>` (`ZPRNET_PREFIX_LEN`, 32), and Windows installs the on-link
+  `fd5a:5052::/32` route itself, as Linux and macOS do. One fix in
+  `add_address_impl` covers every caller: node/Zode self-addressing, the
+  granted actor address and the AAA.
+- **One argv builder.** The netsh argv comes from
+  `sys/addr_hint.rs::netsh_add_address_args`, which is compiled on every OS
+  so its tests run on Linux. The manual-fix hint, which had the same bug, is
+  built from the same function, so it prints exactly what `ph` runs.
+- **Rejected:** keeping the /64 and adding an on-link /32 route in the node
+  path. That would patch one caller and leave every address, and the hint,
+  wrong.
+- **The /128 visa-service route stays** (gate g165 q4). It is redundant for
+  addresses `ph` adds itself, but still covers an address configured by hand
+  with a longer prefix. #234 decides whether it stays.
+- **Consequence.** A Windows node's /32 now owns `fd5a:5052::/32`, so a `ph
+  adapter` started afterwards on the same host refuses to start at the
+  zipline#101 route-owner check. Linux and macOS have always behaved this
+  way. The node-plus-adapter phase planned in "Nothing may assume `ph` is the
+  only instance on the host" above is superseded by Zodes, which are
+  peer-to-peer in one process; #234 removes adapter mode.
 
 **The Windows substrate socket tolerates connection reset.** At bind,
 `SIO_UDP_CONNRESET` is disabled via `WSAIoctl`; belt and braces,
@@ -605,7 +635,8 @@ Temporary` are gone: `new_mq` builds the utun as IPv6 when the address is
 platform the TUN is created unaddressed and addressed afterwards through
 `TunCtl`. The manual-fix hint the node prints when a local ZPR address is
 missing from the TUN is now a per-platform string from `sys/` (`ip -6 addr
-add` / `ifconfig … inet6 … alias` / `netsh interface ipv6 add address`).
+add` / `ifconfig … inet6 … alias` / `netsh interface ipv6 add address`,
+with the prefix length since zl-zipline#272).
 Rejected: applying the address inside `new_mq` via the dead builder path —
 two ways to address a TUN, and the startup-check path would differ from
 Linux and Windows.

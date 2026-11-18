@@ -1291,8 +1291,10 @@ visa service at `65fe475` (`v0.22.0-zodes.9`).
   downloaded from a Windows server. After the recovery restart, the direct
   link was Active on both ends again, but the restarted Linux client's DNS
   lookups got no answer (#271), so the last download failed.
-- **Windows was not tested as the client.** It can't reach the DNS Zode
-  (#272).
+- **Windows was not tested as the client.** It couldn't reach the DNS Zode
+  (#272, now fixed: a Windows Zode applies its ZPR address as a /32; see
+  SYSTEM_OVERVIEW.md, *Design decisions*). The #271 retest runs Windows as
+  the client.
 - **macOS has not been run.** The Mac was unavailable; the Linux-macOS and
   macOS-Windows pairs will be tested by hand later.
 
@@ -1336,9 +1338,6 @@ What the real machines showed beyond the netns test:
 - **#271** after an endpoint rejoins (restart, crash, or a visa-service
   disconnect), the DNS Zode's replies stop reaching it. The reply stream
   stays on a superseded visa. Seen on real machines (org-zpr/zipline#255).
-- **#272** a Windows Zode applies its ZPR address as a /64, not /32
-  (`add_address` ignores the prefix), so the DNS Zode at
-  `fd5a:5052:90de::2` is unreachable and names don't resolve on Windows.
 - **#273** deleting a service hosted on a Zode makes the visa service
   disconnect that Zode ("no longer approved by policy"); it rejoins about
   9 s later.
