@@ -908,14 +908,13 @@ forgets a visa when it expires, so no revocation can reach an expired copy
 afterwards. The fix checks expiry where a Zode uses a visa for a new
 binding:
 
-- **Expiry is checked at the lookup only.** A visa that expires while a
-  next-hop bind under it is in flight is still bound when the answer comes
-  back; `VisaTable::bind` checks only that the visa is held. The window
-  runs from the lookup to the commit, which includes every hop's bind
-  further down the path. A transit hop that does not hold the visa
-  fetches it by ID (the visa service returns only a live one, or the bind
-  is refused) and binds it with no expiry check of its own, and so does
-  the ingress with a visa it has just been granted.
+- **Each hop checks once, at its lookup.** The ingress checks at its
+  match; a transit hop when it handles the `Stream ID Request`, against
+  the visa it holds or, if it must fetch it by ID, at the visa service's
+  live lookup. No hop checks again when the bind commits
+  (`VisaTable::bind` checks only that the visa is held), and the ingress
+  binds a visa it has just been granted unchecked. So a bind whose checks
+  all passed before the visa expired still commits after it.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
@@ -1454,8 +1453,10 @@ window.
   9 s later.
 - **#274** a periodic visa expiry sweep. A Zode ejects an expired visa only
   when a new flow matches it (#271). An idle expired visa stays in the
-  table until then: a link loss does not find it, as it has no binding.
-  One with live streams also goes when a link they cross drops (F3).
+  table until then: F3's binding-based cleanup on a link loss does not
+  find it (rule 9's bootstrap visas are the exception: a lost initial
+  link revokes its recorded hand-off). One with live streams also goes
+  when a link they cross drops (F3).
 - **#275** (visa service) attributes are refreshed only after they expire,
   so a visa request that needs one is denied in the attribute's last 30 s
   (see "Visa expiry at match time (#271)").

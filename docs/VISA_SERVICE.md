@@ -493,10 +493,10 @@ a Zode checks expiry only when it would use a visa for a new binding, with no
 timer. A new flow that matches an expired visa at its ingress Zode ejects
 that visa, withdraws its adapter streams and looks again, so it triggers a
 fresh request unless that lookup finds a live visa. Further down the path,
-a `Stream ID Request` for an expired visa the hop holds is refused. A visa
-it does not hold is fetched by ID; the visa service returns only a live one,
-and the Zode binds it without checking its expiry again. (A joiner's check
-of its bootstrap hand-off, J4, is separate and older.)
+each hop checks once, when it handles the `Stream ID Request`: an expired
+visa it holds is refused, and one it must fetch by ID is looked up live
+here. No hop checks again when the bind commits. (A joiner's check of its
+bootstrap hand-off, J4, is separate and older.)
 At each Zode, streams already bound under an expired visa keep forwarding
 until a new flow matches it there, or that Zode loses a link they cross (a
 periodic sweep is
@@ -1260,10 +1260,11 @@ No tracker issues are filed for these unless linked.
   supersedes the older visa with the same five-tuple (ZODE_LINKS.md J9, J11;
   [#252](https://github.com/org-zpr/zl-zipline/issues/252)).
 - **Nodes enforce visa expiry only at a match.** The design has a node stop
-  forwarding on expiry. A Zode instead ejects an expired visa when a new flow
-  matches it, and refuses a `Stream ID Request` for one; no timer sweeps the
-  table, so live streams under an expired visa keep flowing until then, or
-  until a link they cross drops
+  forwarding on expiry. A Zode instead ejects an expired visa, with its
+  streams, when a new flow matches it at the ingress; a transit hop refuses
+  a new `Stream ID Request` for one but keeps its existing streams. No
+  timer sweeps the table, so live streams under an expired visa keep
+  flowing until an ingress match ejects it, or a link they cross drops
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
   [#274](https://github.com/org-zpr/zl-zipline/issues/274); see *Expiration,
   revocation, renewal*).

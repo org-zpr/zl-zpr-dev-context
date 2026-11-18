@@ -769,14 +769,12 @@ not read the RFCs as a description of current guarantees.
   to a visa that has already expired. At the flow's ingress the expired visa
   is ejected and its adapter streams are withdrawn, and the lookup runs
   again: a new visa is requested unless that lookup finds a live one.
-  Further down the path a `Stream ID Request` for an expired visa the hop
-  holds is refused. A visa it does not hold is fetched by ID: the visa
-  service returns only a live one, or the bind is refused, but the Zode
-  does not check the fetched visa's expiry again. Expiry is not checked
-  again when the binding is committed, and a visa the ingress has just
-  been granted is bound with no expiry check either, so a visa that
-  expires between the lookup or grant and the commit (while every hop
-  further down the path binds) is still bound
+  Further down the path, each hop checks once, when it handles the
+  `Stream ID Request`: an expired visa it holds is refused, and one it
+  must fetch by ID is looked up live at the visa service. A refusal there
+  leaves the hop's existing streams under the visa in place. No hop checks
+  again when the bind commits, so a bind whose checks all passed before
+  the visa expired still commits after it
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
   expiry when binding a flow (a joiner already refused an expired
