@@ -765,6 +765,22 @@ not read the RFCs as a description of current guarantees.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
   revocation of visas, endpoints, and trusted services without a policy
   install. See [VISA_SERVICE.md](VISA_SERVICE.md).
+- **Visa expiry, when a flow is matched** — a Zode never matches a new flow
+  to a visa that has already expired. At the flow's ingress the expired visa
+  is ejected and its adapter streams are withdrawn, and the lookup runs
+  again: a new visa is requested unless that lookup finds a live one.
+  Further down the path, each hop checks once, when it handles the
+  `Stream ID Request`: an expired visa it holds is refused, and one it
+  must fetch by ID is looked up live at the visa service. A refusal there
+  leaves the hop's existing streams under the visa in place. No hop checks
+  again when the bind commits, so a bind whose checks all passed before
+  the visa expired is not stopped by the expiry
+  ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
+  "Visa expiry at match time (#271)"). Before #271 `ph` never checked
+  expiry when binding a flow (a joiner already refused an expired
+  bootstrap hand-off: ZODE_LINKS.md J4, ZDP.md "Bootstrap Visas"), and
+  since the visa service never revokes an expired visa, a Zode kept
+  admitting new flows under it.
 - **Authentication expiry is enforced, not just recorded.** A periodic sweep
   in the visa service revokes the authentication of every connected adapter
   whose expiration has passed and drops the actor, batched one
@@ -853,6 +869,21 @@ not read the RFCs as a description of current guarantees.
 
 **Not yet, or verify before relying on it:**
 
+- **Visa expiry on a timer.** Expiry is checked only when a Zode would bind
+  under a visa (*Implemented*, above). No sweep removes an expired visa, so
+  the streams already bound under it keep flowing until a new flow matches
+  it, a link they cross drops, or an R16 reset (ZODE_LINKS.md) drops
+  every visa outside the Zode's two VS-API flows; the visa service, which
+  forgets a visa at expiry, cannot revoke it
+  ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+- **Attribute lifetimes near their end.** The visa service refreshes an
+  attribute only after it has expired, and in the attribute's last 30
+  seconds denies every visa request that needs it, unless a refresh of
+  the attribute's source intervenes
+  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). A flow that a
+  held, unexpired visa already covers is unaffected. This fails closed, but
+  quietly: the deny is counted and listed, with `NoReason`, by
+  `GET /admin/visas/denies`; only its cause is logged, at DEBUG.
 - **A2A confidentiality.** Internal RFC-17 says outright that A2A currently
   protects message integrity only and that encryption could be added later. The
   Case 1 table's payload-encryption row is a design goal, not a current

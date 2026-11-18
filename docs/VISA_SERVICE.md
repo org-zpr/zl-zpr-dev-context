@@ -488,6 +488,35 @@ On expiry a node stops forwarding and tears down the tethers to its adapters;
 further traffic looks new and triggers a fresh request. Nodes can be configured
 to re-request before expiry.
 
+*Built differently* ([#271](https://github.com/org-zpr/zl-zipline/issues/271)):
+a Zode checks expiry only when it would use a visa for a new binding, with no
+timer. A new flow that matches an expired visa at its ingress Zode ejects
+that visa, withdraws its adapter streams and looks again, so it triggers a
+fresh request unless that lookup finds a live visa. Further down the path,
+each hop checks once, when it handles the `Stream ID Request`: an expired
+visa it holds is refused, and one it must fetch by ID is looked up live
+here. No hop checks again when the bind commits. (A joiner's check of its
+bootstrap hand-off, J4, is separate and older.)
+At each Zode, streams already bound under an expired visa keep forwarding
+until a new flow matches it there, that Zode loses a link they cross, or an
+R16 reset drops every visa outside the Zode's two VS-API flows
+(ZODE_LINKS.md; a periodic sweep is
+[#274](https://github.com/org-zpr/zl-zipline/issues/274)). The visa service
+forgets a visa when it expires, so it never revokes an expired one; before
+#271 a Zode kept using expired visas for good. See ZODE_LINKS.md, "Visa
+expiry at match time (#271)".
+
+*Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
+visa service refreshes an attribute only once it has expired, and denies a
+visa whose lifetime would be under the 30-second minimum. So in the last 30
+seconds of an attribute's lifetime, while it still bounds the visa's
+lifetime, every visa request that needs it is denied, until the attribute
+expires and is refreshed. A refresh of its whole source, for another
+attribute's expiry or a stale source revision, can end the window early. A new flow that a
+held, unexpired visa already covers (a wildcard port, say) does not ask,
+and is unaffected. The deny is counted and listed, with `NoReason`, by
+`GET /admin/visas/denies`; only its cause is logged, at DEBUG.
+
 Revocation is different — it is an administrative action or a push from a
 trusted service. Installing a policy can revoke visas by newly disallowing a
 communication, by changing trusted services in a way that invalidates prior
@@ -1231,6 +1260,22 @@ No tracker issues are filed for these unless linked.
   For a Zode's core visas the visa service pushes the new visa as an ordinary install, and the Zode
   supersedes the older visa with the same five-tuple (ZODE_LINKS.md J9, J11;
   [#252](https://github.com/org-zpr/zl-zipline/issues/252)).
+- **Nodes enforce visa expiry only at a match.** The design has a node stop
+  forwarding on expiry. A Zode instead ejects an expired visa, with its
+  streams, when a new flow matches it at the ingress; a transit hop refuses
+  a new `Stream ID Request` for one but keeps its existing streams. No
+  timer sweeps the table, so live streams under an expired visa keep
+  flowing until an ingress match ejects it, a link they cross drops, or an
+  R16 reset drops every visa outside the Zode's two VS-API flows
+  ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
+  [#274](https://github.com/org-zpr/zl-zipline/issues/274); see *Expiration,
+  revocation, renewal*).
+- **Attributes are refreshed only after they expire**, so the visa service
+  denies every visa request that needs an attribute in its last 30 seconds,
+  while that attribute still bounds the visa's lifetime and no refresh of
+  its source intervenes,
+  with `NoReason` and the cause logged only at DEBUG
+  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
 - **Configuration moved to TOML.** `config-example.yaml` at the repository root

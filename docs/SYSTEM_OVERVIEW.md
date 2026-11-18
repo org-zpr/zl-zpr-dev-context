@@ -226,7 +226,9 @@ header without pushing past the substrate MTU.
 
 **10. End.** Visas expire on a timestamp every recipient can see, so no
 "expired" message is ever sent; nodes stop forwarding and tear down tethers,
-and further traffic looks new. Revocation is separate — an administrative
+and further traffic looks new. (In `ph` today a Zode checks expiry only when
+a new flow matches a visa, with no timer: ZODE_LINKS.md, "Visa expiry at
+match time (#271)".) Revocation is separate — an administrative
 action or a policy change — and is pushed to the affected nodes, which stop
 immediately.
 
