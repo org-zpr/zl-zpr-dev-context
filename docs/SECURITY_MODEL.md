@@ -770,16 +770,19 @@ not read the RFCs as a description of current guarantees.
   is ejected and its adapter streams are withdrawn, and the lookup runs
   again: a new visa is requested unless that lookup finds a live one.
   Further down the path a `Stream ID Request` for an expired visa the hop
-  holds is refused; a visa it does not hold is fetched by ID and bound with
-  no expiry check. Expiry is not checked again when the binding is
-  committed, and a visa the ingress has just been granted is bound with
-  no expiry check either, so a visa that expires between the lookup or
-  grant and the commit (while every hop further down the path binds) is
-  still bound
+  holds is refused. A visa it does not hold is fetched by ID: the visa
+  service returns only a live one, or the bind is refused, but the Zode
+  does not check the fetched visa's expiry again. Expiry is not checked
+  again when the binding is committed, and a visa the ingress has just
+  been granted is bound with no expiry check either, so a visa that
+  expires between the lookup or grant and the commit (while every hop
+  further down the path binds) is still bound
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
-  expiry, and since the visa service never revokes an expired visa, a
-  Zode kept admitting new flows under it.
+  expiry when binding a flow (a joiner already refused an expired
+  bootstrap hand-off: ZODE_LINKS.md J4, ZDP.md "Bootstrap Visas"), and
+  since the visa service never revokes an expired visa, a Zode kept
+  admitting new flows under it.
 - **Authentication expiry is enforced, not just recorded.** A periodic sweep
   in the visa service revokes the authentication of every connected adapter
   whose expiration has passed and drops the actor, batched one

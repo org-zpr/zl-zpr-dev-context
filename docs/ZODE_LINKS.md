@@ -902,7 +902,8 @@ Decisions of pd plan p50
 ([#271](https://github.com/org-zpr/zl-zipline/issues/271)):
 
 **A Zode enforces visa expiry when it matches a flow, with no sweep**
-(operator, 2026-11-18). `ph` never enforced expiry, while the visa service
+(operator, 2026-11-18). `ph` never enforced expiry when binding a flow
+(J4 checks only a bootstrap hand-off), while the visa service
 forgets a visa when it expires, so no revocation can reach an expired copy
 afterwards. The fix checks expiry where a Zode uses a visa for a new
 binding:
@@ -912,7 +913,8 @@ binding:
   back; `VisaTable::bind` checks only that the visa is held. The window
   runs from the lookup to the commit, which includes every hop's bind
   further down the path. A transit hop that does not hold the visa
-  fetches it by ID and binds it with no expiry check either, and so does
+  fetches it by ID (the visa service returns only a live one, or the bind
+  is refused) and binds it with no expiry check of its own, and so does
   the ingress with a visa it has just been granted.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
@@ -1385,7 +1387,8 @@ Built in zl-zpr-core#128; no visa-service change. The design decision is "A
 Zode enforces visa expiry when it matches a flow, with no sweep" above.
 
 **The root cause** (pd plan p50, t300, reproduced on two Linux Zodes):
-`ph` never enforced visa expiry. `VisaTable::handle_expirations` had no
+`ph` never enforced visa expiry when binding a flow (only J4's check of a
+bootstrap hand-off). `VisaTable::handle_expirations` had no
 production caller, and `match_traffic` did not check expiry. The visa
 service forgets a visa when it expires, so the revocations a rejoin or a
 link loss triggers (`end_previous_join`, `revoke_visas_over_link`) never

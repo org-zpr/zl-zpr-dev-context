@@ -493,8 +493,10 @@ a Zode checks expiry only when it would use a visa for a new binding, with no
 timer. A new flow that matches an expired visa at its ingress Zode ejects
 that visa, withdraws its adapter streams and looks again, so it triggers a
 fresh request unless that lookup finds a live visa. Further down the path,
-a `Stream ID Request` for an expired visa the hop holds is refused; a visa
-it does not hold is fetched by ID and bound with no expiry check.
+a `Stream ID Request` for an expired visa the hop holds is refused. A visa
+it does not hold is fetched by ID; the visa service returns only a live one,
+and the Zode binds it without checking its expiry again. (A joiner's check
+of its bootstrap hand-off, J4, is separate and older.)
 At each Zode, streams already bound under an expired visa keep forwarding
 until a new flow matches it there, or that Zode loses a link they cross (a
 periodic sweep is
