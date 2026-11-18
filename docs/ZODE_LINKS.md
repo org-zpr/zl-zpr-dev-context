@@ -624,8 +624,9 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      names the successor, so a stream left on the old visa stays), and a
      transit hop's entry stays until revocation or link loss (see "Visa
      expiry at match time (#271)"); the same holds for "the old binding
-     stays until it expires" above. *Built:* the rebind is refused, and counted as `RebindFailed`, when the new visa's session keys
-     differ from the old one's, since the requestor still holds the old keys.
+     stays until it expires" above. *Built:* the rebind is refused, and
+     counted as `RebindFailed`, when the new visa's session keys differ from
+     the old one's, since the requestor still holds the old keys.
      A failed rebind is not retried. When the next hop grants a rebind whose
      target a still newer visa superseded while it was in flight, the commit
      is refused, but that stale commit is **not counted as a failure**: the
