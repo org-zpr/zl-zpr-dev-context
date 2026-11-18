@@ -3141,8 +3141,11 @@ mod tests {
 
     /// A fake `dist/ph`: `ph --help` prints `top_help` and exits
     /// `top_exit`; `ph <sub> --help` prints `sub_help` and exits `sub_exit`;
-    /// any other subcommand is refused with exit 2, as clap does. The help
-    /// texts must not contain a single quote.
+    /// any other subcommand is refused with exit 2, as clap does.
+    /// `dist/ph` is a symlink to the checked-in `tests/fixtures/fake-ph`,
+    /// which reads these values from data files in `dist/`: executing a
+    /// script the test has just written fails now and then with ETXTBSY
+    /// while parallel tests fork.
     fn write_fake_ph(
         dist: &Path,
         top_help: &str,
@@ -3151,18 +3154,20 @@ mod tests {
         sub_help: &str,
         sub_exit: i32,
     ) {
-        use std::os::unix::fs::PermissionsExt as _;
-        let path = dist.join("ph");
-        let script = format!(
-            "#!/bin/sh\n\
-             case \"$1\" in\n\
-             --help) printf '%s' '{top_help}'; exit {top_exit} ;;\n\
-             {sub}) printf '%s' '{sub_help}'; exit {sub_exit} ;;\n\
-             *) echo \"error: unrecognized subcommand $1\" >&2; exit 2 ;;\n\
-             esac\n"
-        );
-        std::fs::write(&path, script).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let ph = dist.join("ph");
+        if !ph.exists() {
+            let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake-ph");
+            std::os::unix::fs::symlink(fixture, &ph).unwrap();
+        }
+        for (name, value) in [
+            ("top-help", top_help.to_string()),
+            ("top-exit", top_exit.to_string()),
+            ("sub", sub.to_string()),
+            ("sub-help", sub_help.to_string()),
+            ("sub-exit", sub_exit.to_string()),
+        ] {
+            std::fs::write(dist.join(name), value).unwrap();
+        }
     }
 
     /// The netns runner: continues after a failing script, records each
