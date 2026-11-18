@@ -365,7 +365,7 @@ risk. Everything is a release build. The table is in claim order:
 | Tier | What runs | Prerequisites | Default |
 |---|---|---|---|
 | `unit` | `make test` in each built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | run |
-| `netns` | the seventeen `zl-zpr-core/integration-test/` scripts | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
+| `netns` | the eighteen `zl-zpr-core/integration-test/` scripts | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
 | `docker` | `dns-demo` deploy, `test-dns.sh`, `docker compose down -v` | `docker`, `docker compose` | `--test docker` |
 
 - A tier that was asked for and cannot run is an error under `--test all`; a
@@ -381,11 +381,11 @@ risk. Everything is a release build. The table is in claim order:
   (`NETNS_EXCLUDED`). Only the top level is judged — `lib/` and
   `unused_or_outdated/` are invisible, matching the Makefile's own
   `$(wildcard *-test.sh)`. A listed script that only a feature branch carries
-  (`NETNS_SCRIPTS_IF_PRESENT`, today the six Zode scripts from
+  (`NETNS_SCRIPTS_IF_PRESENT`, today the seven Zode scripts from
   `feature/zodes`: `zode-link-test.sh` from zl-zipline#250,
   `zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh` and
-  `zode-wrong-ca-test.sh` from zl-zipline#254, and `zode-login-test.sh` from
-  zl-zipline#233) runs only when the worktree has it;
+  `zode-wrong-ca-test.sh` from zl-zipline#254, `zode-login-test.sh` from
+  zl-zipline#233, and `zode-rejoin-test.sh` from zl-zipline#271) runs only when the worktree has it;
   otherwise the tier records it as `skipped: not in this zl-zpr-core
   revision`. Every other listed script must exist.
 - The netns tier selects its route **host → container → skip**
@@ -396,7 +396,7 @@ risk. Everything is a release build. The table is in claim order:
   `python3` — all hold. The scripts need no sudo: each re-execs itself
   under `unshare -nr` and runs as that namespace's mapped root
   (zipline#189). Otherwise, when a Docker daemon is reachable (`docker info`
-  succeeds), the same seventeen scripts run as root inside the privileged
+  succeeds), the same eighteen scripts run as root inside the privileged
   container of `zl-zpr-core/integration-test/`'s `make docker-test`, one
   `make` invocation per script with `WORKSPACE=<build-dir>`. Either route
   runs up to four scripts at once (`--jobs N` overrides the width on both).

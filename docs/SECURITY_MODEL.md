@@ -765,6 +765,14 @@ not read the RFCs as a description of current guarantees.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
   revocation of visas, endpoints, and trusted services without a policy
   install. See [VISA_SERVICE.md](VISA_SERVICE.md).
+- **Visa expiry, when a flow is matched** — a Zode never binds a new flow
+  under an expired visa. At the flow's ingress the expired visa is ejected,
+  its adapter streams are withdrawn, and a new visa is requested; further
+  down the path a `Stream ID Request` for an expired visa is refused
+  ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
+  "Visa expiry at match time (#271)"). Before #271 `ph` never checked
+  expiry, and since the visa service never revokes an expired visa, a
+  Zode kept admitting new flows under it.
 - **Authentication expiry is enforced, not just recorded.** A periodic sweep
   in the visa service revokes the authentication of every connected adapter
   whose expiration has passed and drops the actor, batched one
@@ -853,6 +861,17 @@ not read the RFCs as a description of current guarantees.
 
 **Not yet, or verify before relying on it:**
 
+- **Visa expiry on a timer.** Expiry is checked only when a Zode would bind
+  under a visa (*Implemented*, above). No sweep removes an expired visa, so
+  the streams already bound under it keep flowing until a new flow matches
+  it or a link they cross drops; the visa service, which forgets a visa at
+  expiry, cannot revoke it
+  ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+- **Attribute lifetimes near their end.** The visa service refreshes an
+  attribute only after it has expired, and in the attribute's last 30
+  seconds denies new visas that need it, with `NoReason`, logged at DEBUG
+  only ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). This
+  fails closed, but silently.
 - **A2A confidentiality.** Internal RFC-17 says outright that A2A currently
   protects message integrity only and that encryption could be added later. The
   Case 1 table's payload-encryption row is a design goal, not a current

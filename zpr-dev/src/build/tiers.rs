@@ -746,7 +746,7 @@ pub fn run_unit(plans: &[RepoPlan], logs: &Path, quiet: bool) -> TierOutcome {
 // The netns tier (issue62 step 3)
 // ---------------------------------------------------------------------------
 
-/// The seventeen integration scripts the netns tier runs, in order. An explicit
+/// The eighteen integration scripts the netns tier runs, in order. An explicit
 /// list, never a glob: `integration-test/unused_or_outdated/` stays out, and
 /// adding a script to the set's gate is a reviewed change (zipline#62).
 /// The list is guarded against drift by [`netns_script_drift`] (zipline#103):
@@ -783,6 +783,10 @@ const NETNS_SCRIPTS: &[&str] = &[
     // A person logs in on a Zode with ph-cli, logs out, renews silently,
     // and is asked again after a visa-service restart (zl-zipline#233).
     "zode-login-test.sh",
+    // After their visas expire, zb and then zc restart, and every UDP/53
+    // reply still reaches zb: a Zode never matches a new flow to an
+    // expired visa (zl-zipline#271).
+    "zode-rejoin-test.sh",
 ];
 
 /// Scripts in [`NETNS_SCRIPTS`] that only some `zl-zpr-core` revisions carry:
@@ -800,6 +804,8 @@ const NETNS_SCRIPTS_IF_PRESENT: &[&str] = &[
     "zode-wrong-ca-test.sh",
     // feature/zodes only, likewise (zl-zipline#233).
     "zode-login-test.sh",
+    // feature/zodes only, likewise (zl-zipline#271).
+    "zode-rejoin-test.sh",
 ];
 
 /// Top-level `integration-test/*-test.sh` scripts the netns tier
@@ -950,7 +956,7 @@ pub struct NetnsPlan {
 pub const NETNS_JOBS: usize = 4;
 
 /// Builds the netns plan against the `zl-zpr-core` worktree and `dist/`:
-/// the seventeen blessed scripts in order, each with the `*_BIN` overrides the
+/// the eighteen blessed scripts in order, each with the `*_BIN` overrides the
 /// scripts already honour pointed at `dist/` — nothing is copied into
 /// `integration-test/`. `a2a-pubkey-test.sh` alone runs the worktree-local
 /// `enable-security-testing` `ph` (a debug build that must never reach
@@ -2356,7 +2362,7 @@ mod tests {
         }
     }
 
-    /// The plan runs exactly the seventeen blessed scripts, in order — an
+    /// The plan runs exactly the eighteen blessed scripts, in order — an
     /// explicit list, not a glob: `unused_or_outdated/` and any new script
     /// stay out until reviewed in (zipline#62, zipline#103). The order is
     /// the documented one: `attr-query-test.sh` after `a2a-pubkey-test.sh`,
@@ -2367,10 +2373,10 @@ mod tests {
     /// regression e2e (zipline#167/#170/#171) — after that (zipline#178),
     /// then `zode-link-test.sh` — the Zode link lifecycle e2e
     /// (zl-zipline#250) — the four Zode scripts of zl-zipline#254 (join,
-    /// line, reroute, wrong CA), and `zode-login-test.sh` (zl-zipline#233)
-    /// last, newest last.
+    /// line, reroute, wrong CA), `zode-login-test.sh` (zl-zipline#233), and
+    /// `zode-rejoin-test.sh` (zl-zipline#271) last, newest last.
     #[test]
-    fn netns_plan_lists_the_seventeen_scripts_in_order() {
+    fn netns_plan_lists_the_eighteen_scripts_in_order() {
         let plan = netns_plan(
             Path::new("/wt/zl-zpr-core"),
             Path::new("/b/dist"),
@@ -2405,6 +2411,7 @@ mod tests {
                 "zode-reroute-test.sh",
                 "zode-wrong-ca-test.sh",
                 "zode-login-test.sh",
+                "zode-rejoin-test.sh",
             ]
         );
         assert_eq!(plan.dir, Path::new("/wt/zl-zpr-core/integration-test"));
@@ -2431,10 +2438,10 @@ mod tests {
         tmp
     }
 
-    /// The feature-branch scripts (zl-zipline#250, #254, #233) run only
-    /// where the core worktree carries them: a `zipline` core revision
-    /// without the six Zode scripts plans the other eleven and records each
-    /// of the six
+    /// The feature-branch scripts (zl-zipline#250, #254, #233, #271) run
+    /// only where the core worktree carries them: a `zipline` core revision
+    /// without the seven Zode scripts plans the other eleven and records
+    /// each of the seven
     /// as skipped with a reason, so the tier neither fails on a missing file
     /// nor overstates what ran. With the scripts present they run, last.
     #[test]
@@ -2446,6 +2453,7 @@ mod tests {
             "zode-reroute-test.sh",
             "zode-wrong-ca-test.sh",
             "zode-login-test.sh",
+            "zode-rejoin-test.sh",
         ];
         let older: Vec<&str> = NETNS_SCRIPTS
             .iter()
