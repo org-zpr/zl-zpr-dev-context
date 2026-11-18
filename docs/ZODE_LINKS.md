@@ -1457,7 +1457,8 @@ window.
   disconnect that Zode ("no longer approved by policy"); it rejoins about
   9 s later.
 - **#274** a periodic visa expiry sweep. A Zode ejects an expired visa only
-  when a new flow matches it (#271). An idle expired visa stays in the
+  when a new flow matches it (#271). Leaving aside an R16 reset, which
+  drops every visa but the VS-API pair, an idle expired visa stays in the
   table until then: F3's binding-based cleanup on a link loss does not
   find it (rule 9's bootstrap visas are the exception: a lost initial
   link revokes its recorded hand-off). One with live streams also goes
