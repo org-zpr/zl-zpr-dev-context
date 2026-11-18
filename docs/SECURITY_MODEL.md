@@ -767,11 +767,12 @@ not read the RFCs as a description of current guarantees.
   install. See [VISA_SERVICE.md](VISA_SERVICE.md).
 - **Visa expiry, when a flow is matched** — a Zode never matches a new flow
   to a visa that has already expired. At the flow's ingress the expired visa
-  is ejected, its adapter streams are withdrawn, and a new visa is
-  requested; further down the path a `Stream ID Request` for an expired visa
+  is ejected and its adapter streams are withdrawn, and the lookup runs
+  again: a new visa is requested unless another held, unexpired visa
+  covers the flow. Further down the path a `Stream ID Request` for an expired visa
   is refused. Expiry is not checked again when the binding is committed, so
-  a visa that expires while its next-hop bind is in flight is still bound,
-  a window of one round trip
+  a visa that expires between the lookup and the commit (while every hop
+  further down the path binds) is still bound
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
   expiry, and since the visa service never revokes an expired visa, a

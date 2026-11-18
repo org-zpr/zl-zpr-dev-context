@@ -491,7 +491,8 @@ to re-request before expiry.
 *Built differently* ([#271](https://github.com/org-zpr/zl-zipline/issues/271)):
 a Zode checks expiry only when it would use a visa for a new binding, with no
 timer. A new flow that matches an expired visa at its ingress Zode ejects
-that visa, withdraws its adapter streams and triggers a fresh request; a
+that visa, withdraws its adapter streams and looks again, so it triggers a
+fresh request unless another held, unexpired visa covers the flow; a
 `Stream ID Request` for an expired visa further down the path is refused.
 At each Zode, streams already bound under an expired visa keep forwarding
 until a new flow matches it there, or that Zode loses a link they cross (a

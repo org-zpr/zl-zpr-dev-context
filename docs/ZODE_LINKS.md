@@ -627,8 +627,8 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      and not counted (#271, gate q5). A refused commit with no newer
      successor, and a next hop that refuses the rebind itself, still warn
      ("stays on visa") and count `RebindFailed`. The supersede of the
-     bootstrap visas by the J5a visas, and of the relay's own pair by its J5a visas, runs in netns
-     in `zode-link-test.sh` (join, restart and forced-drop rejoin), which also
+     bootstrap visas by the J5a visas, and of the relay's own pair by its
+     J5a visas, runs in netns in `zode-link-test.sh` (join, restart and forced-drop rejoin), which also
      checks that no rebind fails. `zode-rejoin-test.sh` (#271) sends two
      concurrent queries per round to a UDP service, whose reply visas
      (`zc:53 -> zb:*`, a wildcard port) share a five-tuple and can supersede
@@ -907,8 +907,9 @@ binding:
 
 - **Expiry is checked at the lookup only.** A visa that expires while a
   next-hop bind under it is in flight is still bound when the answer comes
-  back; `VisaTable::bind` checks only that the visa is held. The window is
-  one round trip.
+  back; `VisaTable::bind` checks only that the visa is held. The window
+  runs from the lookup to the commit, which includes every hop's bind
+  further down the path.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
@@ -1445,9 +1446,9 @@ window.
   disconnect that Zode ("no longer approved by policy"); it rejoins about
   9 s later.
 - **#274** a periodic visa expiry sweep. A Zode ejects an expired visa only
-  when a new flow matches it (#271), so an idle expired visa, or one whose
-  streams are still live, stays in the table until a link it crosses
-  drops.
+  when a new flow matches it (#271). An idle expired visa stays in the
+  table until then: a link loss does not find it, as it has no binding.
+  One with live streams also goes when a link they cross drops (F3).
 - **#275** (visa service) attributes are refreshed only after they expire,
   so a visa request that needs one is denied in the attribute's last 30 s
   (see "Visa expiry at match time (#271)").
