@@ -774,7 +774,7 @@ not read the RFCs as a description of current guarantees.
   must fetch by ID is looked up live at the visa service. A refusal there
   leaves the hop's existing streams under the visa in place. No hop checks
   again when the bind commits, so a bind whose checks all passed before
-  the visa expired still commits after it
+  the visa expired is not stopped by the expiry
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
   expiry when binding a flow (a joiner already refused an expired

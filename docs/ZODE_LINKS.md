@@ -914,7 +914,7 @@ binding:
   live lookup. No hop checks again when the bind commits
   (`VisaTable::bind` checks only that the visa is held), and the ingress
   binds a visa it has just been granted unchecked. So a bind whose checks
-  all passed before the visa expired still commits after it.
+  all passed before the visa expired is not stopped by the expiry.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
