@@ -772,8 +772,10 @@ not read the RFCs as a description of current guarantees.
   Further down the path a `Stream ID Request` for an expired visa the hop
   holds is refused; a visa it does not hold is fetched by ID and bound with
   no expiry check. Expiry is not checked again when the binding is
-  committed, so a visa that expires between the lookup and the commit
-  (while every hop further down the path binds) is still bound
+  committed, and a visa the ingress has just been granted is bound with
+  no expiry check either, so a visa that expires between the lookup or
+  grant and the commit (while every hop further down the path binds) is
+  still bound
   ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
   "Visa expiry at match time (#271)"). Before #271 `ph` never checked
   expiry, and since the visa service never revokes an expired visa, a

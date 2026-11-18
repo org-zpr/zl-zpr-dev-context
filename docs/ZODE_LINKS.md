@@ -622,9 +622,11 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      differ from the old one's, since the requestor still holds the old keys.
      A failed rebind is not retried. When the next hop grants a rebind whose
      target a still newer visa superseded while it was in flight, the commit
-     is refused, but it is **not a failure**: the newer visa's own rebind,
-     started when that visa arrived, moves the stream. It is logged at INFO
-     and not counted (#271, gate q5). A refused commit with no newer
+     is refused, but that stale commit is **not counted as a failure**: the
+     newer visa's own rebind, started when that visa arrived, is the one
+     that moves the stream, and it can still fail on its own (different
+     session keys, say), which counts then. The stale commit is logged at
+     INFO (#271, gate q5). A refused commit with no newer
      successor, and a next hop that refuses the rebind itself, still warn
      ("stays on visa") and count `RebindFailed`. The supersede of the
      bootstrap visas by the J5a visas, and of the relay's own pair by its
@@ -910,7 +912,8 @@ binding:
   back; `VisaTable::bind` checks only that the visa is held. The window
   runs from the lookup to the commit, which includes every hop's bind
   further down the path. A transit hop that does not hold the visa
-  fetches it by ID and binds it with no expiry check either.
+  fetches it by ID and binds it with no expiry check either, and so does
+  the ingress with a visa it has just been granted.
 - **At a flow's ingress, an expired visa is ejected.** `match_traffic`, the
   one lookup every new flow from an adapter or the local actor goes through,
   removes an expired visa through the one removal path (`revoke`: bindings,
