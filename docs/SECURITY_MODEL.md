@@ -873,8 +873,8 @@ not read the RFCs as a description of current guarantees.
   under a visa (*Implemented*, above). No sweep removes an expired visa, so
   the streams already bound under it keep flowing until a new flow matches
   it, a link they cross drops, or an R16 reset (ZODE_LINKS.md) drops
-  every visa but the Zode's own VS-API pair; the visa service, which forgets a visa at
-  expiry, cannot revoke it
+  every visa outside the Zode's two VS-API flows; the visa service, which
+  forgets a visa at expiry, cannot revoke it
   ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
