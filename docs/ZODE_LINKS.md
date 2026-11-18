@@ -1292,9 +1292,10 @@ visa service at `65fe475` (`v0.22.0-zodes.9`).
   link was Active on both ends again, but the restarted Linux client's DNS
   lookups got no answer (#271), so the last download failed.
 - **Windows was not tested as the client.** It couldn't reach the DNS Zode
-  (#272, now fixed: a Windows Zode applies its ZPR address as a /32; see
-  SYSTEM_OVERVIEW.md, *Design decisions*). The #271 retest runs Windows as
-  the client.
+  (#272): `ph` applied its ZPR address as a /64. The code fix (a /32, see
+  SYSTEM_OVERVIEW.md, *Design decisions*) is in core but not yet in a
+  ZIPLINE build, so Windows-client DNS on real machines is still unverified.
+  The #271 retest is that check.
 - **macOS has not been run.** The Mac was unavailable; the Linux-macOS and
   macOS-Windows pairs will be tested by hand later.
 
@@ -1338,6 +1339,8 @@ What the real machines showed beyond the netns test:
 - **#271** after an endpoint rejoins (restart, crash, or a visa-service
   disconnect), the DNS Zode's replies stop reaching it. The reply stream
   stays on a superseded visa. Seen on real machines (org-zpr/zipline#255).
+  Its real-machine retest also runs Windows as the client, the first
+  real-host check of the #272 fix.
 - **#273** deleting a service hosted on a Zode makes the visa service
   disconnect that Zode ("no longer approved by policy"); it rejoins about
   9 s later.

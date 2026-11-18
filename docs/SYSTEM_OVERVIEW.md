@@ -529,7 +529,9 @@ machines this meant a Windows Zode could not reach the DNS Zode
   `<addr>/<len>` (`ZPRNET_PREFIX_LEN`, 32), and Windows installs the on-link
   `fd5a:5052::/32` route itself, as Linux and macOS do. One fix in
   `add_address_impl` covers every caller: node/Zode self-addressing, the
-  granted actor address and the AAA.
+  granted actor address and the AAA. Unit tests and Windows CI cover the
+  argv; the first real-host check is the #271 retest, with Windows as the
+  client by DNS name.
 - **One argv builder.** The netsh argv comes from
   `sys/addr_hint.rs::netsh_add_address_args`, which is compiled on every OS
   so its tests run on Linux. The manual-fix hint, which had the same bug, is
