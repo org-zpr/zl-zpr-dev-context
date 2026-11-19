@@ -3170,6 +3170,21 @@ mod tests {
         }
     }
 
+    /// Writes a fixture shell script to `path` and returns the program and
+    /// arguments that run it: `sh <path>`, never the script itself.
+    ///
+    /// A test must not `execve` a file it has just written (zipline#280):
+    /// under the parallel test harness another test thread can `fork` while
+    /// the file is still open for writing, the child holds that descriptor
+    /// until its own `exec`, and executing the script meanwhile fails with
+    /// ETXTBSY ("Text file busy"). `sh` only opens the script to read it, so
+    /// the race cannot occur. The runners under test spawn whatever program
+    /// the plan names, so this changes nothing they are tested for.
+    fn sh_script(path: &Path, body: &str) -> (String, Vec<String>) {
+        std::fs::write(path, body).unwrap();
+        ("sh".to_string(), vec![path.display().to_string()])
+    }
+
     /// The netns runner: continues after a failing script, records each
     /// script by name, and a prep-build failure fails that one script while
     /// the rest of the tier still runs.
@@ -3178,15 +3193,12 @@ mod tests {
     /// scripts passed (dev-context#99 review).
     #[test]
     fn run_netns_records_planned_skips_without_failing() {
-        use std::os::unix::fs::PermissionsExt as _;
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("integration-test");
         std::fs::create_dir_all(&dir).unwrap();
         let logs = tmp.path().join("logs");
         std::fs::create_dir_all(&logs).unwrap();
-        let ok = dir.join("ok.sh");
-        std::fs::write(&ok, "#!/bin/sh\necho fine\n").unwrap();
-        std::fs::set_permissions(&ok, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (program, args) = sh_script(&dir.join("ok.sh"), "echo fine\n");
 
         let plan = NetnsPlan {
             skipped: vec![(
@@ -3197,15 +3209,19 @@ mod tests {
             jobs: 1,
             scripts: vec![NetnsScript {
                 script: "ok.sh",
-                program: ok.display().to_string(),
-                args: vec![],
+                program,
+                args,
                 env: vec![],
                 env_remove: vec![],
                 prep: None,
             }],
         };
         let outcome = run_netns(&plan, &logs, true);
-        assert!(outcome.passed, "a skip must not fail the tier");
+        assert!(
+            outcome.passed,
+            "a skip must not fail the tier: {:?}",
+            outcome.repos
+        );
         assert_eq!(outcome.repos["ok.sh"], "passed");
         assert_eq!(
             outcome.repos["feature-test.sh"],
@@ -3222,16 +3238,10 @@ mod tests {
         std::fs::create_dir_all(&logs).unwrap();
 
         // Three fixture scripts: pass, fail, pass-with-failing-prep.
-        for (name, body) in [
-            ("ok.sh", "#!/bin/sh\necho fine\n"),
-            ("bad.sh", "#!/bin/sh\necho broken; exit 3\n"),
-            ("prepped.sh", "#!/bin/sh\necho never runs\n"),
-        ] {
-            use std::os::unix::fs::PermissionsExt as _;
-            let path = dir.join(name);
-            std::fs::write(&path, body).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let (ok_program, ok_args) = sh_script(&dir.join("ok.sh"), "echo fine\n");
+        let (bad_program, bad_args) = sh_script(&dir.join("bad.sh"), "echo broken; exit 3\n");
+        let (prepped_program, prepped_args) =
+            sh_script(&dir.join("prepped.sh"), "echo never runs\n");
 
         let plan = NetnsPlan {
             skipped: Vec::new(),
@@ -3240,24 +3250,24 @@ mod tests {
             scripts: vec![
                 NetnsScript {
                     script: "ok.sh",
-                    program: dir.join("ok.sh").display().to_string(),
-                    args: vec![],
+                    program: ok_program,
+                    args: ok_args,
                     env: vec![],
                     env_remove: vec![],
                     prep: None,
                 },
                 NetnsScript {
                     script: "bad.sh",
-                    program: dir.join("bad.sh").display().to_string(),
-                    args: vec![],
+                    program: bad_program,
+                    args: bad_args,
                     env: vec![],
                     env_remove: vec![],
                     prep: None,
                 },
                 NetnsScript {
                     script: "prepped.sh",
-                    program: dir.join("prepped.sh").display().to_string(),
-                    args: vec![],
+                    program: prepped_program,
+                    args: prepped_args,
                     env: vec![],
                     env_remove: vec![],
                     prep: Some(PrepStep {
@@ -3301,22 +3311,17 @@ mod tests {
 
         // Touch our own marker, then poll up to ~10s for all three.
         let rendezvous = format!(
-            "#!/bin/sh\ntouch {meet}/$1\n\
+            "touch {meet}/$1\n\
              for i in $(seq 100); do\n\
              [ $(ls {meet} | wc -l) -ge 3 ] && exit 0\n\
              sleep 0.1\ndone\nexit 1\n",
             meet = meet.display()
         );
-        let path = dir.join("meet.sh");
-        {
-            use std::os::unix::fs::PermissionsExt as _;
-            std::fs::write(&path, rendezvous).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        let (program, args) = sh_script(&dir.join("meet.sh"), &rendezvous);
         let script = |name: &'static str| NetnsScript {
             script: name,
-            program: path.display().to_string(),
-            args: vec![name.to_string()],
+            program: program.clone(),
+            args: [args.clone(), vec![name.to_string()]].concat(),
             env: vec![],
             env_remove: vec![],
             prep: None,
@@ -3434,33 +3439,21 @@ mod tests {
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
             }
         }
-        let write_script = |name: &str, body: &str| -> String {
-            let path = tmp.join(name);
-            std::fs::write(&path, body).unwrap();
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-            path.display().to_string()
+        let step = |name: &'static str, body: &str| -> DockerStep {
+            let (program, args) = sh_script(&tmp.join(format!("{name}.sh")), body);
+            DockerStep {
+                name,
+                program,
+                args,
+                dir: tmp.to_path_buf(),
+            }
         };
         DockerPlan {
             dist,
             bin: tmp.join("demo/dns-demo/bin"),
-            deploy: DockerStep {
-                name: "deploy",
-                program: write_script("deploy.sh", "#!/bin/sh\necho deployed\n"),
-                args: vec![],
-                dir: tmp.to_path_buf(),
-            },
-            test: DockerStep {
-                name: "test",
-                program: write_script("test.sh", test_body),
-                args: vec![],
-                dir: tmp.to_path_buf(),
-            },
-            teardown: DockerStep {
-                name: "teardown",
-                program: write_script("teardown.sh", teardown_body),
-                args: vec![],
-                dir: tmp.to_path_buf(),
-            },
+            deploy: step("deploy", "echo deployed\n"),
+            test: step("test", test_body),
+            teardown: step("teardown", teardown_body),
         }
     }
 
@@ -3475,8 +3468,8 @@ mod tests {
         let marker = tmp.path().join("torn-down");
         let plan = fixture_docker_plan(
             tmp.path(),
-            "#!/bin/sh\necho SECTION 3 broke; exit 1\n",
-            &format!("#!/bin/sh\ntouch {}\n", marker.display()),
+            "echo SECTION 3 broke; exit 1\n",
+            &format!("touch {}\n", marker.display()),
         );
 
         let outcome = run_docker(&plan, &logs, true);
@@ -3502,11 +3495,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let logs = tmp.path().join("logs");
         std::fs::create_dir_all(&logs).unwrap();
-        let plan = fixture_docker_plan(
-            tmp.path(),
-            "#!/bin/sh\necho all good\n",
-            "#!/bin/sh\necho stuck volume; exit 1\n",
-        );
+        let plan =
+            fixture_docker_plan(tmp.path(), "echo all good\n", "echo stuck volume; exit 1\n");
 
         let outcome = run_docker(&plan, &logs, true);
         assert!(!outcome.passed, "a teardown failure must fail the tier");
@@ -3529,8 +3519,8 @@ mod tests {
         let marker = tmp.path().join("torn-down");
         let mut plan = fixture_docker_plan(
             tmp.path(),
-            "#!/bin/sh\necho unreachable\n",
-            &format!("#!/bin/sh\ntouch {}\n", marker.display()),
+            "echo unreachable\n",
+            &format!("touch {}\n", marker.display()),
         );
         // Break staging: remove one staged binary from dist/.
         std::fs::remove_file(plan.dist.join("ph")).unwrap();

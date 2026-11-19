@@ -1750,7 +1750,9 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
     // end-to-end tiers of task B5, both run against `dist/`. A probe-skipped
     // tier is recorded `skipped: <reason>` and never presented as coverage.
     let mut tier_results: BTreeMap<String, Tier> = BTreeMap::new();
-    let mut tier_failed = false;
+    // The tiers that failed, in run order: names the failure in the
+    // terminal summary (zipline#280).
+    let mut failed_tiers: Vec<&'static str> = Vec::new();
     // Set iff the netns tier ran through the docker fallback (zipline#93):
     // becomes the generated coverage note in the emitted manifest.
     let mut netns_container_note: Option<String> = None;
@@ -1760,7 +1762,9 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         }
         let plans = tiers::unit_plan(inputs.recipes, &worktrees, &dist);
         let outcome = tiers::run_unit(&plans, &logs, inputs.quiet);
-        tier_failed = !outcome.passed;
+        if !outcome.passed {
+            failed_tiers.push("unit");
+        }
         tier_results.insert("unit".to_string(), Tier::from_outcome(&outcome));
     }
 
@@ -1855,7 +1859,7 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
                             // and the manifest still records the tier as
                             // skipped, with the reason (spec-003 §3/§6).
                             eprintln!("error: {error:#}");
-                            tier_failed = true;
+                            failed_tiers.push("netns");
                             let reason = error.to_string();
                             tier_results.insert("netns".to_string(), Tier::skipped(&reason));
                         }
@@ -1886,7 +1890,7 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
                     ) {
                         Err(error) => {
                             eprintln!("error: {error:#}");
-                            tier_failed = true;
+                            failed_tiers.push("netns");
                             tier_results.insert(
                                 "netns".to_string(),
                                 Tier {
@@ -1899,7 +1903,9 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
                         }
                         Ok(plan) => {
                             let outcome = tiers::run_netns(&plan, &logs, inputs.quiet);
-                            tier_failed = tier_failed || !outcome.passed;
+                            if !outcome.passed {
+                                failed_tiers.push("netns");
+                            }
                             // The coverage note exists iff the container route
                             // actually ran, quoting the real host gap
                             // (zipline#93, contract 2).
@@ -1949,7 +1955,9 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
                 }
                 let plan = tiers::docker_plan(&demo, &dist);
                 let outcome = tiers::run_docker(&plan, &logs, inputs.quiet);
-                tier_failed = tier_failed || !outcome.passed;
+                if !outcome.passed {
+                    failed_tiers.push("docker");
+                }
                 tier_results.insert("docker".to_string(), Tier::from_outcome(&outcome));
             }
         }
@@ -2020,14 +2028,16 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         }
         return Ok(false);
     }
-    if tier_failed {
+    if !failed_tiers.is_empty() {
         // Same retention rule as a build failure: the failing tests and
         // their fixtures live in the worktrees, so they are what a person
         // debugs with. No tarball: a set that failed its tests must not
         // look shippable, though dist/ (with the manifest recording the
         // failure) survives.
         if !inputs.quiet {
-            println!("unit tier failed; see tiers.unit in the emitted manifest");
+            for line in tier_failure_lines(&failed_tiers, &emitted.resolved.tiers) {
+                println!("{line}");
+            }
             println!("worktrees left in {} for debugging", src.display());
         }
         return Ok(false);
@@ -2052,6 +2062,29 @@ fn execute_build(inputs: &BuildInputs) -> Result<bool> {
         let _ = std::fs::remove_dir(&src);
     }
     Ok(true)
+}
+
+/// The terminal summary for a run whose test tiers failed: one line per
+/// failed tier, naming it and the manifest field recording it (zipline#280
+/// — this line once always said `unit`, whichever tier had failed). A tier
+/// the manifest records `skipped` failed the run because it was explicitly
+/// requested and could not run; its line says that, so the terminal never
+/// claims tests failed that never ran (spec-003 §3).
+fn tier_failure_lines(failed_tiers: &[&str], tiers: &BTreeMap<String, Tier>) -> Vec<String> {
+    failed_tiers
+        .iter()
+        .map(|tier| {
+            let what = if tiers
+                .get(*tier)
+                .is_some_and(|result| result.status == "skipped")
+            {
+                "was requested but could not run"
+            } else {
+                "failed"
+            };
+            format!("{tier} tier {what}; see tiers.{tier} in the emitted manifest")
+        })
+        .collect()
 }
 
 /// The sha256 of one file, streamed, as lowercase hex.
@@ -2997,10 +3030,15 @@ allow_pin_drift:
     }
 
     /// Two-wide, a failure stops further claims while the in-flight build
-    /// finishes (PR #44 Codex P2): recipe A fails immediately, B (claimed
-    /// by the other worker before the failure) runs to completion, and C is
-    /// never claimed — B outlives A's failure by a wide margin, so by the
-    /// time B's worker loops back the stop is long recorded.
+    /// finishes (PR #44 Codex P2): recipe A fails, B (claimed by the other
+    /// worker before the failure) runs to completion, and C is never claimed.
+    ///
+    /// The scripts hand off through files so the order does not depend on
+    /// scheduling (zipline#280 — fixed sleeps flaked on a loaded machine):
+    /// A fails only once B has started, so B is claimed before the stop; B
+    /// finishes only once A's build log holds A's output. The runner writes
+    /// that log after A exits and records the stop a few statements later,
+    /// so B's extra second covers only a worker stalled in between.
     #[test]
     fn run_recipes_two_wide_failure_stops_later_claims() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3008,10 +3046,33 @@ allow_pin_drift:
         let dist = tmp.path().join("dist");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::create_dir_all(&dist).unwrap();
+        let started_b = tmp.path().join("started-b");
+        let log_a = logs.join("repo-a-build.log");
         let ran_b = tmp.path().join("ran-b");
         let ran_c = tmp.path().join("ran-c");
-        let a = scripted_recipe("repo-a", "echo broken; exit 3\n".to_string());
-        let b = scripted_recipe("repo-b", format!("sleep 1\ntouch {}\n", ran_b.display()));
+        // A polls up to ~10s for B's start marker, then fails either way;
+        // B polls up to ~10s for A's failure in A's log, then finishes.
+        let a = scripted_recipe(
+            "repo-a",
+            format!(
+                "for i in $(seq 100); do\n\
+                 [ -e {started} ] && break\n\
+                 sleep 0.1\ndone\necho broken; exit 3\n",
+                started = started_b.display()
+            ),
+        );
+        let b = scripted_recipe(
+            "repo-b",
+            format!(
+                "touch {started}\n\
+                 for i in $(seq 100); do\n\
+                 grep -qs broken {log_a} && break\n\
+                 sleep 0.1\ndone\nsleep 1\ntouch {ran}\n",
+                started = started_b.display(),
+                log_a = log_a.display(),
+                ran = ran_b.display()
+            ),
+        );
         let c = scripted_recipe("repo-c", format!("touch {}\n", ran_c.display()));
         let wt_a = tmp.path().join("wt-a");
         let wt_b = tmp.path().join("wt-b");
@@ -4313,6 +4374,33 @@ allow_pin_drift:
                 "netns integration tests did NOT run: not selected (--test unit)",
                 "docker end-to-end tests did NOT run: not selected (--test unit)",
                 "unit tests FAILED; see tiers.unit.repos",
+            ]
+        );
+    }
+
+    /// The terminal summary names the tiers that actually failed, one line
+    /// each (zipline#280: a run where only netns failed, unit not even
+    /// selected, printed "unit tier failed; see tiers.unit"). An explicitly
+    /// requested tier that could not run is recorded `skipped` and says so,
+    /// rather than claiming its tests failed.
+    #[test]
+    fn tier_failure_lines_name_each_failed_tier_by_its_status() {
+        let tiers = results(&[("netns", failed())]);
+        assert_eq!(
+            tier_failure_lines(&["netns"], &tiers),
+            ["netns tier failed; see tiers.netns in the emitted manifest"]
+        );
+        let tiers = results(&[
+            ("unit", failed()),
+            ("netns", Tier::skipped("runner too old")),
+            ("docker", failed()),
+        ]);
+        assert_eq!(
+            tier_failure_lines(&["unit", "netns", "docker"], &tiers),
+            [
+                "unit tier failed; see tiers.unit in the emitted manifest",
+                "netns tier was requested but could not run; see tiers.netns in the emitted manifest",
+                "docker tier failed; see tiers.docker in the emitted manifest",
             ]
         );
     }
