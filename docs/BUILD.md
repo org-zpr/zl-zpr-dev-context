@@ -707,19 +707,35 @@ workspace does not check out.
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
-fallback of the `netns` tier. **It fails, rather than skips, on a build set
-whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
-`dns-demo` still starts `ph node` and `ph adapter`, and zl-zpr-demo is
-unmaintained, so no port is planned. Run such sets with `--test unit,netns`
-(see "Cutting a Zodes set" below).
+fallback of the `netns` tier. `dns-demo` runs Zodes on zl-zpr-demo's
+`feature/zodes` ([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
+zl-zipline#235): a relay Zode that hosts the visa service on its own TUN,
+plus web, client and dns endpoint Zodes linked to it. zl-zpr-demo's `zipline`
+branch still starts `ph node` and `ph adapter`, so it needs a core from before
+zl-zipline#234; pin the demo at `feature/zodes` with a `ph zode` core. The
+ported demo also needs a visa service with zl-zipline#284's Zode departure
+(zl-zpr-visaservice#72, `cf4b4e7`): without it a stopped web Zode stays
+registered and `test-dns.sh` section 3 times out waiting for NXDOMAIN
+(`DNS.md`, "Query semantics"). `build-sets/2026-11-19.yaml` pins a known-good
+set.
 
-Last recorded `netns` run for #234 (zpr-dev `--test netns`, recorded in
-zl-zpr-core#136, the core-node-dock PR, at core 3c99287): 13 scripts passed,
-the 7 classic scripts were skipped as absent from the checkout, and
-`zode-ping-test.sh` failed on the release `ph` (its out-of-order counter is
-debug-only; see `PH_DEBUG_BUILD` below). After that fix it passed in
-standalone reruns on a release and a debug `ph`, not in another full tier
-run. `zode-reroute-test.sh`, which passed, is unchanged since core 6e7baba.
+Last recorded full run on `feature/zodes`: `build-sets/2026-11-19.yaml`
+(zl-zipline#235, 2026-11-19, `--test unit,netns,docker`, about 16 minutes on
+the 8-core workspace host). Every tier passed on its first run, with no
+re-runs: `unit` in the four built repositories; `netns` on the host route
+(`privilege: userns`), all fourteen scripts a `feature/zodes` core carries, with the seven
+`zipline`-only scripts skipped as absent from the checkout; and `docker`
+(stage, deploy, test, teardown) on the ported `dns-demo`. Its notes record
+the revisions that are not manifest entries: zl-zpr-common, zl-zpr-vsapi,
+zl-zpr-policy, the zipline commit that pins the same set, and the
+zl-zpr-dev-context commit that supplied `zpr-dev`. On this repository's
+`feature/zodes` it is the newest file in `build-sets/`, so a bare `zpr-dev
+build` builds it when the context checkout (`<workspace>/zl-zpr-dev-context`
+unless `--context` says otherwise; not the current directory) is on
+`feature/zodes`. From another worktree, pass `--context <worktree>` or
+`--manifest <worktree>/build-sets/2026-11-19.yaml`. Either way, run a
+`zpr-dev` built from `feature/zodes`: the `zipline` one's netns drift guard
+rejects the Zode scripts it does not list.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
@@ -763,14 +779,14 @@ instead.
 
 **Cutting a Zodes set** (a core with only `ph zode`, until `feature/zodes`
 merges into `zipline`). `--tip` resolves `zipline` and so selects the old
-core, and a bare `--manifest` reproduce runs the default tiers, which on a
-Docker host include the failing `docker` tier. So in step 2, write a
-manifest whose `zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core`
+core and the adapter-era demo. So in step 2, write a manifest whose
+`zl-zpr-compiler`, `zl-zpr-visaservice`, `zl-zpr-core` and `zl-zpr-demo`
 entries pin their `feature/zodes` revisions (or the set's pre-release tags)
-and whose other entries pin ordinary commits or tags (`zl-zpr-coredns` and
-`zl-zpr-demo` have no `feature/zodes`; shared libraries such as
-`zl-zpr-common` are not entries, see spec-003), and run `zpr-dev build --manifest <file> --test
-unit,netns`; in step 5, reproduce with the same `--test unit,netns`.
+and whose `zl-zpr-coredns` entry pins a commit on its `main` (shared
+libraries such as `zl-zpr-common` are not entries, see spec-003), and run
+`zpr-dev build --manifest <file> --test all`; in step 5, reproduce with the
+same `--test all`, so a tier that cannot run fails instead of skipping.
+`build-sets/2026-11-19.yaml` is such a set.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
 gates against the live checkouts (read-only, seconds), and `--dry-run` prints

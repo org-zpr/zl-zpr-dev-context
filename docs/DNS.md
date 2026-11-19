@@ -79,22 +79,26 @@ a service, and allow both hops. The resolver appears as the *subject* of an
 `Allow` — this is a supported ZPL shape:
 
 ```
-Define zpr-dns as a service.        # UDP/53, provider address granted by a trusted service
+Define zpr-dns as a service.        # UDP/53, at the resolver Zode's node address
 Define vs-admin as a service.       # TCP/8182, provided by the VS's own actor (vs.zpr)
 Allow access:all users to access zpr-dns.
 Allow zpr-dns to access vs-admin.
 ```
 
-In the `.zplc`, the resolver gets its static address from a trusted service
-that vends `device.zpr_addr` keyed on the resolver's CN (an authored
-`["zpr.addr", ...]` provider pin is a compile error since zipline#109 — in
-dns-demo the existing `machines` store carries the grant), so clients can be
-pointed at a fixed address. `vs-admin` is provided by the visa service's own
-actor, CN `vs.zpr`, which is what puts `fd5a:5052::1` behind the name. This
-example is the `dns-demo` adapter layout; on Zodes the resolver's address is
-its Zode's node address instead (see *Implementation status*):
+In the `.zplc`, the resolver is a Zode, and its static address is its
+`[nodes]` entry's `zpr_address`, pinned to its CN (an authored
+`["zpr.addr", ...]` provider pin is a compile error since zipline#109), so
+clients can be pointed at a fixed address. `vs-admin` is provided by the visa
+service's own actor, CN `vs.zpr`, which is what puts `fd5a:5052::1` behind the
+name: the visa service runs on the relay Zode's TUN, with that address as the
+relay's second ZPR address. This is the `dns-demo` layout (its relay node, links
+and the other Zodes are left out):
 
 ```toml
+[nodes."dns.demo"]
+provider = [["device.zpr.adapter.cn", "dns.demo"]]
+zpr_address = "fd5a:5052:8888::53"
+
 [protocols.dns]
 l4protocol = "UDP"
 port = 53
@@ -105,24 +109,18 @@ port = 8182
 
 [trusted_services.machines]
 api = "file"
-returns_attributes = ["hostnames -> device.hostname{}", "zpr_addr -> device.zpr_addr"]
+returns_attributes = ["hostnames -> device.hostname{}"]
 expiration_seconds = 3600
 
 [services.zpr-dns]
 protocol = "dns"
 port = 53
-provider = [["device.zpr.adapter.cn", "dns.demo"]]   # static addr granted by `machines` (device.zpr_addr)
+provider = [["device.zpr.adapter.cn", "dns.demo"]]   # at its node's zpr_address
 
 [services.vs-admin]
 protocol = "vs-admin"
 port = 8182
 provider = [["device.zpr.adapter.cn", "vs.zpr"]]
-```
-
-with the resolver's address in the store file (`machines.json`):
-
-```json
-{ "device.zpr.adapter.cn": { "dns.demo": { "zpr_addr": ["fd5a:5052:8888::53"] } } }
 ```
 
 The resolver's CN also needs a `[bootstrap]` key entry. Keep service names
@@ -131,11 +129,8 @@ lookup is exact-match.
 
 **2. The naming authority**, if machine names are wanted, is a trusted service
 returning `hostnames -> device.hostname{}`. In the configuration above this is
-the same `[trusted_services.machines]` block declared in step 1 — one store
-vends both the hostname claims and the resolver's static-address grant, so the
-table is declared once (TOML rejects a table defined twice). A deployment that
-does not need static-address grants can drop the `zpr_addr` mapping and keep
-only the `hostnames` one.
+the `[trusted_services.machines]` block declared in step 1, over
+`machines.json`.
 
 Note on pruning: the compiler drops a trusted service that no ZPL rule
 references — but `device.hostname` is visa-service-interpreted, so a store
@@ -326,12 +321,22 @@ another provider's live `service:<name>` entry.
 ## Implementation status
 
 Service names and machine names are fully implemented and merged. The end-to-end proof is
-`zl-zpr-demo/dns-demo`: `make && local-compute/deploy-docker.sh &&
-local-compute/test-dns.sh` stands up node + VS + web + client + resolver and
-exercises resolution, liveness, both policy hops, machine names and aliases,
-and the collision / precedence / invalid-name controls. The demo still docks
-its VS, web, client and resolver as adapters on one node, so it runs only
-against a core from before zl-zipline#234, which removed the adapter dock.
+`zl-zpr-demo/dns-demo`, on zl-zpr-demo's `feature/zodes`
+([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
+[zl-zipline#235](https://github.com/org-zpr/zl-zipline/issues/235)). Its
+`local-compute/deploy-docker.sh` stands up a relay Zode that hosts the visa
+service on its own TUN, plus web, client and resolver endpoint Zodes linked to
+it, and `local-compute/test-dns.sh` exercises resolution, liveness, both policy
+hops, machine names and aliases, and the collision / precedence / invalid-name
+controls. It is `zpr-dev build`'s `docker` tier: all eight `test-dns.sh`
+sections passed in build set `build-sets/2026-11-19.yaml`. Reproduce it through
+that set, with a `zpr-dev` built from zl-zpr-dev-context's `feature/zodes`:
+`zpr-dev build --manifest <zl-zpr-dev-context>/build-sets/2026-11-19.yaml
+--test docker` (add `--force` to replace an earlier build of the set). The
+demo's own `make` builds whatever the source checkouts hold, and the
+workspace's default is `zipline`, whose core has no `ph zode`; zl-zpr-demo's
+`zipline` branch still docks adapters on one node, so it runs only against a
+core from before zl-zipline#234.
 
 On ZIPLINE the resolver runs behind a Zode named `dns.zpr` ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
 a Zode with an initial link to the relay, a server-generated link

@@ -304,6 +304,7 @@ Runnable demonstrations of ZPR. Each has its own `README.md`.
 containerized-demo/   a running ZPRnet in containers
 multinode-demo/       multiple nodes
 iot-demo/             ZPR integrated with the Oracle IoT platform
+dns-demo/             DNS over ZPR; zpr-dev's docker tier (Zodes on feature/zodes)
 ```
 
 The fastest way to see a working ZPRnet without assembling one by hand.
