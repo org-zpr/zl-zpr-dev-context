@@ -754,6 +754,58 @@ a visa-service nonce (`getLoginNonce`) over accepting that risk for v1. See
 *A Zode's own login* above.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
+**A Zode's substrate address comes from what the relay observes, never from
+the Zode; policy is the only override.** Before
+[#264](https://github.com/org-zpr/zl-zipline/issues/264) a Zode reported the
+address its peers should dial, and nothing checked it, so a malicious Zode
+could aim every peer it was proposed to at any host and port: a bounded dial
+redirection, and a reflection vector. Now a Zode's `zpr.substrate_addr`
+claim, an authenticated claim that policy can read, is policy's declared
+address or the relay's observation of the Zode's initial link (ZODE_LINKS.md,
+J2 and *Design decisions*):
+
+- **The observation is self-proving.** It is the source of a link that
+  completed keying with a verified CN. A spoofed source cannot complete the
+  handshake, because the replies go to the spoofed address, so the address is
+  one the CN holder itself sends from and receives at.
+- **No party can aim another's traffic** (operator, hard requirement). A Zode
+  sends to a substrate address only if it is its own configured initial link,
+  a policy address, such an observation, or the source of an inbound packet
+  it answers. The relay never dials; only a link's owner dials, and only to
+  `Link.peer`; a keyed link never roams to a later packet's source; and an
+  observed address counts only while its Zode has a live VS-API session (as
+  built, a live VSS worker), so once the visa service sees a vanished Zode's
+  session end, its IP, perhaps reassigned by DHCP or CGNAT, is no longer
+  proposed. Until the worker notices, a topology built meanwhile may still
+  carry it.
+- **Policy is the only override**, for a NAT that does not keep a forwarded
+  port for outbound traffic or a multi-homed server. A Zode-supplied address
+  cross-checked against the observation was rejected (operator), and so was a
+  Zode-supplied LAN address for two Zodes behind one NAT: it would let a Zode
+  aim its peers at any internal host. Such a pair links directly only if the
+  NAT hairpins or policy declares their LAN addresses, and otherwise goes
+  through the relay.
+- **Deployment requirement: the relay must see each Zode at an address its
+  peers can dial.** A Zode's own NAT is fine when its mapping accepts the
+  peers' traffic. A source NAT or proxy in front of the relay that the peers
+  cannot dial back through, Docker's userland proxy included, makes the relay
+  observe every Zode at that box's address. Direct
+  links then fail (each owner dials the NAT) and rule 13a sends the traffic
+  through the relay: a loss of direct links, not of reachability or of any
+  check. On the libvirt testbed, libvirt's masquerade of the VMs' traffic to
+  the relay container's published port did this (org-zpr/zipline#289); the
+  testbed fix is a `RETURN` rule in libvirt's `LIBVIRT_PRT` chain for
+  VM-to-Docker-subnet traffic, after which the relay observed the VMs at their
+  real addresses and the direct links formed (ZODE_LINKS.md, "On real
+  machines"). A deployment with hand-written policy that cannot avoid the NAT
+  gives its Zodes policy addresses; ZIPLINE 2.0.9's generated policy declares
+  none, so there the NAT has to go.
+- **Not needed any more:** the issue's mitigations 2-4 (rate-limiting address
+  changes, a public-address check at the visa service, protecting rule 13a
+  from re-reports) all defend against a Zode choosing its address. Mitigation
+  1, the dialer's CN check (`check_keyed_peer`, `Refusal::WrongCn`), already
+  existed.
+
 **A departed Zode is removed on link evidence that a single peer cannot
 forge.** The visa service removes a Zode other than the relay, with the
 ordinary disconnect teardown (reason `Timeout`), once every link of it has
@@ -861,16 +913,29 @@ not read the RFCs as a description of current guarantees.
   pass cut short by a restart does not leave them unrevoked. A policy entry
   that is not an IP address fails the policy load. See
   ROUTING.md, "Path computation" and "Transit changes".
-- **A reported substrate address is checked, and steers only dials** — a
-  Zode's `connect` or `open` reports the substrate address its peers should
-  dial. An unspecified IP or port 0 is refused, and so is any address other
-  than the one policy declares for the node; with none declared, the report
-  stands (`accept_reported_substrate`,
-  [zipline#255](https://github.com/org-zpr/zl-zipline/issues/255)). The address
-  only goes into peers' `Link.peer`: the link still needs the node's CA-signed
-  certificate with the CN policy gives it. Whether a Zode can misuse the address
-  it reports, for example to make peers dial a third party, is
-  [zipline#264](https://github.com/org-zpr/zl-zipline/issues/264).
+- **A Zode's substrate address is policy's or the relay's observation,
+  never its own word** — the relay reports the source address of a joiner's
+  initial link, once it has keyed with the joiner's verified CN, as
+  `observedAddr` on `requestBootstrapVisas`. The visa service records it
+  (refusing an unspecified IP or port 0 with `paramError`), and `connect` and
+  `open` take policy's address first, then the observation, then the stored
+  claim (`substrate_addr_for`). `connect` refuses any unknown parameter,
+  including the old `substrate_addr`; `ph` has no option to set one. A stored
+  claim counts only while its node has a live VSS worker; gating it on the
+  worker rather than on registration lets a VSS-only outage during a policy
+  push flap a healthy direct link
+  ([zl-zipline#287](https://github.com/org-zpr/zl-zipline/issues/287),
+  deferred: availability only, not a check). The claim does not record its
+  source, so a visa-service store kept across the upgrade may still hold a
+  claim a pre-#264 Zode reported, until that Zode's next bootstrap request
+  replaces it. `feature/zodes` is a flag day: start it with an empty store. The address only goes
+  into peers' `Link.peer`, and the link still needs the node's CA-signed
+  certificate with the CN policy gives it
+  ([zipline#264](https://github.com/org-zpr/zl-zipline/issues/264); see
+  *Design decisions*). Not verified: whether the relay's first handshake
+  reply, which may carry its certificate, is much larger than an initiator's
+  first message, which would let a spoofed initiator use the relay as a UDP
+  amplifier; message sizes have not been measured.
 - **A Windows Zode accepts direct links through Windows Firewall.** The
   ZIPLINE MSI installs an inbound rule, "Zipline (direct links)": `ph.exe`
   only, UDP 5000, every profile, removed with the package
