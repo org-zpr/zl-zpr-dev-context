@@ -840,12 +840,16 @@ policy address overrides it
 reasoning is in ZODE_LINKS.md and SECURITY_MODEL.md, *Design decisions*).
 Two consequences for whoever deploys ZPR:
 
-- **The relay must see each Zode's true source address.** Put no source NAT
-  or proxy between the Zodes and the relay: no masquerade in front of the
-  relay, and not Docker's userland proxy on a published port. Behind one, the
-  relay observes every Zode at the NAT's address, every direct link fails,
-  and all traffic goes through the relay. If such a NAT cannot be avoided,
-  declare the Zodes' substrate addresses in policy. On the libvirt testbed,
+- **The relay must see each Zode at an address its peers can dial.** Put no
+  source NAT or proxy between the Zodes and the relay that the peers cannot
+  dial back through: no masquerade in front of the relay, and not Docker's
+  userland proxy on a published port. Behind one, the relay observes every
+  Zode at that box's address, every direct link fails, and all traffic goes
+  through the relay. (A Zode's own NAT is fine when its mapping accepts the
+  peers' traffic.) If such a NAT cannot be avoided, declare the Zodes'
+  substrate addresses in policy. That is for hand-written policy: ZIPLINE
+  2.0.9 generates its policy and declares no endpoint addresses, so on ZIPLINE
+  the NAT has to go. On the libvirt testbed,
   libvirt masqueraded the VMs' traffic into the Docker relay, so the relay saw
   both VMs at the bridge gateway and no direct link formed. A `RETURN` rule in
   libvirt's `LIBVIRT_PRT` chain for VM-to-Docker-subnet traffic fixed it: the

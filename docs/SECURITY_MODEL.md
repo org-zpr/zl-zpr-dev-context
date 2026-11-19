@@ -785,9 +785,9 @@ J2 and *Design decisions*):
   aim its peers at any internal host. Such a pair links directly only if the
   NAT hairpins or policy declares their LAN addresses, and otherwise goes
   through the relay.
-- **Deployment requirement: the relay must see each Zode's true source
-  address.** A source NAT or proxy in front of the relay, Docker's userland
-  proxy included, makes it observe every Zode at that box's address. Direct
+- **Deployment requirement: the relay must see each Zode at an address its
+  peers can dial.** A source NAT or proxy in front of the relay, Docker's
+  userland proxy included, makes it observe every Zode at that box's address. Direct
   links then fail (each owner dials the NAT) and rule 13a sends the traffic
   through the relay: a loss of direct links, not of reachability or of any
   check. On the libvirt testbed, libvirt's masquerade of the VMs' traffic to
@@ -795,8 +795,9 @@ J2 and *Design decisions*):
   testbed fix is a `RETURN` rule in libvirt's `LIBVIRT_PRT` chain for
   VM-to-Docker-subnet traffic, after which the relay observed the VMs at their
   real addresses and the direct links formed (ZODE_LINKS.md, "On real
-  machines"). A deployment that cannot avoid the NAT gives its Zodes policy
-  addresses.
+  machines"). A deployment with hand-written policy that cannot avoid the NAT
+  gives its Zodes policy addresses; ZIPLINE 2.0.9's generated policy declares
+  none, so there the NAT has to go.
 - **Not needed any more:** the issue's mitigations 2-4 (rate-limiting address
   changes, a public-address check at the visa service, protecting rule 13a
   from re-reports) all defend against a Zode choosing its address. Mitigation

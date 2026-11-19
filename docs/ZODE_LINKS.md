@@ -1110,7 +1110,7 @@ any host and port. Now:
   q2). Restoring it without policy would need a Zode-supplied LAN address,
   which would let a Zode aim its peers at any internal host. ZIPLINE connects machines at different places; two on one LAN
   do not need it.
-- **The relay must see each Zode's true source address.** Any source NAT or
+- **The relay must see each Zode at an address its peers can dial.** Any source NAT or
   proxy between the Zodes and the relay makes the relay observe every Zode at
   that box's address, so no direct link can form (each dial goes to the NAT)
   and all traffic goes through the relay. Docker's userland proxy, or a
