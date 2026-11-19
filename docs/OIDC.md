@@ -582,9 +582,14 @@ logs the user out. At the expiry, with no renewal, ph sends a device-only
 actor only when the visa service accepts it: if it is refused, ph keeps the
 login recorded and tries again every 10 s (`RENEWAL_RETRY_INTERVAL`) until
 it succeeds, and the visa service's expiry sweep, which skips node actors,
-is no fallback for this. The machine stays connected: this drops
-only the user namespace, so device-only rules keep working while user rules
-stop matching.
+is no fallback for this. The machine stays connected: once the visa service
+accepts the device-only `reauthorize`, only the user namespace is dropped, so
+new flows match device-only rules and no longer user rules. Two limits
+follow. Until that `reauthorize` succeeds, the expired user authority still
+caps the actor's authentication lifetime, so the visa service can deny the
+Zode's new visa requests. And a stream bound under a user visa before the
+expiry keeps forwarding until that visa ends (visas are immutable;
+`zode-oidc-test.sh` tests the expiry with a new flow for this reason).
 
 The visa service's authentication-expiry sweep (`vs/src/auth_sweep.rs`)
 revokes expired *adapter* actors on their docking node; node actors are out

@@ -1282,10 +1282,14 @@ because no adapter docks on a Zode.
 - **No actor docks on a node.** The design has adapters dock on nodes, and
   the visa service still implements the adapter roles: adapter
   authentication through a node, pool and granted addresses,
-  `revokeAuthentication`, and the AAA prefix it pushes to each node. Since
+  and `revokeAuthentication`. Since
   [zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234) every
   node is a Zode, which accepts only Zode links, so in v1 every actor other
-  than `vs.zpr` is a Zode's own actor and these paths are unused. The visa
+  than `vs.zpr` is a Zode's own actor and these paths are unused. The AAA
+  prefix push is still live: the visa service sends `Configure([AAA_PREFIX])`
+  and the Zode validates it and fills its pool
+  (`vss_worker::process_configuration`), though nothing allocates from that
+  pool in v1 ([ZODE_LINKS.md](ZODE_LINKS.md), "AAA kept, unused"). The visa
   service has no adapter either: it runs on the relay (see *The visa service
   on the relay, and trusted services*).
 - **Attributes are refreshed only after they expire**, so the visa service
