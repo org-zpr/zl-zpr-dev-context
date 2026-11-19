@@ -154,6 +154,11 @@ merged; core moves to it (org-zpr/zl-zpr-core#126) with the `zode-reroute-test.s
 the re-proposal. zipline pins it too (`ZPR_VISASERVICE_REF`, build set
 `zodes-zipline255`, org-zpr/zipline#255): one commit after `3a9596e`, on the same
 zl-zpr-common tag, so no other pin moves with it.
+org-zpr/zipline#256 (package 2.0.6) moves only zipline's core pin, to
+`13d27db` (the zl-zipline#234 merge, `ph zode` only). The visa service stays at
+`65fe475`, the compiler at `3e16a94` and CoreDNS at `39d49be`. Core, the visa
+service and the compiler are all on zl-zpr-common `zl-v0.32.0-zodes.5`, and the
+Zode-Zode wire is unchanged, so no flag day goes with it.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and

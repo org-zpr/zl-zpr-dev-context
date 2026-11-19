@@ -715,8 +715,7 @@ one TUN. `vs.zpr` has no adapter of its own.
   ZIPLINE's relay container (`zipline-relay-<id>`, [org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252))
   pre-creates a persistent TUN with both addresses, so restarting `ph` never
   takes `vs.zpr` away from a running visa service. Then it starts `ph zode
-  --relay true --forwarding true` (ZIPLINE still passes `node` until
-  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)), valkey (127.0.0.1 only) and, once valkey
+  --relay true --forwarding true`, valkey (127.0.0.1 only) and, once valkey
   answers PING, the visa service. If the visa service is not listening on
   `vs.zpr` (VS-API 5002, admin 8182) within 30 s, the container exits and
   Docker restarts it: the interim answer to
@@ -1072,8 +1071,7 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
   enrols a machine already holds its relay link. Deleting the machine removes
   that link, and the relay refuses its still-valid certificate from then on.
   The network's own `dns.zpr` Zode is in that topology too ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
-  ZIPLINE's dns container runs CoreDNS behind a `ph zode` (`ph node` until
-  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) named `dns.zpr`,
+  ZIPLINE's dns container runs CoreDNS behind a `ph zode` named `dns.zpr`,
   with `--initial-link node.zpr.org@<relay dock address>`, a server-generated
   link certificate and RSA key, and its fixed address `fd5a:5052:90de::2`. It
   links to the relay only; no rule gives it a direct link.
@@ -1388,11 +1386,11 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
   request times out after `BOOTSTRAP_REQUEST_TIMEOUT` (5 s) and it closes zb's
   link. SIGCONT follows at once, so the relay's own session never drops.
 
-### On real machines (org-zpr/zipline#255)
+### On real machines (org-zpr/zipline#255, #256)
 
-The demo has run on real machines against a ZIPLINE dev server: relay and
-DNS Zodes in containers, Ubuntu and Windows Zodes on adapter 2.0.4, and the
-visa service at `65fe475` (`v0.22.0-zodes.9`).
+The demo first ran on real machines (2026-11-17) against a ZIPLINE dev
+server: relay and DNS Zodes in containers, Ubuntu and Windows Zodes on
+adapter 2.0.4, and the visa service at `65fe475` (`v0.22.0-zodes.9`).
 - **The runner and the recordings.** The runner is zipline
   `test/manual/zodes-demo/demo.sh`, and the recordings are in its `runs/`.
 - **Linux-Linux passed every step:** the direct link, a 256 MiB transfer that
@@ -1402,15 +1400,39 @@ visa service at `65fe475` (`v0.22.0-zodes.9`).
   downloaded from a Windows server. After the recovery restart, the direct
   link was Active on both ends again, but the restarted Linux client's DNS
   lookups got no answer (#271), so the last download failed. The cause
-  was an expired visa, and the fix is in core (see "Visa expiry at match
-  time (#271)" below) but not yet in a ZIPLINE build.
+  was an expired visa, fixed in core (see "Visa expiry at match
+  time (#271)" below) and in ZIPLINE from package 2.0.5.
 - **Windows was not tested as the client.** It couldn't reach the DNS Zode
   (#272): `ph` applied its ZPR address as a /64. The code fix (a /32, see
-  SYSTEM_OVERVIEW.md, *Design decisions*) is in core but not yet in a
-  ZIPLINE build, so Windows-client DNS on real machines is still unverified.
-  The #271 retest is that check.
+  SYSTEM_OVERVIEW.md, *Design decisions*) is in ZIPLINE from package 2.0.5.
 - **macOS has not been run.** The Mac was unavailable; the Linux-macOS and
   macOS-Windows pairs will be tested by hand later.
+- **The #271 and #272 retest** (2026-11-18, package 2.0.5, core `9f67284`).
+  Linux-Windows passed every step, step 5 included. Windows as the client
+  resolved its server by name and passed every step on the second run; the
+  first run's step 5 download got a TCP reset
+  ([#277](https://github.com/org-zpr/zl-zipline/issues/277), intermittent).
+- **`ph zode` everywhere**
+  ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)).
+  Package 2.0.6 pins core `13d27db` (the zl-zipline#234 merge, `ph zode`
+  only), the visa service at `65fe475`, the compiler at `3e16a94` and
+  CoreDNS at `39d49be`. The Linux and Windows Zodes, the relay container and
+  the DNS container all run `ph zode` (2026-11-19, ubuvm1, ubuvm2 and
+  Windows). On a fresh network, a Windows Zode reached `vs.zpr` and the DNS
+  Zode with no /128 visa-service route, only the on-link `fd5a:5052::/32`;
+  its address had PrefixLength 32, and it resolved names by DNS
+  ([checks](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-checks)). The demo results:
+  - Linux-Linux: 17/17 steps ([L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-L)).
+  - Linux client, Windows server: 16/17 on the first run
+    ([L-W-1](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-1)). The step 3 direct download got a TCP reset with no
+    restart before it, so
+    [#277](https://github.com/org-zpr/zl-zipline/issues/277) covers more than
+    a restart: TCP to or from a Windows Zode can be reset mid-transfer. The
+    re-run passed 17/17 ([L-W-2](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-2)).
+  - Windows client, Linux server, by DNS name: 17/17 ([W-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-W-L)).
+
+  #277 is open. It has reset 2 of the Windows runs: 2026-11-18 W-L-1
+  (step 5, after a restart) and 2026-11-19 L-W-1 (step 3, no restart).
 
 What the real machines showed beyond the netns test:
 
