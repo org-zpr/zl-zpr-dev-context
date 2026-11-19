@@ -737,7 +737,10 @@ starts.** The visa service bounds a user flow's visas by the login's expiry
 and forgets a visa when it expires, so it never revokes an expired one: the
 Zodes must stop it themselves. Each forwarding entry carries the bound
 visa's expiry and the fast path checks it per packet, so access ends at the
-login's expiry on flows that were already open too (operator, gate g184;
+login's expiry on flows that were already open too, as exactly as each
+Zode's clock allows: the clock is read once per fast-path wakeup, and a
+skewed clock moves the cutoff
+([#281](https://github.com/org-zpr/zl-zipline/issues/281)) (operator, gate g184;
 [#274](https://github.com/org-zpr/zl-zipline/issues/274)). The sweep that
 frees expired visas reclaims memory and enforces nothing. Rationale and the
 rejected options: ZODE_LINKS.md, "Design decisions" (pd plan p53).
@@ -784,8 +787,8 @@ not read the RFCs as a description of current guarantees.
   new visa and one whose rebind failed stops at the old visa's expiry. A
   Zode never matches a new flow to an expired visa (#271), and a bind or
   a J11 commit refuses one, including a visa just fetched by ID. A sweep
-  on the link keep-alive (at most every 10 s) then frees expired visas: at
-  the ingress at once, withdrawing the local streams so the next packet
+  on the link keep-alive (10 to about 13 s apart) then frees expired
+  visas: at the ingress on its first run after the expiry, withdrawing the local streams so the next packet
   asks for a new visa; at a hop a stream enters over a Zode link, only
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is a bound on
