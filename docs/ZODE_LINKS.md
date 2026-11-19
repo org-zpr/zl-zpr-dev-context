@@ -1021,13 +1021,16 @@ new `ping` reused the bound stream). Now:
   PFT entries. A visa with no stream entering over a Zode link (this Zode
   is the ingress, or the visa has no stream left) is freed by the first
   sweep after its expiry, and its local streams are withdrawn, so the
-  actor's next packet binds afresh, under a new visa or not at all.
+  actor's next packet binds afresh: under another live visa that covers it, a new one, or
+  none.
 - **A transit hop keeps the stream-ID slot for a grace** (D4). A visa with
   a stream entering over a Zode link is freed only
   `STREAM_ID_REUSE_GRACE` (60 s) after its expiry, so its stream ID is not
   handed to a new stream while an upstream Zode whose clock lags may still
-  send on it. The grace is a bound on clock skew between Zodes (g184
-  q6). Every hop compares an absolute instant with its own clock, so a
+  send on it. The grace is the clock skew between Zodes it is designed to
+  tolerate, not a bound the code enforces: the sweep checks only this
+  Zode's clock, so an upstream lagging by more than 60 s could still send
+  on a reused ID (g184 q6). Every hop compares an absolute instant with its own clock, so a
   Zode whose clock is off stops a stream early or late; sending a TTL
   instead, or detecting skew, is
   [#281](https://github.com/org-zpr/zl-zipline/issues/281) (g184 q11).

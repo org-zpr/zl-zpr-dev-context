@@ -494,7 +494,8 @@ Zode ejects that visa and looks again, and a `Stream ID Request`, a bind or
 a J11 rebind commit for an expired visa is refused, including a visa
 fetched by ID. A sweep on the link keep-alive, at least 10 s apart, then
 frees expired visas and, at the ingress, withdraws their streams from the
-Zode's actor, so further traffic looks new and triggers a fresh request.
+Zode's actor, so further traffic looks new and is matched afresh: it
+triggers a fresh request unless another live visa covers it.
 (A joiner's check of its bootstrap hand-off, J4, is separate and older.)
 Two differences remain. A hop whose stream enters over a Zode link holds
 the expired visa, and its stream ID, for a 60 s grace before freeing it,

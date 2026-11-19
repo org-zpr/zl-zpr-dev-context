@@ -738,9 +738,10 @@ and forgets a visa when it expires, so it never revokes an expired one: the
 Zodes must stop it themselves. Each forwarding entry carries the bound
 visa's expiry and the fast path checks it per packet, so access ends at the
 visa's expiry on flows that were already open too, which the login's
-expiry bounds from above, as exactly as each
-Zode's clock allows: the clock is read once per fast-path wakeup, and a
-skewed clock moves the cutoff
+expiry bounds from above. A packet is dropped once the fast-path worker's
+clock sample reaches the expiry: the clock is read once per wakeup, so a
+batch that began just before the expiry still passes, and a skewed clock
+moves the cutoff
 ([#281](https://github.com/org-zpr/zl-zipline/issues/281)) (operator, gate g184;
 [#274](https://github.com/org-zpr/zl-zipline/issues/274)). The sweep that
 frees expired visas reclaims memory and enforces nothing. Rationale and the
@@ -790,7 +791,8 @@ not read the RFCs as a description of current guarantees.
   a J11 commit refuses one, including a visa just fetched by ID. A sweep
   on the link keep-alive (at least 10 s apart) then frees expired
   visas: at the ingress on its first run after the expiry, withdrawing the local streams so the next packet
-  asks for a new visa; at a hop a stream enters over a Zode link, only
+  is matched afresh (a new visa request, unless another live visa covers
+  it); at a hop a stream enters over a Zode link, only
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is a bound on
   clock skew between Zodes: expiry is an absolute instant compared with
