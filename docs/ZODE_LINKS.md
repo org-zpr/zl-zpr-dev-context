@@ -705,9 +705,11 @@ one TUN. `vs.zpr` has no adapter of its own.
   host must bind too. `ph` does not deprecate `vs.zpr` (`preferred_lft 0`).
 - **Startup order.** The TUN carries both addresses, then `ph zode` starts,
   then valkey and the visa service. The visa service's VS-API and admin
-  listeners bind `vs_addr`. If `vs_addr` is not local, the listener task logs
-  an error and ends, but the process keeps running, so `vs.zpr` must already be
-  on the TUN. The relay's VS-API connection retries until the visa service
+  listeners bind `vs_addr`, so `vs.zpr` must already be on the TUN. If
+  `vs_addr` is not local, the `v0.22.0-zodes.9` release logs an error, ends
+  the listener task and keeps running; since visaservice#70 (1037ac7,
+  [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266)) on its
+  `feature/zodes`, `vs` exits with status 1 instead. The relay's VS-API connection retries until the visa service
   listens (`run_with_reconnect`). In netns, `ph` applies both addresses and the
   harness waits for `vs.zpr` on `tun0` before it starts the visa service.
   ZIPLINE's relay container (`zipline-relay-<id>`, [org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252))
@@ -967,8 +969,9 @@ behaviour only adapter docks used. It is compiled and unit tested, and nothing
 calls it in v1. Each kept item says so in a comment.
 
 - **Kept:** the pool fill from the visa service's `Configure([AAA_PREFIX])`
-  (`vss_worker::process_configuration`, still live, because the visa service
-  still sends the prefix); the Hello AAA TLV, which no code sends and a Zode
+  (`vss_worker::process_configuration`, live code, not test-only, because the
+  visa service still sends the prefix; binding and link cleanup also still
+  check for an AAA address, but find none, since nothing allocates one); the Hello AAA TLV, which no code sends and a Zode
   still refuses on a Zode link; `allocate_aaa` and `install_aaa`; giving the
   address back to the pool on link cleanup; and the AAA arms of
   `find_egress_link` and `bind_actor_address`. Their unit tests are the only

@@ -699,10 +699,13 @@ whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
 unmaintained, so no port is planned. Run such sets with `--test unit,netns`
 (see "Cutting a Zodes set" below).
 
-Last recorded `netns` run for #234 (zpr-dev, at zl-zpr-core#136, the
-core-node-dock PR): 13 scripts passed, `zode-reroute-test.sh` with output
-byte-identical to core 6e7baba, and the 7 classic scripts were skipped as
-absent from the checkout.
+Last recorded `netns` run for #234 (zpr-dev `--test netns`, recorded in
+zl-zpr-core#136, the core-node-dock PR, at core 3c99287): 13 scripts passed,
+the 7 classic scripts were skipped as absent from the checkout, and
+`zode-ping-test.sh` failed on the release `ph` (its out-of-order counter is
+debug-only; see `PH_DEBUG_BUILD` below). After that fix it passed in
+standalone reruns on a release and a debug `ph`, not in another full tier
+run. `zode-reroute-test.sh`, which passed, is unchanged since core 6e7baba.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
