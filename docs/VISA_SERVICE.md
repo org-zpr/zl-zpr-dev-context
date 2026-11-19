@@ -668,9 +668,12 @@ and `vs.zpr`, and the relay grants the visa service's visas only for
 `vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
 never falls back to a source the kernel picks.
 
-**`vs_addr` must be local before `vs` starts.** If it is not, the VS-API and
-admin listener tasks log an error and end, and the process keeps running
-without them (`vsapi_worker::launch`). On a relay Zode that hosts the visa
+**`vs_addr` must be local before `vs` starts.** If it is not, the
+`v0.22.0-zodes.9` release logs an error, ends the VS-API and admin listener
+tasks and keeps running without them (`vsapi_worker::launch`); since
+visaservice#70 (1037ac7,
+[zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266)) on its
+`feature/zodes`, `vs` exits with status 1 instead. On a relay Zode that hosts the visa
 service, start order is therefore: the TUN with both addresses, then `ph zode`,
 then valkey and `vs` (ZODE_LINKS.md, "The relay hosts the visa service
 (#229)").

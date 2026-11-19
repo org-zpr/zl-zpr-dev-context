@@ -965,8 +965,9 @@ Decisions of pd plan p51
 
 **AAA kept, unused** (operator, zodes master plan §5.4; gate g167 q8). The
 Actor Authentication Address code stays for a future need, but without the
-behaviour only adapter docks used. It is compiled and unit tested, and nothing
-calls it in v1. Each kept item says so in a comment.
+behaviour only adapter docks used. It is compiled and unit tested. In v1 the
+pool still fills from the live `AAA_PREFIX` push, but nothing allocates or
+installs an AAA address. Each kept item says so in a comment.
 
 - **Kept:** the pool fill from the visa service's `Configure([AAA_PREFIX])`
   (`vss_worker::process_configuration`, live code, not test-only, because the
@@ -974,8 +975,8 @@ calls it in v1. Each kept item says so in a comment.
   check for an AAA address, but find none, since nothing allocates one); the Hello AAA TLV, which no code sends and a Zode
   still refuses on a Zode link; `allocate_aaa` and `install_aaa`; giving the
   address back to the pool on link cleanup; and the AAA arms of
-  `find_egress_link` and `bind_actor_address`. Their unit tests are the only
-  callers: `vss_worker` `test_configure_aaa_prefix_fills_the_pool_and_refuses_a_bad_one`,
+  `find_egress_link` and `bind_actor_address`. Allocation and installation
+  have no production caller; the tests that exercise the kept code are `vss_worker` `test_configure_aaa_prefix_fills_the_pool_and_refuses_a_bad_one`,
   `link_state` `install_aaa_adds_an_authentication_address` and
   `allocated_aaa_is_given_back_by_link_cleanup`, and `mgmt::handlers`
   `test_hello_response_aaa_round_trips`.
