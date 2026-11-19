@@ -199,6 +199,23 @@ NXDOMAIN within roughly `ttl + negative_ttl`; a service that moves resolves to
 its new address on the same scale. Keep TTLs short — ZPR addresses are
 recycled across reconnects.
 
+"Goes away" means the visa service removed the provider's actor, and with it
+the services the actor provides. The plugin learns this only by asking again
+on a cache miss; the visa service pushes nothing to CoreDNS. For a Zode
+([zl-zipline#284](https://github.com/org-zpr/zl-zipline/issues/284)):
+
+- **A graceful stop** (SIGINT, SIGTERM, a Windows console event) deregisters
+  the Zode before its links go down, so the name stops resolving within one
+  cache period.
+- **A crash or a lost Zode** is removed once every link of it has been down for
+  `ZODE_DEPARTURE_GRACE` (10 s), so detection (9-12 s), the grace and one cache
+  period add up. That is about 52 s with the demo's `ttl 30`.
+- `ph` treats SIGHUP as a crash. zl-zpr-demo's `demo-stop-ph` kills ph's tmux
+  session, so `test-dns.sh` section 3 exercises the crash path. It saw
+  NXDOMAIN 25 s after the stop, against its 60 s deadline.
+- **Not removed:** a Zode that left while the visa service was down. A restart
+  schedules no departure checks (ZODE_LINKS.md, "Zode departure (#284)").
+
 ## Security properties worth preserving
 
 - **The `resolve` key asks about one name and gets one address.** It reaches
@@ -332,6 +349,8 @@ Not built, in rough order of likely demand:
 - **SRV records** from `service_endpoints` — cheap, no consumer yet.
 - **Push invalidation** on actor departure, and any bulk/zone-transfer mode.
   Short TTLs are the deliberate ceiling; revisit if 30 s staleness bites.
+  Departure itself is built: a departed Zode's actor is removed (#284; see
+  "Query semantics").
 - **Multi-node placement** of the resolver — blocked on the data plane.
 - **Pushing rejected claims to the naming authority.** Today conflicts are
   only visible to a poller via `hostname_conflicts`.
