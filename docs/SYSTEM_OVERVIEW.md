@@ -292,7 +292,8 @@ where `n` is one more than the network's count of addresses handed out so far
 and an address is unique within its network, so a deleted Zode's address is
 never handed to another machine: DNS answers and open connections elsewhere may
 still name it. `zipline register` writes the address into the Zode's
-`zipline.toml`, and `ph zode --zpr-addr` claims it. The visa service honours
+`zipline.toml`, and `ph zode --zpr-addr` claims it (zipline runs `ph node` until
+[org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256) switches it). The visa service honours
 the claim only once the network's policy pins the address to the Zode's CN as
 the node's `zpr_address`, and only if it passes the static-address checks
 above. ZIPLINE's generated policy writes that pin for every registered Zode

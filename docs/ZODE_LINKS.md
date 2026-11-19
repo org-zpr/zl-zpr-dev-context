@@ -383,7 +383,8 @@ F5. **No Zode-to-Zode teardown messages.** On Zode links, `Stream ID Withdrawal`
     (ZDP type 5) and `Unbind Egress Stream Indication` (type 13) are neither sent
     nor accepted. Zodes don't use them with each other: the existing NodeToNode
     handlers and the `node::unbind_stream` send path are **removed**, not fixed.
-    The message types stay for docking sessions.
+    The message types stay for a Zode's internal links to its own adapter
+    and local actor.
 F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
     finds no visa and sends a `visaRequest`. The visa service plans a route that
     avoids the dead link, usually through the relay. No other recovery signal
@@ -430,9 +431,9 @@ the Hello, which F1 forbids. #250 replaces its link-layer rework.
 
 **Bootstrap visas are requested on demand, not stocked ahead of time.** The relay
 already has a VS-API session, so it asks for a joining Zode's bootstrap visas
-when that Zode's initial link comes up. This is the same idea as a node acting
-for an adapter that docks with it. The visa service no longer keeps bootstrap visas
-for offline Zodes in topology.
+when that Zode's initial link comes up. This is the same idea as a node that
+once acted for an adapter docked with it (before #234). The visa service no
+longer keeps bootstrap visas for offline Zodes in topology.
 
 The steps below are the approved design. Where the code does something more
 specific, or something different, a *Built:* note says so. "Implementation
@@ -675,12 +676,12 @@ gate g89) answered them, along with the choices the code forced:
 ## The relay hosts the visa service (#229)
 
 The relay Zode and the visa service share one host, one network namespace and
-one TUN. There is no `ph adapter` for `vs.zpr`.
+one TUN. `vs.zpr` has no adapter of its own.
 
 - **One TUN, two addresses.** The relay's `zpr_addr` lists its own address
   first and `vs.zpr` (`fd5a:5052::1`) after it. `zpr_addr[0]` stays the
   relay's own address everywhere: its VS-API session and the source of that
-  session, its VSS listener, and link ownership. `ph node` applies every
+  session, its VSS listener, and link ownership. `ph zode` applies every
   `zpr_addr` entry to the TUN at startup if it is missing
   (`Assembly::ensure_local_zpr_addrs_on_tun`), and it never removes them at
   exit.
@@ -699,10 +700,10 @@ one TUN. There is no `ph adapter` for `vs.zpr`.
   one interface, the kernel picks `vs.zpr` as the source of an unbound
   connection to `vs.zpr` (RFC 6724 rule 1), and the address added last for
   other destinations. So the relay's VS-API connection binds `zpr_addr[0]`
-  (`VSConn`, every `ph node`, gate g117 q3), the visa service's VSS and proxied
+  (`VSConn`, every Zode, gate g117 q3), the visa service's VSS and proxied
   JWKS connections bind `vs_addr`, and a future ZPRnet client on the relay
   host must bind too. `ph` does not deprecate `vs.zpr` (`preferred_lft 0`).
-- **Startup order.** The TUN carries both addresses, then `ph node` starts,
+- **Startup order.** The TUN carries both addresses, then `ph zode` starts,
   then valkey and the visa service. The visa service's VS-API and admin
   listeners bind `vs_addr`. If `vs_addr` is not local, the listener task logs
   an error and ends, but the process keeps running, so `vs.zpr` must already be
@@ -711,21 +712,22 @@ one TUN. There is no `ph adapter` for `vs.zpr`.
   harness waits for `vs.zpr` on `tun0` before it starts the visa service.
   ZIPLINE's relay container (`zipline-relay-<id>`, [org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252))
   pre-creates a persistent TUN with both addresses, so restarting `ph` never
-  takes `vs.zpr` away from a running visa service. Then it starts `ph node
+  takes `vs.zpr` away from a running visa service. Then it starts `ph zode
   --relay true --forwarding true`, valkey (127.0.0.1 only) and, once valkey
   answers PING, the visa service. If the visa service is not listening on
   `vs.zpr` (VS-API 5002, admin 8182) within 30 s, the container exits and
   Docker restarts it: the interim answer to
   [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266).
-- **A relay refuses an adapter-docked visa service.** On a relay, an adapter
-  whose verified certificate carries the visa service's DN is closed at keying,
-  and no special-peer name is assigned (gate g117 q4). Nodes that are not relays
-  (the `one-node-*` layouts) still accept it until #234.
+- **No Zode accepts an adapter dock, so neither does the relay.** Dispatch
+  refuses and counts any first handshake that is not a Zode
+  handshake, so a relay or a Zode accepts Zode links only. Gate g117 q4 first
+  closed the visa service's own adapter dock on a relay; zl-zipline#234 removed
+  adapter docks everywhere.
 - **The relay's own VS-API visas.** The self-granted pair (IDs 1 and 2), and
   the J5a and J9 visas that supersede it, match no packet, because the session
   runs over `lo`. They stay (gate g117 q5): an insert supersedes, there is no
   live stream to rebind, and the J10 relay path that #252 stabilised stays
-  untouched. Removing them waits for #234.
+  untouched.
 - **The visa service needs no change.** It authenticates itself at startup.
   With no adapter, the first node to authenticate becomes the node the
   `vs.zpr` actor docks on (VISA_SERVICE.md), and that is always the relay.
@@ -893,10 +895,11 @@ on the TUN yet, the dial fails and `VSConn` retries; there is no fallback to an
 unbound connect. Rejected: binding only on a relay, a special case that leaves
 joiners with a kernel-chosen source.
 
-**The adapter-docked visa service is retired on a relay** (q4). A relay closes
+**The adapter-docked visa service is retired on a relay** (q4). A relay closed
 a dock from the visa service's adapter, and every Zode netns script runs the
 co-located relay, with J7 tested by stopping the visa service (SIGSTOP and
-SIGCONT). The adapter-docked `one-node-*` scripts stay until #234.
+SIGCONT). zl-zipline#234 then removed adapter docks and the adapter-docked
+`one-node-*` scripts: no Zode accepts a dock now.
 
 **The relay's self-granted VS-API pair stays** (q5). Rejected: dropping it on a
 relay, which would be half done, because the visa service would still mint J5a
@@ -940,17 +943,39 @@ binding:
 - **No periodic sweep.** `VisaTable::handle_expirations` stays test-only. At
   each Zode, an expired visa with live streams keeps carrying them until a
   new flow matches it there, or that Zode loses a link they cross (F3). The
-  visa service cannot revoke it: it has forgotten the visa. Whether
-  to sweep, and whether a sweep notifies, is
+  visa service cannot revoke it: it has forgotten the visa. Checking
+  expiry on every use of a visa, so that bound streams do not outlive it,
+  is planned Zodes epic work:
   [#274](https://github.com/org-zpr/zl-zipline/issues/274).
 - **A rebind superseded mid-flight is no failure** (gate q5): see J11.
 
-Rejected: a periodic sweep in this fix (deferred to #274); ejecting an
+Rejected: a periodic sweep in this fix (#274 now plans an expiry check on
+every use of a visa instead); ejecting an
 expired visa at a transit hop's by-ID request (stream ID reuse, above);
 fetching an expired visa again by ID (the visa service no longer has it);
 and revoking a visa locally when a next hop refuses it with "visa N not
 found" (that is [#257](https://github.com/org-zpr/zl-zipline/issues/257)'s
 question, and the match-time check already ends the expired case).
+
+Decisions of pd plan p51
+([#234](https://github.com/org-zpr/zl-zipline/issues/234)):
+
+**AAA kept, unused** (operator, zodes master plan §5.4; gate g167 q8). The
+Actor Authentication Address code stays for a future need, but without the
+behaviour only adapter docks used. It is compiled and unit tested, and nothing
+calls it in v1. Each kept item says so in a comment.
+
+- **Kept:** the pool fill from the visa service's `Configure([AAA_PREFIX])`
+  (`vss_worker::process_configuration`, still live, because the visa service
+  still sends the prefix); the Hello AAA TLV, which no code sends and a Zode
+  still refuses on a Zode link; `allocate_aaa` and `install_aaa`; giving the
+  address back to the pool on link cleanup; and the AAA arms of
+  `find_egress_link` and `bind_actor_address`.
+- **Dropped:** the adapter-dock Hello policy: refusing a dock when the pool
+  is empty, and "no ordinary link without an AAA".
+
+Rejected: deleting AAA outright (a future need would rebuild it), and keeping
+the dock policy (dead behaviour with no link that could reach it).
 
 ## Implementation status
 
@@ -959,6 +984,11 @@ acceptance, #106 lifecycle, and the reporting PR), with the visa-service half in
 zl-zpr-visaservice#66 and the schema in zl-zpr-vsapi#5 and zl-zpr-common#14
 (tag `zl-v0.32.0-zodes.3`). Rules 11a and 16 and the relay join came with #252;
 see "Relay join (#252)" below.
+
+Adapter mode is removed (#234). `ph zode` is the only `ph` subcommand; `ph node`
+and `ph adapter` are gone. A Zode is either a relay or dials its relay over an
+initial link, and it accepts Zode links only: dispatch refuses any other first
+handshake. The visa service runs behind the relay, never as a docked adapter.
 
 ### Where the code lives
 
@@ -973,7 +1003,7 @@ see "Relay join (#252)" below.
 | Rule 14 (`end_agrees`), rule 13a (failed pairs, `record_failures`, `clear_failed_pairs_for`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
 | The re-proposal after a `down` report (rules 10, 13 and 13a; zl-zipline#268, visaservice#71): newly-down detection and the pending marks (`LinkStateTable::newly_down`, `mark_repropose`, `take_repropose`), `TopologyMgr::record_link_states`; scheduling and the delayed send (`schedule_link_repropose`, `repropose_link_after_down`) | `zl-zpr-visaservice/vs/src/link_state.rs`, `vs/src/topology_mgr.rs`, `vs/src/vsapi_worker.rs` |
 | netns test: a relay, a Zode with an initial link to it, and a Zode outside the relay's topology; since #252 also the join, restart and rejoin (see "Relay join (#252)"); since #229 the relay hosts the visa service, with §7 check 1 asserted at the end of scenario 1 | `zl-zpr-core/integration-test/zode-link-test.sh`, `integration-test/lib/zode_funcs.sh` |
-| The relay hosts the visa service (#229): the relay's `zpr_addr` rules (`check_node_zpr_addrs`); the VS-API connection binds `zpr_addr[0]` (`VSConn::new`, `connect_from`); a relay refuses the visa service's adapter at keying (`process_keying_done`) | `zl-zpr-core/adapter/ph/src/config.rs`, `libnode2/src/vsconn.rs`, `adapter/ph/src/link_state.rs` |
+| The relay hosts the visa service (#229): the relay's `zpr_addr` rules (`check_node_zpr_addrs`); the VS-API connection binds `zpr_addr[0]` (`VSConn::new`, `connect_from`); any first handshake that is not a Zode handshake is refused (since #234) | `zl-zpr-core/adapter/ph/src/config.rs`, `libnode2/src/vsconn.rs`, `adapter/ph/src/mgmt/dispatch.rs` |
 | netns tests (#254): two joiners at once; zb - relay - zc with the relay's forwarding on and off; a direct link that drops and re-routes through the relay; a Zode in the policy with a certificate from another CA | `zl-zpr-core/integration-test/zode-join-test.sh`, `zode-line-test.sh`, `zode-reroute-test.sh`, `zode-wrong-ca-test.sh` |
 
 Everything scoped to one connection hangs off that connection's peer-table
@@ -1013,9 +1043,9 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
 ### Configuration
 
 - **Initial link.** `[node.initial_link]` with `addr = "IP:port"` (the relay's
-  substrate address) and `cn = "<relay CN>"`, or `ph node --initial-link
+  substrate address) and `cn = "<relay CN>"`, or `ph zode --initial-link
   CN@IP:PORT`, which overrides the file. At most one. Validation rejects an empty
-  CN, an unspecified IP and port 0. Node only. On a ZIPLINE machine,
+  CN, an unspecified IP and port 0. On a ZIPLINE machine,
   `zipline register` writes the initial link: the server's poll answer carries
   the relay's CN and IPv4 substrate address, and `zipline service-run` passes
   them as `--initial-link <relay_cn>@<relay_addr>`, beside the Zode
@@ -1024,15 +1054,16 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
   `--advertised-substrate-addr` on an endpoint
   ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
   SECURITY_MODEL.md, *Design decisions*).
-- **Relay.** `relay = true` in `[node]`, or `ph node --relay true`. Default off.
-  A relay has no initial link: setting both is a config error.
+- **Relay.** `relay = true` in `[node]`, or `ph zode --relay true`. Default off.
+- **Exactly one of the two.** A Zode is a relay or has an initial link, never
+  both and never neither: `Config::check_valid` refuses both cases.
 - **The relay's topology on ZIPLINE.** Rule 4 needs every joiner's CN in the
   relay's topology before the joiner connects. ZIPLINE's generated policy
   declares a link from the relay to every registered Zode, so the push that
   enrols a machine already holds its relay link. Deleting the machine removes
   that link, and the relay refuses its still-valid certificate from then on.
   The network's own `dns.zpr` Zode is in that topology too ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
-  ZIPLINE's dns container runs CoreDNS behind a `ph node` named `dns.zpr`,
+  ZIPLINE's dns container runs CoreDNS behind a `ph zode` named `dns.zpr`,
   with `--initial-link node.zpr.org@<relay dock address>`, a server-generated
   link certificate and RSA key, and its fixed address `fd5a:5052:90de::2`. It
   links to the relay only; no rule gives it a direct link.
@@ -1050,11 +1081,13 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
 
 - **Handshake marker.** A dialing Zode puts `ZODE1` in the plaintext payload of
   the first Noise XX message. The node it reaches reads the marker before any
-  link exists, so it creates a Zode link instead of an adapter dock. Noise mixes
+  link exists, and creates a Zode link. A first message without it is refused
+  and counted: there are no adapter docks (#234). Noise mixes
   the payload into the handshake hash, so a marker changed in transit breaks the
   handshake. See [ZDP.md](ZDP.md), "Zode links".
 - **Hello.** The dialer sends the HelloRequest. The answerer replies with none
-  of the adapter-dock TLVs (`AAA`, `OIDC_IDP`, `VS_BOOTSTRAP_LINK`), and a Zode
+  of the old adapter-dock TLVs (`AAA`, `OIDC_IDP`, `VS_BOOTSTRAP_LINK`; no code
+  sends them in v1), and a Zode
   HelloResponse that carries any of them closes the link.
 - **`setTopology`.** A `Link` without `zprAddr` or with an empty `peerCn` is
   logged and skipped, and the rest are applied. The call still answers `ok`.
@@ -1124,7 +1157,7 @@ relay with its `forwarding` on and off (F1, F2, F8).
 
 | Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
 |---|---|
-| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; adapter matching (`actor_auth`, AAA) on non-Zode links only | `assembly.rs::find_egress_link` |
+| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; address matching on the internal adapter and local-actor links only (`actor_auth`, and the kept, unused AAA arm) | `assembly.rs::find_egress_link` |
 | F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
 | F2 guards, in order: no visa or no egress, the previous hop (#253: `check_prev_hop`, F1's `find_zode_egress_link` for the visa's `prev_hop` must give the ingress link; `Visa::prev_hop`), the loop guard (egress == ingress is refused), a forward-only visa from or to an adapter, and a refusal when transaction IDs run out. Every refused `Stream ID Request` is counted once, as `StreamIdRequestRejected`, in `bind_reject` | `mgmt/node.rs::prepare_next_hop_bind` |
 | F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of the bootstrap visas carried over an initial link is #252's `bootstrap_handoff::revoke_for_lost_link` | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |
@@ -1319,8 +1352,8 @@ to a Zode at its new address need peers to receive the new `Link.peer`, which
 the visa service sends with the topology it re-proposes on that Zode's session
 start (#255). Windows and macOS were checked by hand: a Zode with a wildcard
 `self_addr` and no advertised address starts, joins through the relay and
-reports its real local address (`windows-node-test.md` and
-`macos-node-test.md`, section 6). Network-change runs on those two hosts are
+reports its real local address (`windows-zode-test.md` and
+`macos-zode-test.md`, section 6). Network-change runs on those two hosts are
 [zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263).
 
 ### The relay hosts the visa service (#229)
@@ -1330,7 +1363,7 @@ service `v0.22.0-zodes.8`). The design is "The relay hosts the visa service
 (#229)" above; the code is in "Where the code lives".
 
 - The netns Zode layout (`lib/zode_funcs.sh`) has no `zpr-vs` namespace and no
-  visa-service adapter. The relay's `ph node` gets `--zpr-addr` for its own
+  visa-service adapter. The relay's `ph zode` gets `--zpr-addr` for its own
   address and then for `vs.zpr`, and applies both to `tun0` itself. The
   harness waits for `vs.zpr` on `tun0`, then starts valkey and the visa
   service in the relay's namespace, then waits for the relay to register.
@@ -1412,7 +1445,8 @@ show it because no visa expired during a test.
 **The fix**, as decided above: `match_traffic` ejects an expired visa and
 looks again, and the ejected visa's adapter streams are withdrawn;
 `request_stream` refuses a `Stream ID Request` for an expired visa it
-holds, without ejecting or fetching it. There is no sweep
+holds, without ejecting or fetching it. There is no sweep; checking expiry
+on every use of a visa is planned
 ([#274](https://github.com/org-zpr/zl-zipline/issues/274)). The same PR made
 a rebind superseded mid-flight an INFO line rather than a `RebindFailed`
 (J11, gate q5). On the real hosts that misleading warning had pointed the
@@ -1458,7 +1492,8 @@ window.
 - **#273** deleting a service hosted on a Zode makes the visa service
   disconnect that Zode ("no longer approved by policy"); it rejoins about
   9 s later.
-- **#274** a periodic visa expiry sweep. A Zode ejects an expired visa only
+- **#274** (in the Zodes epic, #216) enforce visa expiry on every use of a
+  visa, because bound streams outlive expiry. A Zode ejects an expired visa only
   when a new flow matches it (#271). Leaving aside an R16 reset, which
   drops every visa outside the Zode's two VS-API flows, an idle expired
   visa stays in the table until then: F3's binding-based cleanup on a link loss does not
@@ -1470,9 +1505,6 @@ window.
   (see "Visa expiry at match time (#271)").
 - **org-zpr/zipline#278** the generated policy allows DNS on UDP 53 only, so
   a resolver's TCP fallback is denied.
-- **#234** retiring adapters: the `one-node-*` scripts still dock the visa
-  service as an adapter on a node that is not a relay, and the relay's unused
-  self-granted VS-API pair (#229) goes then.
 - **#266** (visa service): the visa service should exit
   when a listener cannot bind `vs_addr`. Today it keeps running without
   VS-API, which is why the relay's startup order matters.

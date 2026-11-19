@@ -236,7 +236,8 @@ refused with `invalidOperation`, logged with the caller CN and target
 address, and leaves all state unchanged. Without this, one subverted node
 could disconnect any actor or node in the ZPRnet, breaking the Case 2
 containment ("a compromised component can deny only the services it
-provides").
+provides"). The adapter and AAA arms are the visa service's and stay; since
+zl-zipline#234 no adapter docks on a Zode.
 
 **The SS (bootstrap-signature) arm.** `reauthorize` also accepts a
 self-signed blob, so a device authority is re-proved the same way install-driven
@@ -550,7 +551,7 @@ that policy does not list as transit-capable (`Policy.transitNodes`). That check
 is built ([zipline#255](https://github.com/org-zpr/zl-zipline/issues/255),
 *Implementation status*, below), and it fails closed: an unset or empty list
 means no node may carry other nodes' traffic. The node's check is its `forwarding`
-setting (`[node] forwarding`, `ph node --forwarding`, default off). With it off,
+setting (`[node] forwarding`, `ph zode --forwarding`, default off). With it off,
 the node refuses every `forwardOnly` visa. The setting cannot be the only
 guard, because a subverted node can turn it on; that is why the visa-service
 half is required. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
@@ -641,9 +642,8 @@ node join policy `vsdock` (its TODO "Not all nodes are VS docks"), but the visa
 service only parses that flag and never acts on it. A ZIPLINE compile test pins
 all of this against the compiled policy with zpdump. The node role also enables
 things that aren't services: node authentication, a self-renewing `reauthorize`
-(zl-zipline#232), a router vertex (never transit unless listed) and adapter
-docking. Docking still needs a CA-signed link certificate, and the docked actor
-authenticates itself.
+(zl-zipline#232) and a router vertex (never transit unless listed). It also
+enabled adapter docking until zl-zipline#234; no Zode accepts a dock now.
 ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253))
 
 **A direct link is proposed only between Zodes that an `allow` rule selects.**
@@ -793,6 +793,9 @@ not read the RFCs as a description of current guarantees.
   passes it revokes them — adapters through the same batched
   `revokeAuthentication`, nodes by disconnect. This is what makes the
   identity-lifetime rule above an enforced bound rather than a stored value.
+  Since zl-zipline#234 no adapter docks on a Zode, so a Zode acknowledges a
+  `revokeAuthentication` without acting on it (`process_revoke_auth`), and
+  it acts on a `requestAuthentication` only for its own actor.
 - **Session-bound renewal** — the `reauthorize` bindings in *Silent
   re-authentication* above are implemented and unit-tested per row
   (zipline#43).
@@ -833,15 +836,14 @@ not read the RFCs as a description of current guarantees.
     rules 1 and 13a).
   - **What it exposes.** Anyone on the substrate can now reach `ph`'s
     substrate listener, as on Linux and macOS, where nothing filters it.
-    Two handshake paths answer there:
-    - the Zode link responder;
-    - with the pinned core, the legacy adapter-docking responder
-      (`mgmt/dispatch.rs` sends an unmarked handshake to `start_tether`).
-  - **Why that is acceptable for Zode links.** A Zode link survives keying
-    only with a certificate signed by the network's CA whose CN is in the
-    Zode's current topology, and only from the link's owner (rule 3). The
-    docking path keeps its own checks until #234 removes adapter mode.
-    Everything else on the machine stays closed.
+    Only the Zode link responder answers there: `mgmt/dispatch.rs` refuses
+    and counts any first handshake that is not a Zode handshake. Before
+    zl-zipline#234 an unmarked handshake reached a legacy adapter-docking
+    responder.
+  - **Why that is acceptable.** A Zode link survives keying only with a
+    certificate signed by the network's CA whose CN is in the Zode's current
+    topology, and only from the link's owner (rule 3). Everything else on the
+    machine stays closed.
   - **Every profile.** Laptops on public Wi-Fi are the common case.
 - **A Zode's own login, visa-service half** — `getLoginNonce` and the
   `reauthorize` gain/drop for a node's own actor are implemented in the visa
@@ -869,12 +871,14 @@ not read the RFCs as a description of current guarantees.
 
 **Not yet, or verify before relying on it:**
 
-- **Visa expiry on a timer.** Expiry is checked only when a Zode would bind
-  under a visa (*Implemented*, above). No sweep removes an expired visa, so
-  the streams already bound under it keep flowing until a new flow matches
-  it, a link they cross drops, or an R16 reset (ZODE_LINKS.md) drops
-  every visa outside the Zode's two VS-API flows; the visa service, which
-  forgets a visa at expiry, cannot revoke it
+- **Visa expiry on every use of a visa.** Expiry is checked only when a Zode
+  would bind under a visa (*Implemented*, above). Nothing removes an expired
+  visa otherwise, so the streams already bound under it keep flowing until a
+  new flow matches it, a link they cross drops, or an R16 reset
+  (ZODE_LINKS.md) drops every visa outside the Zode's two VS-API flows; the
+  visa service, which forgets a visa at expiry, cannot revoke it. Enforcing
+  expiry on every use of a visa, so bound streams do not outlive it, is
+  planned Zodes epic work
   ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
@@ -912,12 +916,6 @@ not read the RFCs as a description of current guarantees.
   machinery is exercised against a live source (netns end-to-end test,
   zipline#81) as well as local JSON. `zpr-attr/1` departs from the RFC-13.1
   per-call HMAC — see ATTRIBUTE_SERVICE.md.
-- **Background renewal does not complete end to end.** Every piece is
-  implemented and unit-tested, but the node reaches its renewal deadline with
-  no way to reach the user's authentication agent — see the *Not yet* note in
-  [OIDC.md](OIDC.md). Until that closes, an OIDC actor is disconnected when
-  its authentication window ends, which is the safe direction to fail but not
-  the intended behaviour.
 - **Topology-bound link certificates (Zodes).** The verification and the
   CN-in-topology rule are implemented for Zode-to-Zode links
   ([#220](https://github.com/org-zpr/zl-zipline/issues/220); *Design
@@ -940,7 +938,7 @@ not read the RFCs as a description of current guarantees.
   ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
   *Design decisions*, above). `zipline register` writes the Zode's link key,
   its certificate, the CA certificate, its ZPR address and the relay's CN and
-  substrate address, and `zipline service-run` starts `ph node` with them.
+  substrate address, and `zipline service-run` starts `ph zode` with them.
   The network's generated policy lists every registered Zode in the relay's
   topology and pins its address
   ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
@@ -972,11 +970,11 @@ not read the RFCs as a description of current guarantees.
 | Attribute sourcing and expiry | `zl-zpr-visaservice/vs/src/trusted_services/` |
 | A2A integrity | `zl-zpr-core/adapter/ph` — `zdp.rs`, `fastpath.rs`, `adapter_tables.rs` |
 | Link crypto and key management | `zl-zpr-core/adapter/ph` — `km_noise.rs`, `km_cert_exchange.rs`, `pki.rs` |
-| Per-packet visa enforcement | `zl-zpr-core/libnode2`, and the dock path in `zl-zpr-core/adapter` |
+| Per-packet visa enforcement | `zl-zpr-core/libnode2`, and the dock half of `ph` in `zl-zpr-core/adapter/ph` |
 | What policy can express | `zl-zpr-compiler` — see [ZPL.md](ZPL.md) |
 
-`zl-zpr-core/packet_walk.md` traces a flow end to end and is the best orientation
-to the data path.
+[ZDP.md](ZDP.md), "Flow setup", traces a flow's first packet and is the best
+orientation to the data path.
 
 Related: [VISA_SERVICE.md](VISA_SERVICE.md), [ZPL.md](ZPL.md),
 [REPOSITORIES.md](REPOSITORIES.md).

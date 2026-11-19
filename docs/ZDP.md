@@ -17,7 +17,6 @@ a message type, or changing anything about how packets are secured on the wire.
 | **Internal RFC 17** — "ZDP Protocol Definition" | The current protocol definition: procedures, packet formats, message types. |
 | **Internal RFC 6.4** — "ZPR Data Protocols" | The predecessor. Still the best source for **substrate** requirements and encapsulations (§3), the addressing model (§4), and the rationale behind field sizes. Its packet formats are superseded. |
 | **`zl-zpr-core/adapter/ph/src/zdp.rs`** | The wire format **as actually implemented** — header structs and the message-type enum. |
-| **`zl-zpr-core/packet_walk.md`** | The intended life of a packet, written as an implementation guide. |
 
 The ZDP RFCs live only as `.docx`/`.pdf`; unlike internal RFCs 4, 12, 15, 16,
 and 19 there is no Markdown source. Extract text with `pdftotext -layout`.
@@ -205,25 +204,23 @@ Never infer a type value from 6.4.
 | 133 | Terminate Link or Docking Session | no |
 | 134 / 135 | Hello Request / Response | no |
 | 136 / 137 | Configuration Request / Response | no |
-| 138 / 139 | Acquire / Grant ZPR Address † | no |
-| 140 | Revoke ZPR Address | no |
-| 141 | Init Authentication Request † | no |
-| 142 / 143 | Start Authentication / Abandon Authentication Attempt † | no |
-| 144 / 145 | Renew Authentication Request / Response ‡ | no |
+| 138–145 | Reserved (were actor authorization and renewal over a dock) ¶ | no |
 | 146 | Bootstrap Visas ‡ | no |
 | 252 / 253 | Canceled / Cancel † | no |
 | 254 | Acknowledgement | no |
 | 255 | Reserved — silently discard | — |
 
-† marked `TODO: add to RFC` or *experimental* in `zdp.rs`: implemented ahead of
-the spec. 142/143 are upstream zpr-core #1410's experimental actor-authorization
-assignments (`diagrams/actor_authorization.md` in zl-zpr-core).
+† marked `TODO: add to RFC` in `zdp.rs`: implemented ahead of the spec.
 
-‡ zipline-only (zipline#66): node-to-adapter credential renewal. They were 142/143
-until zl-zpr-core#96 merged #1410, which claimed those numbers; zipline's moved,
-so zipline nodes and adapters from before and after that merge do not interoperate.
-146 is zipline-only too (zipline#252): the relay hands a joining Zode its
-bootstrap visas on a Zode link (see "Bootstrap Visas" below).
+¶ Acquire / Grant / Revoke ZPR Address, Init Authentication, Start
+Authentication, Abandon Authentication Attempt, and the zipline-only Renew
+Authentication Request / Response. They carried the authorization and renewal
+of an actor docked over an adapter link. No actor docks on a Zode
+(zl-zipline#234), so no code sends them, and a message of these types is
+refused as an unknown type (`zdp.rs`).
+
+‡ zipline-only (zipline#252): the relay hands a joining Zode its bootstrap
+visas on a Zode link (see "Bootstrap Visas" below).
 
 Note the shape of the divergence: the RFC has separate Echo Request/Response
 and Terminate Request/Response/Indication types; the implementation has one
@@ -321,77 +318,70 @@ peer — the caller may reset the link on those.
 
 ## Procedures
 
-### Link and docking-session bring-up
+### Link bring-up
 
-Docking sessions are **always initiated by the adapter** (6.4 §5.6): the dock
-platform serves many adapters, adapters often have no fixed substrate address,
-and probing would be wasteful and noisy. A link between two Zodes is dialed
-only by its owner: the Zode whose initial link it is, or else the end with the
-lower ZPR address, and a relay never dials (see "Zode links" below).
+Every link to another `ph` is a Zode link (below). A Zode's adapter and local
+actor reach its node half over the `Internal` links (link IDs 1 and 2), which
+have no bring-up. A node refuses and counts any first handshake that is not a
+Zode handshake (`mgmt/dispatch.rs`).
+
+*History.* Before zl-zipline#234 a separate `ph` adapter docked with a node.
+The adapter always initiated the docking session (6.4 §5.6), and after Hello
+the node authorized the adapter's actor over the dock with types 138-145.
+That path is gone: no actor docks on a Zode, and those types are reserved.
 
 The sequence is: keying (Noise) → `Hello` Request/Response → link Active with
-`Echo` keep-alives → actor authorization. A Hello Response may accept, reject, or
-redirect to another dock. Each side names the connection policy under which it
+`Echo` keep-alives. Each side names the connection policy under which it
 initiated or accepted.
 
-Since zl-zpr-core#96 (which merged upstream #1410) **the link and the actor have
-separate state machines.** The link is Active once Hello completes; it then runs
-actor authorization as its own exchange, and a failed authorization no longer
-tears the link down.
-
 - **Link** (`link_state.rs`). States: `Inactive`, `Keying`, `Helloing`, `Active`,
-  `Closing`, `Resetting`, `Disconnecting`, `Error`. Link types: `Internal`,
-  `AdapterToNode`, `NodeToAdapter`, and `NodeToNode` (a Zode link; each end
-  records whether it is the dialer or the answerer, `ZodeEnd`).
-- **Actor** (`actor_auth.rs`, `ActorAuthorization`). One transaction carries
-  `Start Authentication` → `Init Authentication` (the node's challenge) →
-  `Acquire ZPR Address` (the adapter's evidence) → `Grant ZPR Address`, or
-  `Abandon Authentication Attempt` on a local failure. Grant and Renew Response
-  carry an `AuthenticationStatus`: `Success` 0, `Rejected` 1, `Retryable` 2, and
-  the zipline-only `PolicyDenied` 3. With auto-connect off every failure ends
-  the attempt; with it on, transient failures retry with backoff and explicit
-  denials latch. Either way the operator retries with `ph-cli connect` (or by
-  restarting the adapter).
+  `Closing`, `Resetting`, `Error`. Link types: `Internal` and `NodeToNode` (a
+  Zode link; each end records whether it is the dialer or the answerer,
+  `ZodeEnd`).
+- **Actor.** No actor is authorized over a link. A Zode authenticates its own
+  actor to the visa service over its VS-API session, and a user logs in
+  through `zode_login.rs` (see [OIDC.md](OIDC.md)).
 
-The Hello exchange carries TLVs 9 `ACTOR_AUTH_PROTOCOL` (both directions,
-version 1, mandatory), 10 `VS_BOOTSTRAP_LINK` (response, verified VS adapter
-only), and the zipline-only 11 `OIDC_IDP` (response, one per advertised OIDC
-identity provider; it was 9 before zl-zpr-core#96). The upstream ASA TLV (4) is
-not used: zipline removed it with the BAS client (zipline#15).
+The Hello exchange carries TLV 9 `ACTOR_AUTH_PROTOCOL` (both directions,
+version 1, mandatory). TLVs 3 `AAA`, 10 `VS_BOOTSTRAP_LINK` and the
+zipline-only 11 `OIDC_IDP` belonged to the adapter dock. No code sends them in
+v1, and a Zode refuses a HelloResponse that carries any of them. The AAA code
+is kept, unused ([ZODE_LINKS.md](ZODE_LINKS.md), "AAA kept, unused"). The
+upstream ASA TLV (4) is not used: zipline removed it with the BAS client
+(zipline#15).
 
 Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 3-second timeout; a link is torn down after `KEEP_ALIVE_MAX_MISSES = 3`
-consecutive misses (zipline#113). `LINK_HELLO_TIMEOUT = 3 s`, restart holddown
-5 s, and a node drops an adapter dock whose keying does not finish within
-`NODE_KEYING_TIMEOUT = 60 s` (zipline#173). A Zode link is bounded tighter,
-on both ends, so an attempt ends inside the owner's 10-second link-up window:
-`ZODE_KEYING_TIMEOUT = 2 s` and `ZODE_HELLO_TIMEOUT = 2 s`.
+consecutive misses (zipline#113). A link never restarts itself: only its owner
+redials. Keying and Hello are bounded on both ends, so an attempt ends inside
+the owner's 10-second link-up window: `ZODE_KEYING_TIMEOUT = 2 s` and
+`ZODE_HELLO_TIMEOUT = 2 s`.
 
 ### Zode links
 
-A link between two Zodes (`LinkType::NodeToNode`) uses the same keying, Hello
-and keep-alive as a docking session, with these differences. Who dials, what
-is accepted, and what happens on loss are in [ZODE_LINKS.md](ZODE_LINKS.md)
-([#250](https://github.com/org-zpr/zl-zipline/issues/250)).
+A link between two Zodes (`LinkType::NodeToNode`) uses keying, Hello and
+keep-alive as above. Who dials, what is accepted, and what happens on loss are
+in [ZODE_LINKS.md](ZODE_LINKS.md)
+([#250](https://github.com/org-zpr/zl-zipline/issues/250)). A link is dialed
+only by its owner: the Zode whose initial link it is, or else the end with the
+lower ZPR address, and a relay never dials.
 
 - **Handshake marker.** The dialing Zode puts the five bytes `ZODE1`
   (`km_noise.rs`, `ZODE_HANDSHAKE_MARKER`) in the plaintext payload of the
   first Noise XX message. A node that receives a Key Management packet from an
   unknown substrate address reads that payload before any link exists
   (`mgmt/dispatch.rs`): with the marker it starts a Zode link as the answerer,
-  without it an adapter dock. Noise mixes the payload into the handshake hash,
+  without it the packet is refused. Noise mixes the payload into the handshake hash,
   so a marker changed in transit breaks the handshake. Adding the marker gains
   an attacker nothing: a Zode link demands a CA-signed certificate whose CN
   passes the acceptance rules.
 - **Both ends present certificates**, as above, and the CN is checked once
   keying finishes, before Hello.
-- **The dialer sends the HelloRequest**, as an adapter does. The answerer
+- **The dialer sends the HelloRequest.** The answerer
   waits for it, bounded by `ZODE_HELLO_TIMEOUT`.
 - **The answer carries no adapter-dock TLVs.** A Zode's HelloResponse has no
   `AAA` address, no `OIDC_IDP` and no `VS_BOOTSTRAP_LINK`. A dialer that
   receives any of them on a Zode link closes the link.
-- **No special-peer names.** A certificate on a Zode link that claims a
-  special-peer name (the visa service's) is logged and ignored.
 
 ### Bootstrap Visas (type 146)
 
@@ -458,6 +448,8 @@ joiner's two VS-API visas and hands them over in this message
 
 ### Flow setup
 
+In a Zode the adapter and its dock are the two halves of one `ph` process,
+joined by the internal links; "adapter" and "dock" below are those halves.
 The adapter keeps an **Actor Lookup Table** (ALT/ELT) keyed by 5-tuple and a
 **Dock Lookup Table** (DLT) keyed by Stream ID; the node keeps a **Peer
 Forwarding Table** (PFT) per link, keyed by Stream ID. A lookup yields a
@@ -488,7 +480,7 @@ travelled hop by hop in `Visa Herald Request` messages with a hop count, each
 forwarder validating it and offering back a Visa ID. Read §5.11 for the
 intended semantics of re-heralding around a failed link and of the
 `Visa Deaccept` cascade that tears a half-built path back down — the
-implementation currently has one node, so none of it is exercised.
+implementation does not herald visas, so none of it is exercised.
 
 An intermediary node holds a `forwardOnly` visa for the flow: an ID and a next
 hop, no 5-tuple. It answers a `Stream ID Request` from the previous node by
@@ -560,7 +552,8 @@ dropped.
 hop binding with the loop guard, both sides of each binding recorded, a lost
 link revoking its visas locally, and `down`/`failed` reported before any visa
 request that follows. **`Stream ID Withdrawal` (5) and `Unbind Egress Stream`
-(13) are docking-session only** (F5): a Zode never sends one on a Zode link and
+(13) are used only on a Zode's internal links** to its own adapter and local
+actor (F5): a Zode never sends one on a Zode link and
 refuses one that arrives there, which closes the link. It is covered by unit
 tests and core CI, and in netns by `zode-line-test.sh` and
 `zode-reroute-test.sh` ([#254](https://github.com/org-zpr/zl-zipline/issues/254)).
@@ -595,14 +588,13 @@ Specified, not implemented:
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
   cascade. Teardown has three causes only: expiry, a visa-service revocation,
   and a lost link (ZODE_LINKS.md F4). `Stream ID Withdrawal` and `Unbind Egress
-  Stream` exist for docking sessions.
+  Stream` exist for a Zode's internal links.
 - **PEP traffic constraints** — rate limits, QoS, DSCP marking, queue
   assignment. The PEP carries next-hop only.
 
 Implemented ahead of the RFC: the reliability layer (`Cancel`/`Canceled`/
-`Acknowledgement`), `Bind Egress Stream`, `Acquire`/`Grant ZPR Address`,
-`Init Authentication`, `Start`/`Abandon Authentication`, the zipline-only
-`Renew Authentication` pair, and transaction IDs.
+`Acknowledgement`), `Bind Egress Stream`, and transaction IDs. Types 138-145
+were implemented ahead of the RFC too, and are reserved since zl-zipline#234.
 
 Before assuming a message or field works, read `zdp.rs` and grep
 `mgmt/handlers.rs` for a handler. A type in the enum does not imply a
