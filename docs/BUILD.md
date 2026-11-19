@@ -699,6 +699,11 @@ whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
 unmaintained, so no port is planned. Run such sets with `--test unit,netns`
 (see "Cutting a Zodes set" below).
 
+Last recorded `netns` run for #234 (zpr-dev, at zl-zpr-core#136, the
+core-node-dock PR): 13 scripts passed, `zode-reroute-test.sh` with output
+byte-identical to core 6e7baba, and the 7 classic scripts were skipped as
+absent from the checkout.
+
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
 probe-gated ones allowed to skip: a tier whose prerequisites are missing is
@@ -837,7 +842,14 @@ Other entry points, each a standalone script:
 | `zode-rejoin-test.sh` | a Zode never matches a new flow to an expired visa (zl-zipline#271, `docs/ZODE_LINKS.md` "Visa expiry at match time (#271)"). zb - relay - zc, with a UDP/53 service on zc that zb may reach only while it holds a `device.hostname` attribute from a file trusted service with a 90 s lifetime (fixture `pregen/zodes-rejoin`), so every visa for it expires during the run, as a ZIPLINE network's DNS visas do. After the visas expire, zb is killed and rejoins (A), then zc is stopped and rejoins (B); each time zb gets every reply, and the other Zode logs that it ejected its expired visa. It failed on core 6e7baba with "visa N not found". Takes about four minutes, most of it waiting for visas to expire |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
-Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`.
+Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,
+and `PH_DEBUG_BUILD=1`, which says `ph` is a debug build. Core CI sets it
+(`.github/workflows/adapter.yml`), and `integration-test/Makefile` forwards it
+(`FORWARD_ENV`). With it set, or when `$PH_BIN` contains the counter's name,
+`zode-ping-test.sh` requires the debug-only `Actor Packets Out-Of-Order`
+counter to be present and 0 on each Zode; otherwise it reports the check as
+"not measured". zpr-dev stages a release `ph`, so its runs say "not
+measured".
 The Zode scripts refuse a non-empty `NETEM_PARAMS` (`zode_preflight` in
 `lib/zode_funcs.sh`); link impairment was for the old `one-node-*` scripts.
 
