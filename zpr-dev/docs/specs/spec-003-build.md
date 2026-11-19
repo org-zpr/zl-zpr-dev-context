@@ -364,13 +364,21 @@ risk. Everything is a release build. The table is in claim order:
 
 | Tier | What runs | Prerequisites | Default |
 |---|---|---|---|
-| `unit` | `make test` in each built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | run |
-| `netns` | the listed `zl-zpr-core/integration-test/` scripts (`NETNS_SCRIPTS`) | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | `--test netns` |
-| `docker` | `dns-demo` deploy, `test-dns.sh`, `docker compose down -v` | `docker`, `docker compose` | `--test docker` |
+| `unit` | `make test` in each built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | runs |
+| `netns` | the listed `zl-zpr-core/integration-test/` scripts (`NETNS_SCRIPTS`) | Linux, and either (unprivileged user namespaces — `unshare -nr true` succeeds — `valkey-server`, `python3`) or a reachable Docker daemon | runs; skipped with the reason when the probe fails |
+| `docker` | `dns-demo` deploy, `test-dns.sh`, `docker compose down -v` | `docker`, `docker compose` | runs; skipped with the reason when the probe fails |
 
-- A tier that was asked for and cannot run is an error under `--test all`; a
-  tier that was not asked for is reported `skipped` with the probe's failure
-  text as the reason. A skipped test is always visible in the output **and**
+- **Default** is the selection with no `--test` flag, or `--test default`:
+  every implemented tier (`IMPLEMENTED` in `tiers.rs`), none of them
+  explicit. A tier that was asked for explicitly — named in a `--test` list
+  or covered by `--test all` — and cannot run is an error; a default-selected
+  tier that cannot run is reported `skipped` with the probe's failure text as
+  the reason. Once a tier's prerequisites hold, a tier whose repository is
+  not in the set (`zl-zpr-core` for `netns`, `zl-zpr-demo` for `docker`) is
+  skipped, `<repository> is not in this set`, even when requested
+  explicitly (the prerequisite check comes first, so a missing prerequisite
+  is still an error). So the emitted `tiers:` block, not the exit status, is
+  the record of coverage. A skipped test is always visible in the output **and**
   in the emitted manifest — a green run must never overstate coverage.
 - `netns` binaries come from `dist/` via `PH_BIN` / `VS_BIN` /
   `VS_ADMIN_BIN` / `VALKEY_SERVER_BIN`; nothing is copied into
@@ -755,6 +763,18 @@ report a pass. Supporting `node` as well is a dev-tool concession to the
 `zipline` pin, not backwards compatibility in `ph` itself (operator, gate
 g167 q12); it goes with the split above.
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
+
+**dns-demo runs Zodes (zl-zipline#235).** Once `ph node` and `ph adapter`
+were gone, the `docker` tier could not pass on a `feature/zodes` core:
+zl-zpr-demo's `dns-demo` launched both. It was ported on zl-zpr-demo's
+`feature/zodes` (zl-zpr-demo#10) to a relay Zode that hosts the visa service,
+plus web, client and dns endpoint Zodes, with `test-dns.sh`'s eight sections
+kept. The tier needed no `zpr-dev` change: it stages `dist/` into
+`dns-demo/bin/` and runs the demo's own deploy and test scripts, whatever they
+launch. So a Zodes set pins `zl-zpr-demo` at `feature/zodes` and runs every
+tier; `build-sets/2026-11-19.yaml` is the first, green on `unit`, `netns`
+(fourteen scripts) and `docker`.
+([zl-zipline#235](https://github.com/org-zpr/zl-zipline/issues/235))
 
 ### 10.5 Deferred
 

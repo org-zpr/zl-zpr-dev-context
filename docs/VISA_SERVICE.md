@@ -911,7 +911,8 @@ mismatch loudly.
 **One store per deployment, keyed on the adapter CN.** `device.zpr.adapter.cn`
 is authenticated for every bootstrap adapter. Where a deployment already has a
 device-keyed `file` store, extend it rather than adding a second — dns-demo's
-`machines` store is the naming *and* addressing authority.
+`machines` store was the naming *and* addressing authority until its Zode port
+(zl-zipline#235) pinned each Zode's address by its `[nodes]` entry instead.
 ([zipline#108](https://github.com/org-zpr/zl-zipline/issues/108))
 
 **Depends on zipline#105 and does not work around its absence.** Without the
