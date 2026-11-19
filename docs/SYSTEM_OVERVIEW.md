@@ -188,10 +188,11 @@ own TUN at `fd5a:5052::1` (`vs.zpr`; see *Design decisions*).
 **4. An endpoint joins.** A Zode's actor authenticates to the visa service
 with the machine's bootstrap key; no identity provider is needed for that.
 A person who logs in on the Zode later adds an OIDC token, a separate step
-([OIDC.md](OIDC.md)). The visa service authenticates the endpoint via
-trusted services, which return tokens carrying policy-specified attributes.
-Some are marked *identity attributes*, and the visa service uses them to query
-other trusted services and complete the profile. It then asks policy: may this
+([OIDC.md](OIDC.md)). The visa service checks the bootstrap key itself (an
+RSA challenge); trusted services, where policy declares them, then enrich the
+authenticated identity with policy-specified attributes. Some are marked
+*identity attributes*, and the visa service uses them to query other trusted
+services and complete the profile. It then asks policy: may this
 endpoint communicate at all, may it host services, does it get a static
 address, is it explicitly denied? A Zode does not receive its ZPR address
 here: it is configured with it before it starts (`--zpr-addr`, the first

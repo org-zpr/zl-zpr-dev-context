@@ -743,9 +743,11 @@ instead.
 merges into `zipline`). `--tip` resolves `zipline` and so selects the old
 core, and a bare `--manifest` reproduce runs the default tiers, which on a
 Docker host include the failing `docker` tier. So in step 2, write a
-manifest that pins the `feature/zodes` revision (or the set's pre-release
-tag) of each repository that has one, and an ordinary commit or tag for the
-rest (`zl-zpr-coredns` and `zl-zpr-demo` have no `feature/zodes`), and run `zpr-dev build --manifest <file> --test
+manifest whose `zl-zpr-compiler`, `zl-zpr-visaservice` and `zl-zpr-core`
+entries pin their `feature/zodes` revisions (or the set's pre-release tags)
+and whose other entries pin ordinary commits or tags (`zl-zpr-coredns` and
+`zl-zpr-demo` have no `feature/zodes`; shared libraries such as
+`zl-zpr-common` are not entries, see spec-003), and run `zpr-dev build --manifest <file> --test
 unit,netns`; in step 5, reproduce with the same `--test unit,netns`.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
@@ -822,7 +824,7 @@ Other entry points, each a standalone script:
 |---|---|
 | `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different `--io-engine` setting on each Zode (`auto`, `io_uring`, `posix_unbatched`; `auto` picks `io_uring` where the host supports it), and `ph-cli tun` output (zipline#202) |
 | `zode-oidc-test.sh` | OIDC on a logged-in Zode (zl-zipline#234, the port of `one-node-oidc-test.sh` and `one-node-oidc-renewal-test.sh`): JWKS key rotation at the IdP, and the IdP withdrawing a login's refresh grant |
-| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked (a logged-in Zode whose bootstrap key was removed, so that both its renewal and the bootstrap-key fallback fail). A logged-in Zode whose renewal fails but whose bootstrap key still passes stays connected without the login (OIDC.md); no script covers that case end to end. Takes several minutes: real installs under a continuous ping |
+| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked (a logged-in Zode whose bootstrap key was removed, so that both its renewal and the bootstrap-key fallback fail). A logged-in Zode whose renewal fails but whose bootstrap key still passes stays connected without the login, and a resident `auth-agent` is asked for a new interactive login (OIDC.md); no script covers that case end to end. Takes several minutes: real installs under a continuous ping |
 | `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy, with a user logged in on a Zode |
 | `attr-query-test.sh` | an `oidc` and a `zpr-attr/1` trusted service in one policy: the reference `zpr-attr-server` decorates the logged-in user's identity over pinned TLS (zipline#81) |
 | `a2a-pubkey-test.sh` | security testing: a malicious relay forges the A2A MICV of the pings it forwards between two Zodes, and the receiver must reject them. Needs `ph` built with `enable-security-testing` |

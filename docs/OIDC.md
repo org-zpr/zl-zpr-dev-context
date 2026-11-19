@@ -512,7 +512,10 @@ whoever cannot is revoked at the deadline (zipline#123). A failed silent
 renewal does not disconnect a logged-in Zode: `zode_login::answer_policy_reauth`
 falls back to device-only K2 authentication with the bootstrap key, so the
 machine stays connected under the new policy generation and the user's login
-is dropped. Only a Zode that cannot pass K2 either is revoked. A bootstrap key
+is dropped. A resident `auth-agent` is then asked for a new interactive login
+(`zode_login::session_replaced`, as after any session replacement), so a
+browser prompt at that point is expected. Only a Zode that cannot pass K2
+either is revoked. A bootstrap key
 removed from policy thus takes effect within one deadline of the install,
 which is a tighter and better-targeted bound than any timer.
 
