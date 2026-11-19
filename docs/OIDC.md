@@ -574,8 +574,11 @@ ceiling instead of once per `expiration_seconds`.
 
 **When user authentication expires and renewal does not happen:** the Zode
 logs the user out. At the expiry, with no renewal, ph sends a device-only
-`reauthorize` (`zode_login.rs`), and retries a refused logout, so no stale
-user authority stays on the actor. The machine stays connected: this drops
+`reauthorize` (`zode_login.rs` `expire`). The user authority leaves the
+actor only when the visa service accepts it: if it is refused, ph keeps the
+login recorded and tries again every 10 s (`RENEWAL_RETRY_INTERVAL`) until
+it succeeds, and the visa service's expiry sweep, which skips node actors,
+is no fallback for this. The machine stays connected: this drops
 only the user namespace, so device-only rules keep working while user rules
 stop matching.
 
@@ -1211,8 +1214,9 @@ ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl
   Overlapping renewals share one and are spaced a second apart, since
   same-second refresh tokens can share an `iat`. A failed renewal is retried
   until the expiry; **at the expiry ph logs the user out itself** (`[SS]`
-  only), and retries a refused logout, so no stale user authority stays on
-  the actor.
+  only). The user authority goes only when the visa service accepts that
+  device-only `reauthorize`; a refused one is retried every 10 s, and until
+  then the user authority stays on the actor.
 - **Logout** sends the device leg alone. The machine stays connected.
 - **Session replaced.** After every successful node authentication (a VS-API
   reconnect, a visa-service restart, a rejoin, a K2 re-authentication) ph

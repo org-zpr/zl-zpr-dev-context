@@ -1353,7 +1353,8 @@ the visa service sends with the topology it re-proposes on that Zode's session
 start (#255). Windows and macOS were checked by hand: a Zode with a wildcard
 `self_addr` and no advertised address starts, joins through the relay and
 reports its real local address (`windows-zode-test.md` and
-`macos-zode-test.md`, section 6). Network-change runs on those two hosts are
+`macos-zode-test.md`, section 2 "a Zode with a wildcard address", with the
+results under Findings). Network-change runs on those two hosts are
 [zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263).
 
 ### The relay hosts the visa service (#229)

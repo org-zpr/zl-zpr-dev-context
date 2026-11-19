@@ -192,8 +192,12 @@ trusted services, which return tokens carrying policy-specified attributes.
 Some are marked *identity attributes*, and the visa service uses them to query
 other trusted services and complete the profile. It then asks policy: may this
 endpoint communicate at all, may it host services, does it get a static
-address, is it explicitly denied? On success the endpoint receives a ZPR
-address and joins.
+address, is it explicitly denied? A Zode does not receive its ZPR address
+here: it is configured with it before it starts (`--zpr-addr`, the first
+address; `ph` refuses to start without one) and uses it as the source of its
+VS-API session. The visa service checks the claim against policy (the node's
+`zpr_address`) and the static-address rules under *Addressing*, and on
+success the Zode joins.
 
 **5. First packet.** An application sends to the Zode's TUN. The Zode's actor
 side finds no entry for the 5-tuple in its lookup table and issues a **bind

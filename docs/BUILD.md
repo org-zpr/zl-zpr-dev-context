@@ -692,6 +692,12 @@ workspace does not check out.
 | `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen on `feature/zodes`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
+The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
+fallback of the `netns` tier. **It fails, rather than skips, on a build set
+whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
+`dns-demo` still starts `ph node` and `ph adapter`, and zl-zpr-demo is
+unmaintained, so no port is planned. Run such sets with `--test unit,netns`.
+
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
 probe-gated ones allowed to skip: a tier whose prerequisites are missing is
