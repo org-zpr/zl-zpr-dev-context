@@ -713,13 +713,14 @@ one TUN. `vs.zpr` has no adapter of its own.
   ZIPLINE's relay container (`zipline-relay-<id>`, [org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252))
   pre-creates a persistent TUN with both addresses, so restarting `ph` never
   takes `vs.zpr` away from a running visa service. Then it starts `ph zode
-  --relay true --forwarding true`, valkey (127.0.0.1 only) and, once valkey
+  --relay true --forwarding true` (ZIPLINE still passes `node` until
+  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)), valkey (127.0.0.1 only) and, once valkey
   answers PING, the visa service. If the visa service is not listening on
   `vs.zpr` (VS-API 5002, admin 8182) within 30 s, the container exits and
   Docker restarts it: the interim answer to
   [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266).
 - **No Zode accepts an adapter dock, so neither does the relay.** Dispatch
-  refuses and counts any first handshake that is not a Zode
+  refuses and counts (`UnknownPeer`) any first handshake that is not a Zode
   handshake, so a relay or a Zode accepts Zode links only. Gate g117 q4 first
   closed the visa service's own adapter dock on a relay; zl-zipline#234 removed
   adapter docks everywhere.
@@ -970,7 +971,11 @@ calls it in v1. Each kept item says so in a comment.
   still sends the prefix); the Hello AAA TLV, which no code sends and a Zode
   still refuses on a Zode link; `allocate_aaa` and `install_aaa`; giving the
   address back to the pool on link cleanup; and the AAA arms of
-  `find_egress_link` and `bind_actor_address`.
+  `find_egress_link` and `bind_actor_address`. Their unit tests are the only
+  callers: `vss_worker` `test_configure_aaa_prefix_fills_the_pool_and_refuses_a_bad_one`,
+  `link_state` `install_aaa_adds_an_authentication_address` and
+  `allocated_aaa_is_given_back_by_link_cleanup`, and `mgmt::handlers`
+  `test_hello_response_aaa_round_trips`.
 - **Dropped:** the adapter-dock Hello policy: refusing a dock when the pool
   is empty, and "no ordinary link without an AAA".
 
@@ -1063,7 +1068,8 @@ In `zl-zpr-visaservice/vs/src/config.rs`:
   enrols a machine already holds its relay link. Deleting the machine removes
   that link, and the relay refuses its still-valid certificate from then on.
   The network's own `dns.zpr` Zode is in that topology too ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
-  ZIPLINE's dns container runs CoreDNS behind a `ph zode` named `dns.zpr`,
+  ZIPLINE's dns container runs CoreDNS behind a `ph zode` (`ph node` until
+  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) named `dns.zpr`,
   with `--initial-link node.zpr.org@<relay dock address>`, a server-generated
   link certificate and RSA key, and its fixed address `fd5a:5052:90de::2`. It
   links to the relay only; no rule gives it a direct link.
@@ -1157,7 +1163,7 @@ relay with its `forwarding` on and off (F1, F2, F8).
 
 | Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
 |---|---|
-| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; address matching on the internal adapter and local-actor links only (`actor_auth`, and the kept, unused AAA arm) | `assembly.rs::find_egress_link` |
+| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; address matching on the Internal local-actor link only, the one non-Zode link left (`actor_auth`, and the kept, unused AAA arm) | `assembly.rs::find_egress_link` |
 | F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
 | F2 guards, in order: no visa or no egress, the previous hop (#253: `check_prev_hop`, F1's `find_zode_egress_link` for the visa's `prev_hop` must give the ingress link; `Visa::prev_hop`), the loop guard (egress == ingress is refused), a forward-only visa from or to an adapter, and a refusal when transaction IDs run out. Every refused `Stream ID Request` is counted once, as `StreamIdRequestRejected`, in `bind_reject` | `mgmt/node.rs::prepare_next_hop_bind` |
 | F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of the bootstrap visas carried over an initial link is #252's `bootstrap_handoff::revoke_for_lost_link` | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |

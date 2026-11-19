@@ -781,6 +781,9 @@ visa service, and Zodes that dial it — on network namespaces. It is not run by
 integration-test/vs                 from zl-zpr-visaservice
 integration-test/vs-admin           from zl-zpr-visaservice
 integration-test/valkey-server      or set VALKEY_SERVER_BIN
+integration-test/zpr-attr-server    from zl-zpr-visaservice, or set ZPR_ATTR_SERVER_BIN
+                                    (attr-query-test.sh only; it exits before
+                                    its assertions without it)
 target/debug/ph, target/debug/ph-cli   built here by make
 ```
 
@@ -799,7 +802,7 @@ Other entry points, each a standalone script:
 |---|---|
 | `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different packet I/O engine on each Zode, and `ph-cli tun` output (zipline#202) |
 | `zode-oidc-test.sh` | OIDC on a logged-in Zode (zl-zipline#234, the port of `one-node-oidc-test.sh` and `one-node-oidc-renewal-test.sh`): JWKS key rotation at the IdP, and the IdP withdrawing a login's refresh grant |
-| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
+| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal; a logged-in Zode whose renewal fails falls back to its bootstrap key and stays connected without the login, and whoever cannot re-authenticate at all is revoked. Takes several minutes: real installs under a continuous ping |
 | `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy, with a user logged in on a Zode |
 | `attr-query-test.sh` | an `oidc` and a `zpr-attr/1` trusted service in one policy: the reference `zpr-attr-server` decorates the logged-in user's identity over pinned TLS (zipline#81) |
 | `a2a-pubkey-test.sh` | security testing: a malicious relay forges the A2A MICV of the pings it forwards between two Zodes, and the receiver must reject them. Needs `ph` built with `enable-security-testing` |

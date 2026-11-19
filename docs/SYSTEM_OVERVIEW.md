@@ -377,7 +377,7 @@ Zodes master plan §5.11).
   still talk over the internal link pair inside the process; that is the
   RFC's Adapter/Node split, kept as a logical one.
 - **A Zode accepts only Zode links.** Any first handshake message that is not
-  a Zode handshake is refused and counted (`mgmt/dispatch.rs`).
+  a Zode handshake is refused and counted as `UnknownPeer` (`mgmt/dispatch.rs`).
 - **No alias, no backwards compatibility.** `ph node` and `ph adapter` are
   unknown subcommands (clap exits 2), and `[adapter]` and
   `auth_renewal_lead_seconds` are refused as unknown keys, not ignored: a
@@ -390,7 +390,8 @@ Zodes master plan §5.11).
   adapter on a non-relay node, is gone.
 - **The CLI contract** (what zipline's service runner, org-zpr/zipline#256,
   consumes). Every flag `ph node` took keeps its name and meaning:
-  `--control-path`, `--control-group`, `-a/--self-addr`, `--ca-file`,
+  `--control-path`, `--control-group`, `-a/--self-addr` (port 0 means the
+  default link port, 5000), `--ca-file`,
   `--certificate-file`, `-k/--private-key-file`, `-K/--noise-private-key`,
   `-i/--tun-if`, `-z/--zpr-addr` (repeatable: the Zode's own IPv6 address
   first; a relay adds `fd5a:5052::1`, and no other Zode lists it),
@@ -398,8 +399,12 @@ Zodes master plan §5.11).
   `--auth-private-key`, `--advertised-substrate-addr`, `--forwarding`,
   `--initial-link`, `--relay`, and the `enable-security-testing` flags. So a
   caller switches by replacing the word `node` with `zode`. `ph-cli counters`,
-  `link show [id]` and `tun` keep their output formats; `Actor state:` and
-  `Last auth failure:` may be absent for a Zode link.
+  `link show [id]` and `tun` keep their output formats, except that
+  `link show` no longer prints `Actor state:` or `Last auth failure:` (no
+  actor is authorized over a link). **Upgrade `ph` and `ph-cli` together:**
+  `adapter/admin-api/cli.capnp` changed the `CmdLineInter` interface ID and
+  renumbered its methods, so an older `ph-cli` cannot call a new `ph`, not
+  even for `counters` or `tun`.
 - **The Zode's own login renews with a fixed 300 s lead**
   (`zode_login::AUTH_RENEWAL_LEAD`). The removed
   `auth_renewal_lead_seconds` had configured both the node-side renewal of
@@ -753,11 +758,12 @@ are in `zl-zpr-core/integration-test/macos-zode-test.md` ("Prerequisites"),
 unvalidated until someone runs it with the firewall on.
 ([zipline#164](https://github.com/org-zpr/zl-zipline/issues/164))
 
-**Links that never complete the noise handshake stay in `Keying`
-indefinitely.** Mis-NATed links from before the NAT rules were up kept
-re-timing-out the handshake for the whole run and were removed only at
-shutdown. Not macOS-specific — filed as
-[zipline#173](https://github.com/org-zpr/zl-zipline/issues/173).
+**Links that never completed the noise handshake stayed in `Keying`
+indefinitely** under `ph node`. Mis-NATed docks from before the NAT rules were
+up kept re-timing-out the handshake for the whole run and were removed only at
+shutdown ([zipline#173](https://github.com/org-zpr/zl-zipline/issues/173),
+closed). The adapter dock is gone, and a Zode link's keying is bounded by
+`ZODE_KEYING_TIMEOUT = 2 s` ([ZDP.md](ZDP.md)).
 ([zipline#164](https://github.com/org-zpr/zl-zipline/issues/164))
 
 **Graceful shutdown is clean.** Ctrl-C revokes visas, resets links, exits on
@@ -830,8 +836,6 @@ from zl-zipline#234, each with an open issue unless noted:
 - Two-interface pktinfo verification on a real host (the remote-node test
   env it named is gone) —
   [zipline#172](https://github.com/org-zpr/zl-zipline/issues/172)
-- Never-completing links stuck in `Keying` —
-  [zipline#173](https://github.com/org-zpr/zl-zipline/issues/173)
 - `ph zode` command-line options do not override the config file for most
   `[global]` keys, although `--help` says they do: `set_from_common` (the
   CLI) runs before `set_from_globals` (the file), and `--zpr-addr` is

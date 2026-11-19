@@ -508,7 +508,11 @@ obliges every connected actor (each Zode's own actor) to
 re-authenticate every authority it holds under the new policy generation
 within the visa service's `reauth_deadline`, the RSA leg against the new
 snapshot's bootstrap keys and the OIDC leg silently through the auth agent;
-whoever cannot is revoked at the deadline (zipline#123). A bootstrap key
+whoever cannot is revoked at the deadline (zipline#123). A failed silent
+renewal does not disconnect a logged-in Zode: `zode_login::answer_policy_reauth`
+falls back to device-only K2 authentication with the bootstrap key, so the
+machine stays connected under the new policy generation and the user's login
+is dropped. Only a Zode that cannot pass K2 either is revoked. A bootstrap key
 removed from policy thus takes effect within one deadline of the install,
 which is a tighter and better-targeted bound than any timer.
 

@@ -323,7 +323,7 @@ peer — the caller may reset the link on those.
 Every link to another `ph` is a Zode link (below). A Zode's adapter and local
 actor reach its node half over the `Internal` links (link IDs 1 and 2), which
 have no bring-up. A node refuses and counts any first handshake that is not a
-Zode handshake (`mgmt/dispatch.rs`).
+Zode handshake, as `UnknownPeer` (`mgmt/dispatch.rs`).
 
 *History.* Before zl-zipline#234 a separate `ph` adapter docked with a node.
 The adapter always initiated the docking session (6.4 §5.6), and after Hello
@@ -371,7 +371,7 @@ lower ZPR address, and a relay never dials.
   first Noise XX message. A node that receives a Key Management packet from an
   unknown substrate address reads that payload before any link exists
   (`mgmt/dispatch.rs`): with the marker it starts a Zode link as the answerer,
-  without it the packet is refused. Noise mixes the payload into the handshake hash,
+  without it the packet is refused and counted as `UnknownPeer`. Noise mixes the payload into the handshake hash,
   so a marker changed in transit breaks the handshake. Adding the marker gains
   an attacker nothing: a Zode link demands a CA-signed certificate whose CN
   passes the acceptance rules.

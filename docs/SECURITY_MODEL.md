@@ -837,9 +837,9 @@ not read the RFCs as a description of current guarantees.
   - **What it exposes.** Anyone on the substrate can now reach `ph`'s
     substrate listener, as on Linux and macOS, where nothing filters it.
     Only the Zode link responder answers there: `mgmt/dispatch.rs` refuses
-    and counts any first handshake that is not a Zode handshake. Before
-    zl-zipline#234 an unmarked handshake reached a legacy adapter-docking
-    responder.
+    and counts (`UnknownPeer`) any first handshake that is not a Zode
+    handshake. Before zl-zipline#234 an unmarked handshake reached a legacy
+    adapter-docking responder.
   - **Why that is acceptable.** A Zode link survives keying only with a
     certificate signed by the network's CA whose CN is in the Zode's current
     topology, and only from the link's owner (rule 3). Everything else on the
@@ -938,7 +938,9 @@ not read the RFCs as a description of current guarantees.
   ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
   *Design decisions*, above). `zipline register` writes the Zode's link key,
   its certificate, the CA certificate, its ZPR address and the relay's CN and
-  substrate address, and `zipline service-run` starts `ph zode` with them.
+  substrate address, and `zipline service-run` starts `ph` with them (still
+  as `ph node`, which a `ph zode`-only core refuses, until
+  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256) switches it).
   The network's generated policy lists every registered Zode in the relay's
   topology and pins its address
   ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).
@@ -970,7 +972,7 @@ not read the RFCs as a description of current guarantees.
 | Attribute sourcing and expiry | `zl-zpr-visaservice/vs/src/trusted_services/` |
 | A2A integrity | `zl-zpr-core/adapter/ph` — `zdp.rs`, `fastpath.rs`, `adapter_tables.rs` |
 | Link crypto and key management | `zl-zpr-core/adapter/ph` — `km_noise.rs`, `km_cert_exchange.rs`, `pki.rs` |
-| Per-packet visa enforcement | `zl-zpr-core/libnode2`, and the dock half of `ph` in `zl-zpr-core/adapter/ph` |
+| Per-packet visa enforcement | `zl-zpr-core/libnode2`, and the node side of `ph` in `zl-zpr-core/adapter/ph` |
 | What policy can express | `zl-zpr-compiler` — see [ZPL.md](ZPL.md) |
 
 [ZDP.md](ZDP.md), "Flow setup", traces a flow's first packet and is the best
