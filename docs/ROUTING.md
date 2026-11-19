@@ -585,7 +585,7 @@ per packet.
 
 **`forwardOnly` visas — implemented on the node, opt-in.** A node installs one
 only if its `forwarding` setting is on: `forwarding = true` in the `[node]`
-section of the `ph node` config file, or `ph node --forwarding true`, which
+section of the Zode config file, or `ph zode --forwarding true`, which
 overrides the file. The default is off. With it off, `insert_visa` refuses the
 visa with `ForwardingDisabled` and logs a warning; a pushed visa is then dropped
 but still acknowledged, and a visa fetched for a bind fails that bind. A
@@ -593,9 +593,10 @@ but still acknowledged, and a visa fetched for a bind fails that bind. A
 table and never matches a new flow. It is used only when the previous node on
 the path sends a `Stream ID Request` naming it: the node asks the next hop for a
 stream for the same visa and maps the upstream stream to the downstream one in
-its PFT. An adapter at either end is refused, because an adapter binds by
-traffic classifier, which a `forwardOnly` visa does not have; an adapter
-requestor is refused before anything is asked of the next hop. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
+its PFT. The Zode's own actor (its local-actor link) at either end is
+refused, because that side binds by traffic classifier, which a
+`forwardOnly` visa does not have; such a requestor is refused before
+anything is asked of the next hop. ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219))
 
 **`setTopology` — drives the Zode's links.**
 libnode2 decodes each `Link` on its own: one without `zprAddr` or with an empty
@@ -758,9 +759,9 @@ Routing destinations are ZPR addresses, and where each kind comes from matters:
 | | Source |
 |---|---|
 | **Node ZPR address** | `zpr_address` in `.zplc`, and the same value in the node's own config. Not allocated. |
-| **Adapter/actor address** | Allocated by the visa service from its pool, or requested by the adapter via the `zpr.addr` claim (the one `zpr.*` claim an adapter may send). |
-| **AAA address** | Used only during authentication. The ZPRnet AAA network is `fd5a:5052:0:aaa::/64`; each node gets a **/88** carved out using the low 24 bits of its node address, pushed to the node as the `AAA_PREFIX` configuration parameter and used to seed its local `AddressPool`. |
-| **Static service address** | A service needing a fixed address sets `zpr_addr` in the adapter config *and* is granted the same address by a trusted service returning `device.zpr_addr` (a `file` store keyed on the adapter CN at minimum). An authored `["zpr.addr", ...]` provider attribute in `.zplc` is a compile error (zipline#109). |
+| **Adapter/actor address** | Visa-service paths unused in v1: an adapter got a pool address, or one granted by a trusted service and requested with the `zpr.addr` claim. Since zl-zipline#234 no adapter docks on a Zode, so every actor is a Zode's own actor at its node address, except the visa service itself: `vs.zpr` is a separate, self-authorized actor at `fd5a:5052::1`, on the relay's TUN beside the relay's node address. |
+| **AAA address** | Was used only while an adapter authenticated over its dock. The ZPRnet AAA network is `fd5a:5052:0:aaa::/64`; each node gets a **/88** carved out using the low 24 bits of its node address, pushed to the node as the `AAA_PREFIX` configuration parameter and used to seed its local `AddressPool`. The visa service still pushes it and a Zode still fills its pool, but since zl-zipline#234 nothing allocates from it: the AAA code is kept, unused (Zodes master plan §5.4). |
+| **Static service address** | A service needing a fixed address runs behind its own Zode, whose node address is pinned by its `[nodes]` entry (as for DNS on ZIPLINE, DNS.md). The adapter form, `zpr_addr` in the adapter config plus a `device.zpr_addr` grant keyed on the adapter CN, has no adapter to serve since zl-zipline#234; the visa service still checks a grant keyed on a Zode's CN when that Zode joins, so a leftover grant that disagrees with the pin makes the join fail. An authored `["zpr.addr", ...]` provider attribute in `.zplc` is a compile error (zipline#109). |
 
 ZRFC 6.4 §4.1 has node addresses as prefixes from which dock and tether
 addresses are cut, so a route to a dock covers every tether on it. The
@@ -779,7 +780,9 @@ comes from a table lookup rather than from prefix containment.
   `ctype`: `UP` if a connected node reports the link, `DOWN` if policy declares
   it but no node reports it, `INVALID` otherwise (and then with no substrate
   addresses, link id, or cost).
-- The per-node admin endpoint lists that node's `adapters` and `links`.
+- The per-node admin endpoint lists that node's `adapters` and `links`. Since
+  zl-zipline#234 the only entry in any `adapters` list is `vs.zpr`, on the
+  relay (`hack_set_vs_docking_node`).
 - `zpr-dashboard` (TUI) and `vs-admin gui` render the same data;
   `demo-zpr-dashboard` in the multinode demo wraps it.
 - Deny reason **`NoRoute`** in the deny log is the routing-specific failure:
@@ -955,7 +958,7 @@ fewer hops, then to the smaller last-link id, so routing is deterministic.
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224))
 
 **Carrying other nodes' traffic is opt-in per node.** The `forwarding` setting
-(`[node] forwarding`, `ph node --forwarding`) defaults to off, and a node with
+(`[node] forwarding`, `ph zode --forwarding`) defaults to off, and a node with
 it off refuses every `forwardOnly` visa. Nothing in the node's code says
 "relay": a Zode relays because it is configured to. The visa service's routing
 over `Policy.transitNodes` (above) is meant to be the primary non-transit

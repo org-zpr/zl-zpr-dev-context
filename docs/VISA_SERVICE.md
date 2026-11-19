@@ -95,45 +95,41 @@ background work.
 
 ### Bootstrap
 
-A ZPRnet needs a visa service, a docking node, and a trusted authentication
-service connected before adapter authentication can work. Those come up on
-static configuration, called **bootstrap** — which is also enough to run an
-entirely statically authenticated ZPRnet.
+A ZPRnet needs a visa service and the relay Zode it runs on before any other
+Zode can authenticate. Those come up on static configuration, called
+**bootstrap** — which is also enough to run an entirely statically
+authenticated ZPRnet.
 
 Bootstrap configuration maps Common Names from ZPR link keys to RSA public key
-files; that list is exactly the set of adapters permitted to authenticate
-statically, and in the adapter-docked layout it must include the visa service
-adapter. The visa service reserves the link key name **`vs.zpr`**. On a relay
-Zode that hosts the visa service there is no such adapter: see the next
-section.
+files; that list is exactly the set of actors permitted to authenticate
+statically. The visa service reserves the link key name **`vs.zpr`**, and its
+own actor needs no entry: see the next section.
 
-The protocol: the adapter signs challenge data from the node with its RSA
-private key, the node forwards the adapter CN and the signature to the visa
-service, and the visa service verifies it against the configured public key.
+The protocol: a Zode connects over VS-API, signs the visa service's challenge
+with its RSA private key (`--auth-private-key`), and the visa service verifies
+the signature against the configured public key. The visa service still
+implements the adapter form too, where a node forwarded a docked adapter's CN
+and signature, but since zl-zipline#234 no adapter docks on a Zode.
 
-### Docking and trusted services
+### The visa service on the relay, and trusted services
 
-The visa service activates by docking with a node through its adapter. The
-adapter establishes a link with its designated CN, the node identifies the visa
-service by that CN, and the node then authenticates to the visa service over
-the VS-API using its own private RSA key.
-
-**On a relay Zode there is no visa-service adapter** (zl-zipline#229). The
-visa service runs beside the relay's `ph node`, `vs.zpr` is a second address on
-the relay's TUN, and the relay refuses a dock from the visa service's adapter.
-The visa service authenticates itself at startup, and the relay authenticates
-to it over VS-API as above. The adapter-docked layout above remains for nodes
-that are not relays (the `one-node-*` tests) until #234. See "The relay hosts
-the visa service, with no adapter" under *Design decisions*, and ZODE_LINKS.md.
+The visa service runs on the relay Zode, with no adapter (zl-zipline#229). It
+runs beside the relay's `ph zode` on the relay's TUN, where `vs.zpr`
+(`fd5a:5052::1`) is a second address: the relay lists it in `--zpr-addr`
+after its own. The visa service authenticates itself at startup, and every
+Zode, the relay first, authenticates to it over VS-API as above. A relay or
+Zode accepts only Zode links, so nothing docks on a Zode. See "The relay
+hosts the visa service, with no adapter" under *Design decisions*, and
+ZODE_LINKS.md.
 ZIPLINE runs it this way ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)): each network's
-`zipline-relay-<id>` container holds the relay's `ph node`, valkey and the
+`zipline-relay-<id>` container holds the relay Zode, valkey and the
 visa service, and its policy has no `vs.zpr` bootstrap key or rule. The visa
 service needs neither: it authenticates itself by construction
 (`authenticate_visa_service`), and `approve_connection` approves an actor
 that matches no join policy.
 
-A trusted service can only join through a node once a visa service is
-docked — nodes cannot authenticate connections by themselves. Each time a new
+A trusted service can only join once the visa service is up — Zodes cannot
+authenticate connections by themselves. Each time a new
 trusted service connects, the visa service refreshes attributes for every
 connected actor.
 
@@ -309,8 +305,8 @@ Every authentication-capable trusted service is named in policy and must be
 connected for authentication to succeed; if none is reachable and the actor
 cannot use bootstrap authentication, authentication fails.
 
-The visa service passes authentication-service addresses to nodes, which pass
-them to connecting adapters. A trusted service returns a token carrying the
+The visa service passes authentication-service addresses to nodes; a Zode
+uses them for its own login (zl-zipline#233). A trusted service returns a token carrying the
 attributes policy asks for, some of which policy designates as **identity
 attributes**. The visa service then queries other trusted services with those
 identity attributes to complete the actor's profile.
@@ -390,12 +386,13 @@ peers are offered and what they dial (ZODE_LINKS.md rule 13b; ROUTING.md,
 node; the link's certificate check bounds what a false one can do, and whether
 that is enough is [#264](https://github.com/org-zpr/zl-zipline/issues/264).
 
-The visa service's own adapter is the one address neither source supplies: it
-is fixed by configuration, so an actor whose *authenticated* CN is `vs.zpr` is
+The visa service's own address is the one neither source supplies: it is
+fixed by configuration, so an actor whose *authenticated* CN is `vs.zpr` is
 assigned `fd5a:5052::1` before policy is consulted, with no pin and regardless
-of what it requested, and its adapter's record supersedes the one its startup
-self-authorization wrote there. A merely claimed `vs.zpr` gets nothing
-(zipline#102).
+of what it requested. The visa service's startup self-authorization writes
+that record. A merely claimed `vs.zpr` gets nothing (zipline#102). The visa
+service still lets an authenticated `vs.zpr` adapter replace the record, but
+since zl-zipline#234 no Zode docks one.
 
 Authentication lifetimes depend on how the actor authenticated. **Bootstrap
 (RSA) authentication does not expire**: re-proving possession of a static key
@@ -411,7 +408,8 @@ What forces re-authentication is a **policy install**, not a clock. Every
 install records the new policy generation and a deadline (`now +
 reauth_deadline`), then asks each connected node over the VSS-API
 (`requestAuthentication`) to re-authenticate itself and its docked adapters
-under the new generation; the sweep re-sends to actors still owing, and once
+(a Zode has none since zl-zipline#234, and answers for its own actor) under
+the new generation; the sweep re-sends to actors still owing, and once
 the deadline passes it revokes whoever has not re-authenticated —
 adapters through the batched `revokeAuthentication`, nodes by disconnect
 (zipline#123). Authenticating under the newest generation satisfies all older
@@ -445,10 +443,9 @@ is queued for installation on each, and it is returned to the caller.
 
 ### Distributing visas
 
-The visa returns to the requesting node, which must have a directly connected
-ingress or egress adapter, and propagates to the nodes along the path. Nodes
-attached to the ingress and egress adapters establish the visa association
-(stream ID) with the adapter.
+The visa returns to the requesting node, the ingress Zode, and propagates to
+the nodes along the path. The ingress and egress Zodes bind it (a stream ID)
+to their own actor's traffic.
 
 Each node gets its own copy of the visa, cut to its role on the path (the table
 in [ROUTING.md](ROUTING.md)). Intermediary and egress copies carry
@@ -491,7 +488,7 @@ to re-request before expiry.
 *Built differently* ([#271](https://github.com/org-zpr/zl-zipline/issues/271)):
 a Zode checks expiry only when it would use a visa for a new binding, with no
 timer. A new flow that matches an expired visa at its ingress Zode ejects
-that visa, withdraws its adapter streams and looks again, so it triggers a
+that visa, withdraws its streams and looks again, so it triggers a
 fresh request unless that lookup finds a live visa. Further down the path,
 each hop checks once, when it handles the `Stream ID Request`: an expired
 visa it holds is refused, and one it must fetch by ID is looked up live
@@ -500,8 +497,9 @@ bootstrap hand-off, J4, is separate and older.)
 At each Zode, streams already bound under an expired visa keep forwarding
 until a new flow matches it there, that Zode loses a link they cross, or an
 R16 reset drops every visa outside the Zode's two VS-API flows
-(ZODE_LINKS.md; a periodic sweep is
-[#274](https://github.com/org-zpr/zl-zipline/issues/274)). The visa service
+(ZODE_LINKS.md). Checking expiry on every use of a visa, so bound streams do
+not outlive it, is planned Zodes-epic work, not done yet
+([#274](https://github.com/org-zpr/zl-zipline/issues/274)). The visa service
 forgets a visa when it expires, so it never revokes an expired one; before
 #271 a Zode kept using expired visas for good. See ZODE_LINKS.md, "Visa
 expiry at match time (#271)".
@@ -670,10 +668,13 @@ and `vs.zpr`, and the relay grants the visa service's visas only for
 `vs.zpr`. A `vs_addr` that is not a local address makes the connect fail; it
 never falls back to a source the kernel picks.
 
-**`vs_addr` must be local before `vs` starts.** If it is not, the VS-API and
-admin listener tasks log an error and end, and the process keeps running
-without them (`vsapi_worker::launch`). On a relay Zode that hosts the visa
-service, start order is therefore: the TUN with both addresses, then `ph node`,
+**`vs_addr` must be local before `vs` starts.** If it is not, the
+`v0.22.0-zodes.9` release logs an error, ends the VS-API and admin listener
+tasks and keeps running without them (`vsapi_worker::launch`); since
+visaservice#70 (1037ac7,
+[zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266)) on its
+`feature/zodes`, `vs` exits with status 1 instead. On a relay Zode that hosts the visa
+service, start order is therefore: the TUN with both addresses, then `ph zode`,
 then valkey and `vs` (ZODE_LINKS.md, "The relay hosts the visa service
 (#229)").
 
@@ -838,8 +839,9 @@ following the `device.hostname` precedent, and `zpr_` keeps it from being
 confused with an operator's own `addr` field. `zpr.addr` stays the committed
 address, the request and the pin. Any service may grant, not only `file`,
 because the mapping is declared in the signed `.zplc`, and attributes already
-decide access with dock-side enforcement (zipline#83) pinning an actor to its
-granted address. Choosing an address is therefore no new power; the static-range
+decide access with ingress enforcement pinning an actor to its address
+(zipline#83 added it on the dock side; since zl-zipline#234 a Zode binds only
+traffic from its own addresses, `owns_address`). Choosing an address is therefore no new power; the static-range
 checks apply to every source alike.
 ([zipline#99](https://github.com/org-zpr/zl-zipline/issues/99))
 
@@ -1090,7 +1092,7 @@ and denied. The rules:
   stopped. Its link-state reports are forgotten, so its links are down until it
   reports again, and the visas crossing a link that went down are revoked.
   Every other visa installed on the joiner is marked not installed, so a
-  `reconnect` gets it pushed again. The node actor and its adapters stay, so
+  `reconnect` gets it pushed again. The node actor stays, so
   `reconnect` still works (gate g89 q5).
 
 The checks, the teardown and the mint run as one step under the core-visa
@@ -1129,7 +1131,7 @@ not authenticate either end yet (SECURITY_MODEL.md, "Design decisions";
 From the Zodes epic ([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216)),
 pd plan p41, [zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229).
 
-**No visa-service change.** The visa service runs beside the relay's `ph node`
+**No visa-service change.** The visa service runs beside the relay's `ph zode`
 on the relay's TUN, and `vs.zpr` is a local actor of the relay (ZODE_LINKS.md,
 "The relay hosts the visa service (#229)"). It authenticates itself at startup
 (`self_authorize`). With no adapter, the `vs.zpr` actor's docking node is the
@@ -1139,6 +1141,13 @@ over bootstrap visas the relay requested, and `is_relay` needs the docking node
 to be set. The relay's held-back `ConnectRequest` for the adapter
 (`deferred_vs_connect`) was a second registration of `vs.zpr`; without an
 adapter there is none, and nothing in the visa service depended on it.
+
+**Since zl-zipline#234 this is the only layout.** Every Zode is either a relay
+or dials one over its initial link, and a relay or Zode refuses any first
+handshake that is not a Zode handshake, so no visa-service adapter can dock
+anywhere. Before #234 a node that was not a relay could still dock the visa
+service's adapter (the `one-node-*` netns tests); that layout and those
+tests are gone.
 
 **Follow-up, [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266):** the visa service should exit when a listener
 cannot bind `vs_addr`, instead of running without VS-API.
@@ -1206,7 +1215,9 @@ filter disagreed. The decisions (gate g121):
 
 ### Deferred
 
-No tracker issues are filed for these unless linked.
+No tracker issues are filed for these unless linked. The three adapter items
+at the end are visa-service code that no Zode reaches since zl-zipline#234,
+because no adapter docks on a Zode.
 
 - **Multi-valued `user.zpr.authority`.** More faithful, but it touches
   evaluation semantics and every consumer of the key. Revisit only if a
@@ -1267,9 +1278,23 @@ No tracker issues are filed for these unless linked.
   timer sweeps the table, so live streams under an expired visa keep
   flowing until an ingress match ejects it, a link they cross drops, or an
   R16 reset drops every visa outside the Zode's two VS-API flows
-  ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
-  [#274](https://github.com/org-zpr/zl-zipline/issues/274); see *Expiration,
-  revocation, renewal*).
+  ([#271](https://github.com/org-zpr/zl-zipline/issues/271); see *Expiration,
+  revocation, renewal*). Enforcing expiry on every use of a visa is planned
+  Zodes-epic work, not done yet
+  ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+- **No actor docks on a node.** The design has adapters dock on nodes, and
+  the visa service still implements the adapter roles: adapter
+  authentication through a node, pool and granted addresses,
+  and `revokeAuthentication`. Since
+  [zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234) every
+  node is a Zode, which accepts only Zode links, so in v1 every actor other
+  than `vs.zpr` is a Zode's own actor and these paths are unused. The AAA
+  prefix push is still live: the visa service sends `Configure([AAA_PREFIX])`
+  and the Zode validates it and fills its pool
+  (`vss_worker::process_configuration`), though nothing allocates from that
+  pool in v1 ([ZODE_LINKS.md](ZODE_LINKS.md), "AAA kept, unused"). The visa
+  service has no adapter either: it runs on the relay (see *The visa service
+  on the relay, and trusted services*).
 - **Attributes are refreshed only after they expire**, so the visa service
   denies every visa request that needs an attribute in its last 30 seconds,
   while that attribute still bounds the visa's lifetime and no refresh of

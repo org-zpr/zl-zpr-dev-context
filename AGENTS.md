@@ -49,13 +49,13 @@ paths, so they can be opened directly.
 | Building a compatible set of binaries, or working a build-set issue | `docs/BUILD.md` ("Compatible build sets"), `zpr-dev/docs/specs/spec-003-build.md` |
 | Changing how `zpr-dev build` gates or runs the netns test tier, or its Docker fallback | `zpr-dev/docs/specs/spec-003-build.md` ("Test tiers"), `docs/BUILD.md` |
 | Changing how the visa service assigns, pins or checks a ZPR address | `docs/VISA_SERVICE.md`, `docs/SECURITY_MODEL.md` |
-| Working on `ph adapter` Windows support (Wintun, `WaitSet`, named-pipe control channel) | `docs/SYSTEM_OVERVIEW.md` ("Design decisions"), `docs/BUILD.md` ("Design decisions") |
+| Working on `ph zode` Windows support (Wintun, `WaitSet`, named-pipe control channel) | `docs/SYSTEM_OVERVIEW.md` ("Design decisions"), `docs/BUILD.md` ("Design decisions") |
 | Working an issue under the capnp FD-passing umbrella (the `mkolehmainen/capnproto-rust` fork, unix-only `capnp-ancillary`, retiring `capture.sock`), or changing core's capnp `[patch]` | docs/BUILD.md (incl. ## Design decisions), the fork's ZIPLINE.md |
-| Working an issue under the `ph node` on macOS umbrella (macOS `new_mq` address rule, `macos-node-test.md`) | `docs/SYSTEM_OVERVIEW.md` ("Design decisions") |
+| Working on `ph zode` on macOS (macOS `new_mq` address rule, `macos-zode-test.md`) | `docs/SYSTEM_OVERVIEW.md` ("Design decisions") |
 | Changing ZPL syntax or semantics, or the compiler | `docs/ZPL.md` |
 | Changing visa issuance, revocation, or the evaluator | `docs/VISA_SERVICE.md`, `docs/SECURITY_MODEL.md` |
 | Changing authentication, identity, attributes, or trusted services | `docs/SECURITY_MODEL.md`, `docs/VISA_SERVICE.md` |
-| Changing packet formats, links, docking sessions, forwarding, or compression | `docs/ZDP.md` |
+| Changing packet formats, links, forwarding, or compression | `docs/ZDP.md` |
 | Changing Zode links: who dials, acceptance, link lifecycle, link-state reports, forwarding (traffic over Zode links), or how the relay hosts the visa service | `docs/ZODE_LINKS.md`, `docs/ZDP.md`, `docs/ROUTING.md` |
 | Changing routing, topology, or address assignment | `docs/ROUTING.md`, `docs/SYSTEM_OVERVIEW.md`, `docs/ZDP.md` |
 | Changing DNS resolution, the CoreDNS `zpr` plugin, machine hostnames, or a demo's `Corefile` | `docs/DNS.md` |

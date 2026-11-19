@@ -127,7 +127,7 @@ as `zl-v0.26.0`, not `v0.26.0`.
 
 | Repository | Language | What it is |
 |---|---|---|
-| [`zl-zpr-core`](#zl-zpr-core) | Rust | Core ZPR components — the node and its adapters |
+| [`zl-zpr-core`](#zl-zpr-core) | Rust | Core ZPR components — `ph` (the Zode) and `ph-cli` |
 | [`zl-zpr-common`](#zl-zpr-common) | Rust | Shared `zpr` crate: protocol types, constants, IDL |
 | [`zl-zpr-visaservice`](#zl-zpr-visaservice) | Rust | The Visa Service and its policy evaluator |
 | [`zl-zpr-vsapi`](#zl-zpr-vsapi) | Cap'n Proto | IDL for the Visa Service API |
@@ -177,16 +177,17 @@ zl-zpr-vsapi  ─┴─► zl-zpr-common      submodules inside zl-zpr-common)
 
 ### `zl-zpr-core`
 
-Core ZPR components: the node implementation, its adapters, and the
-integration tests that exercise a running ZPRnet.
+Core ZPR components: `ph`, which runs a Zode (`ph zode`, its only mode
+since zl-zipline#234), its admin CLI `ph-cli`, and the integration tests that
+exercise a running ZPRnet.
 
 ```text
-adapter/            node adapters
+adapter/            ph, ph-cli and the admin API schema (the directory
+                    name is historical: there is no separate adapter)
 libnode2/           the node library
-integration-test/   end-to-end tests
-examples/           worked examples
+integration-test/   end-to-end tests and the platform test guides
+docs/               SETUP.md, how to set up and run Zodes
 diagrams/           architecture diagrams
-packet_walk.md      a packet's path through the node
 ```
 
 A Cargo workspace driven by `make`. The build pulls tools and libraries from

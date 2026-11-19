@@ -23,7 +23,7 @@ service's admin API, and short TTLs are what make the answer track reality.
 ```
  ┌──────────┐  DNS UDP/53         ┌────────────────────────┐  HTTPS TCP/8182   ┌──────────────┐
  │ client   │  visa: client →     │  CoreDNS + zpr plugin  │  visa: zpr-dns →  │  admin API   │
- │ (adapter)│  zpr-dns service    │  granted ZPR address   │  vs-admin service │ fd5a:5052::1 │
+ │ (Zode)   │  zpr-dns service    │  granted ZPR address   │  vs-admin service │ fd5a:5052::1 │
  └──────────┘ ───────────────────▶└────────────────────────┘ ─────────────────▶└──────────────┘
    dig AAAA web.demo                GET /admin/services/web        200 { zpr_addr }
                                     then /admin/hosts/web on 404
@@ -80,17 +80,19 @@ a service, and allow both hops. The resolver appears as the *subject* of an
 
 ```
 Define zpr-dns as a service.        # UDP/53, provider address granted by a trusted service
-Define vs-admin as a service.       # TCP/8182, provided by the VS adapter itself
+Define vs-admin as a service.       # TCP/8182, provided by the VS's own actor (vs.zpr)
 Allow access:all users to access zpr-dns.
 Allow zpr-dns to access vs-admin.
 ```
 
 In the `.zplc`, the resolver gets its static address from a trusted service
-that vends `device.zpr_addr` keyed on the resolver's adapter CN (an authored
+that vends `device.zpr_addr` keyed on the resolver's CN (an authored
 `["zpr.addr", ...]` provider pin is a compile error since zipline#109 — in
 dns-demo the existing `machines` store carries the grant), so clients can be
 pointed at a fixed address. `vs-admin` is provided by the visa service's own
-adapter CN (`vs.zpr`), which is what puts `fd5a:5052::1` behind the name:
+actor, CN `vs.zpr`, which is what puts `fd5a:5052::1` behind the name. This
+example is the `dns-demo` adapter layout; on Zodes the resolver's address is
+its Zode's node address instead (see *Implementation status*):
 
 ```toml
 [protocols.dns]
@@ -238,7 +240,7 @@ permission. Neither touched `policy.capnp`, the compiler or `zpr-common`.
 
 **The resolver is an ordinary policy subject, and the VS an ordinary
 provider.** `Allow zpr-dns to access vs-admin` (a service as the subject)
-and `vs-admin` provided by the VS's own adapter were the design's one real
+and `vs-admin` provided by the VS's own actor were the design's one real
 unknown; both compile and load, so no device-class stand-in for the resolver
 was needed. [zipline#35](https://github.com/org-zpr/zl-zipline/issues/35)
 
@@ -310,10 +312,12 @@ Service names and machine names are fully implemented and merged. The end-to-end
 `zl-zpr-demo/dns-demo`: `make && local-compute/deploy-docker.sh &&
 local-compute/test-dns.sh` stands up node + VS + web + client + resolver and
 exercises resolution, liveness, both policy hops, machine names and aliases,
-and the collision / precedence / invalid-name controls.
+and the collision / precedence / invalid-name controls. The demo still docks
+its VS, web, client and resolver as adapters on one node, so it runs only
+against a core from before zl-zipline#234, which removed the adapter dock.
 
 On ZIPLINE the resolver runs behind a Zode named `dns.zpr` ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
-a `ph node` with an initial link to the relay, a server-generated link
+a Zode with an initial link to the relay, a server-generated link
 certificate and RSA key, and its address `fd5a:5052:90de::2` pinned by its
 `[nodes]` entry in policy. It links to the relay only, and endpoint queries
 reach it through the relay. The `addresses` file trusted service that used to

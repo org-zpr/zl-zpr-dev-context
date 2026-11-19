@@ -69,8 +69,9 @@ visa-service-facing half that validates it and returns attributes. Neither
 half was implemented. OIDC is the first real implementation of that slot, with
 Google supplying the credential.
 
-The adapter is the OIDC **Relying Party**, using the RFC 8252 native-app
-pattern: a public client with no client secret, PKCE, and a loopback redirect.
+The Zode logs its own actor in, and `ph-cli` is the OIDC **Relying Party**,
+using the RFC 8252 native-app pattern: a public client with no client secret,
+PKCE, and a loopback redirect.
 The visa service validates the resulting `id_token` offline against Google's
 JWKS. Nothing about Google is proxied onto the ZPRnet, and the visa service
 needs no direct internet access.
@@ -82,10 +83,10 @@ during design; where they conflict, this section governs.
 
 | Vision assumption | Resolution |
 |---|---|
-| "Is it possible to do this with zero configuration settings on the adapter?" | **Yes.** A public client's `client_id`, issuer URL, and scopes are not secrets, so the node supplies them. The adapter needs no local Google configuration. |
-| "Does [the node] have a way to tell the adapter the type?" | Nearly. The node already holds `ServiceDescriptor.service_uri` with a scheme (`zpr-common/src/vsapi_types/services.rs:20`), but the ZDP `ASA` TLV flattens it to a bare `SocketAddr` (`zpr-core/adapter/ph/src/mgmt/handlers.rs:285`), discarding it. See *Wire format changes*. |
-| "The google open ID API endpoint will need to be already proxied on the ZPR network, or the adapter can speak normal IP" | Both, for different legs. Adapter and browser reach Google over normal IP. The visa service reaches only the JWKS endpoint, over the ZPRnet to a `CONNECT` proxy that tunnels to Google — so nothing of Google's is *proxied* onto the ZPRnet in the reverse-proxy sense, which would be unsafe. |
-| "Adapter grabs the tokens ... forwarded to the node as part of the ZPR authentication process" | Correct, and the adapter exchanges the authorization code itself. The visa service receives an `id_token`, never an authorization code. |
+| "Is it possible to do this with zero configuration settings on the adapter?" | **Yes.** A public client's `client_id`, issuer URL, and scopes are not secrets, so the visa service supplies them. The Zode needs no local Google configuration. |
+| "Does [the node] have a way to tell the adapter the type?" | Yes. The visa service's auth-service list carries each OIDC provider's client config (`OidcClientConfig`), and the Zode reads it directly (`auth_agent::oidc_idps`). See *Wire format changes*. |
+| "The google open ID API endpoint will need to be already proxied on the ZPR network, or the adapter can speak normal IP" | Both, for different legs. `ph-cli` and the browser reach Google over normal IP. The visa service reaches only the JWKS endpoint, over the ZPRnet to a `CONNECT` proxy that tunnels to Google — so nothing of Google's is *proxied* onto the ZPRnet in the reverse-proxy sense, which would be unsafe. |
+| "Adapter grabs the tokens ... forwarded to the node as part of the ZPR authentication process" | Correct, and `ph-cli` exchanges the authorization code itself. The Zode sends the visa service an `id_token` in a `reauthorize`, never an authorization code. |
 | "Not sure if this requires a call to google from the visa service" | No per-authentication call. Only a periodic, cacheable, stale-tolerant JWKS fetch. |
 | "the visa service needs to be configured with a trusted service for this purpose (eg, Google)" | Correct, and the declaration must scope *what Google is trusted to assert* — see `allowed_domains`. |
 
@@ -168,7 +169,7 @@ Roles, in OIDC terms:
 | Role | Who |
 |---|---|
 | OpenID Provider | Google |
-| Relying Party | the ZPR adapter (`ph`), via `ph-cli` |
+| Relying Party | `ph-cli`, for the Zode's own actor |
 | End User | the human at the terminal |
 
 Channels:
@@ -179,8 +180,7 @@ Channels:
 | `ph-cli` → Google token endpoint | normal IP |
 | Google → loopback redirect | `http://127.0.0.1:<ephemeral>/callback` |
 | `ph-cli` → `ph` | existing capnp RPC over the Unix socket in `get_data_home()` |
-| adapter → node (blobs) | ZDP `AcquireZprAddressRequest` |
-| node → visa service | VSAPI `ConnectRequest.blobs` |
+| Zode → visa service (blobs) | VSAPI `reauthorize` (`ReauthRequest.blobs`) over the Zode's VS-API session |
 | **visa service → Google JWKS** | **over the ZPRnet to an on-net `CONNECT` proxy, then TLS end-to-end to Google** |
 
 The visa service has no direct internet route. It reaches the JWKS endpoint
@@ -195,14 +195,13 @@ integrity on top. See *Security requirements* for the alternative model that
 must not be built.
 
 Standing up the proxy is the deployer's burden, and it is off-the-shelf
-software — squid, tinyproxy, anything that speaks `CONNECT` — with a ZPR
-adapter in front. It is declared in policy as an ordinary TCP service, so it
+software — squid, tinyproxy, anything that speaks `CONNECT` — behind a Zode. It is declared in policy as an ordinary TCP service, so it
 needs no new L7 builtin, and several trusted services may share one proxy.
 
 **The visa service performs no OIDC discovery.** `jwks_uri` is pinned in the
 ZPLC. Discovery would require a second host (Google's discovery document is on
 `accounts.google.com` while the keys are on `www.googleapis.com`), doubling the
-egress surface for no benefit. The adapter still discovers normally, since it
+egress surface for no benefit. `ph-cli` still discovers normally, since it
 has real internet access. A pinned `jwks_uri` is also more auditable — a policy
 reader can see exactly what the visa service will fetch — and because policy is
 signed, it is arguably a stronger assertion than a fetched discovery document.
@@ -219,7 +218,7 @@ For cold start, before any fetch has succeeded, an initial key set is seeded in
 policy. Precedent: `zpr-compiler/src/policybuilder.rs:275` already embeds
 trusted-service certificates via `write_service_cert`.
 
-**Why the adapter and not the visa service exchanges the code.** Having the
+**Why `ph-cli` and not the visa service exchanges the code.** Having the
 visa service redeem the authorization code would keep "the Visa Service
 performs the actual authentication" literally true, and would let it hold the
 PKCE verifier so a stolen code were useless to the endpoint. It was rejected
@@ -242,7 +241,10 @@ three combinations are supported.
 | OIDC only *(new)* | *absent* | `google` | **claimed, unauthenticated** |
 | Both *(new)* | `zpr-bootstrap` | `google` | **authenticated** |
 
-On a Zode the "both" case is reached in two steps, on one actor. The machine
+The visa service implements all three on connect. Since zl-zipline#234 the
+only actor `ph` authenticates is a Zode's own, which always connects with its
+RSA key, so `ph` reaches only the device-only and "both" rows. On a Zode the
+"both" case is reached in two steps, on one actor. The machine
 authenticates as a node with its RSA key (device only). A user login then adds
 the user namespace to that same actor through `reauthorize`, and a logout
 removes what that login added; the device authority and the ZPR address never
@@ -278,7 +280,7 @@ Consequences:
   `user.zpr.authority:zpr-bootstrap`. This is admissible by design but not
   implemented here.
 
-### Adapter, CLI, and daemon split
+### CLI and daemon split
 
 `ph` is a service, eventually started by `systemd`. A daemon cannot own an
 interactive browser flow. `ph-cli` already talks to `ph` over capnp RPC
@@ -290,19 +292,21 @@ an *interface* — so capability passing is established idiom.
 ```capnp
 interface AuthAgent {
     # Provided by ph-cli, called by ph when a browser (and maybe a human) is needed.
-    getOidcCredential @0 (issuer :Text, clientId :Text, scopes :List(Text),
-                          nonce :Data, interactive :Bool)
-                       -> (result :SuccessOrError, idToken :Text);
+    getOidcCredential @0 (issuer :Text, clientId :Text, clientSecret :Text, scopes :List(Text),
+                          allowOfflineAccess :Bool, nonce :Text, interactive :Bool)
+                      -> (result :SuccessOrError, idToken :Text);
 }
 
-# on CmdLineInter:
-startLink @12 (id :UInt32, authAgent :AuthAgent) -> (result :SuccessOrError);
+# on CmdLineInter (zl-zipline#233):
+login     @16 (authAgent: AuthAgent) -> (result: SuccessOrError);
+logout    @17 () -> (result: SuccessOrError);
+showLogin @18 () -> (result: Text);
 ```
 
-The daemon supplies what the node told it, plus the nonce from
-`ZdpInitAuthenticationPayload` (`auth.rs:81`) so the `id_token` is bound to this
-ZPR authentication attempt. The CLI does discovery, PKCE, browser launch,
-loopback listener, and token exchange, and returns only the `id_token`.
+The daemon supplies the provider the visa service lists, plus a nonce the
+visa service issued (`getLoginNonce`), so the `id_token` is bound to this
+login. The CLI does discovery, PKCE, browser launch, loopback listener, and
+token exchange, and returns only the `id_token`.
 
 `interactive` tells the agent whether it may involve the human.
 `interactive = true` is initial login: prompt and open a browser.
@@ -319,12 +323,12 @@ Google TLS trust decisions out of a root daemon.
 
 | Registrar | Shape | Use |
 |---|---|---|
-| `ph-cli connect` | foreground, blocking, exits when the link is up | interactive login |
-| `ph-cli auth-agent` | long-running, per-login-session, a `systemd` **user** unit | unattended re-authentication |
+| `ph-cli connect` | foreground, blocking, exits when the login finishes | scripted login |
+| `ph-cli auth-agent` | long-running, per-login-session, a `systemd` **user** unit | interactive login and unattended re-authentication |
 
 This is the `polkit` / `ssh-agent` pattern: a privileged system daemon calls
 back into a per-session agent for what only the session can provide.
-`ph-cli connect` is `startLink` with an agent attached.
+Both call `login` with an agent attached; neither takes a link id.
 
 **Flow inside `ph-cli`:**
 
@@ -341,17 +345,13 @@ back into a per-session agent for what only the session can provide.
 6. `POST` the token endpoint with code + verifier.
 7. Return the `id_token`.
 
-**FSM impact.** `do_https_authenticate` (`link_state.rs:1363`) already spawns a
-task that awaits an arbitrarily slow operation and emits
-`AuthenticationSuccess` / `AuthenticationFailure`, so the browser flow drops
-into the existing shape. It does resolve the TODO at `link_state.rs:1417`
-("Should we have a state to represent waiting-for-authentication?"): yes — add
-`WaitForUserAuth` with an `OIDC_USER_INTERACTION_TIMEOUT` distinct from
-`VS_AUTHENTICATION_TIMEOUT`, because existing timeouts are sized for
+**No link state.** The login rides on the Zode's VS-API session, not on a
+link (see *Design decisions*). The wait for the user has its own bound,
+`OIDC_USER_INTERACTION_TIMEOUT` (300 s), because other timeouts are sized for
 machine-speed operations.
 
-**`connect` blocks** until the link is up, with progress indication, and returns
-a meaningful exit code.
+**`connect` blocks** until the login succeeds or fails, and returns a
+meaningful exit code.
 
 **Error taxonomy.** `LinkEvent::AuthenticationFailure` currently carries no
 reason. Good feedback here is essential — these are the cases users hit, and
@@ -369,8 +369,8 @@ they demand different actions:
 
 The last is the sharpest: "your login failed" and "your login succeeded but
 policy will not admit this endpoint" require completely different responses and
-are currently indistinguishable. A reason code must propagate visa service →
-node → adapter → CLI.
+were indistinguishable. A reason code propagates visa service → Zode → CLI
+(`AuthFailureReason`).
 
 ### Credential lifetimes and re-authentication
 
@@ -504,11 +504,18 @@ visa-checked and A2A-integrity-checked, and attribute freshness is handled by
 *attribute* expiry, which refreshes independently. Bootstrap
 `device.zpr.authority` is therefore stamped far-future (zipline#119). What
 enforces a policy change instead is the install itself: every policy install
-obliges every connected actor — the node and each docked adapter — to
+obliges every connected actor (each Zode's own actor) to
 re-authenticate every authority it holds under the new policy generation
 within the visa service's `reauth_deadline`, the RSA leg against the new
 snapshot's bootstrap keys and the OIDC leg silently through the auth agent;
-whoever cannot is revoked at the deadline (zipline#123). A bootstrap key
+whoever cannot is revoked at the deadline (zipline#123). A failed silent
+renewal does not disconnect a logged-in Zode: `zode_login::answer_policy_reauth`
+falls back to device-only K2 authentication with the bootstrap key, so the
+machine stays connected under the new policy generation and the user's login
+is dropped. A resident `auth-agent` is then asked for a new interactive login
+(`zode_login::session_replaced`, as after any session replacement), so a
+browser prompt at that point is expected. Only a Zode that cannot pass K2
+either is revoked. A bootstrap key
 removed from policy thus takes effect within one deadline of the install,
 which is a tighter and better-targeted bound than any timer.
 
@@ -539,7 +546,7 @@ access. Deployments that will not accept persistence leave it off and accept a
 prompt every `expiration_seconds`.
 
 **The token is held in memory by `ph-cli auth-agent` and nowhere else.**
-`auth-agent <id>` already runs until interrupted, so the token lives in that
+`auth-agent` runs until interrupted, so the token lives in that
 process, keyed by issuer, and dies with it: silent renewal for a whole working
 session, no at-rest credential, no new dependency, and none of the persistence
 risk weighed above. OS-keyring persistence stays deferred; it is additive (a
@@ -568,33 +575,40 @@ conditional fact rather than inheriting the claim. The renewal itself is
 unaffected in every deployment: a refresh grant is a back-channel HTTPS POST
 with no browser, no desktop and no loopback listener, so root is fine for
 it. Only the *interactive* leg is touched, and only in the residual case,
-where the documented form is `sudo ph-cli auth-agent <id> --no-browser` with
+where the documented form is `sudo ph-cli auth-agent --no-browser` with
 the printed URL pasted into the user's own browser — once per session
 ceiling instead of once per `expiration_seconds`.
 
-**When user authentication expires and renewal does not happen:** log and
-disconnect. This is implemented, not aspirational. A periodic
-authentication-expiry sweep in the visa service (`vs/src/auth_sweep.rs`, one
-pass per `MIN_VISA_LIFETIME` — fine-grained enough that a revocation lands
-inside the shortest possible visa lifetime) finds every connected adapter
-whose `get_authentication_expiration()` has passed, batches one real
-`revokeAuthentication` per docking node, and drops the actor from the store —
-but **only on a positive ack**, so a VSS outage defers the removal to the next
-pass rather than half-removing it. The node honors the revocation by
-terminating the actor and dropping its visas through the existing disconnect
-path. A renewal that lands while a revoke is in flight wins: the sweep
-re-reads the stored expiry after the ack and keeps an actor whose expiration
-moved.
+**When user authentication expires and renewal does not happen:** the Zode
+logs the user out. At the expiry, with no renewal, ph sends a device-only
+`reauthorize` (`zode_login.rs` `expire`). The user authority leaves the
+actor only when the visa service accepts it: if it is refused, ph keeps the
+login recorded and tries again every 10 s (`RENEWAL_RETRY_INTERVAL`) until
+it succeeds, and the visa service's expiry sweep, which skips node actors,
+is no fallback for this. The machine stays connected: once the visa service
+accepts the device-only `reauthorize`, the OIDC login's attributes are
+dropped, so new flows no longer match rules that needed them (the visa
+service re-enriches the actor from its device identity, and a trusted
+service may still supply `user.*` attributes for it; see VISA_SERVICE.md, "A
+Zode's own login and logout"). Two limits follow. Until that `reauthorize`
+succeeds, the expired user authority still caps the actor's authentication
+lifetime, so the visa service can deny the Zode's new visa requests. And a
+stream bound under a user visa before the expiry can keep forwarding past
+both the login's and the visa's expiry: `ph` checks expiry when it matches a
+new flow, not on the forwarding path, so the stream lasts until something
+removes its binding. Checking expiry on every use of a visa is planned:
+[#274](https://github.com/org-zpr/zl-zipline/issues/274).
+`zode-oidc-test.sh` tests the expiry with a new flow for this reason.
 
-Graceful degradation — dropping only the user namespace so device-only rules
-keep working while user rules stop matching — remains **deferred**, and the
-reasons are unchanged. `get_authentication_expiration`
-(`libeval/src/actor.rs`) returns a single actor-level expiration computed as
-the **minimum** over the authority and identity-key attributes, so one expired
-namespace expires the whole actor; and `revokeAuthentication(addrs)` revokes an
-actor wholesale rather than a namespace. Revoking the *visas* that depended on
-the expired namespace needs nothing new — `visa_reconciler` already
-re-evaluates live visas when attributes change.
+The visa service's authentication-expiry sweep (`vs/src/auth_sweep.rs`)
+revokes expired *adapter* actors on their docking node; node actors are out
+of its scope (zipline#44). Since zl-zipline#234 no actor docks on a Zode, so
+the sweep finds nothing there, and a Zode acks any `revokeAuthentication` as
+a no-op (`vss_worker::process_revoke_auth`). The visa service itself still
+has no per-namespace revocation: `get_authentication_expiration`
+(`libeval/src/actor.rs`) returns the **minimum** over the authority and
+identity-key attributes, and `revokeAuthentication(addrs)` revokes an actor
+wholesale.
 
 ### ZPLC configuration
 
@@ -642,7 +656,7 @@ Compiler rules:
 | Property | Rule | Why |
 |---|---|---|
 | `service` | **optional, warned if omitted** | names the JWKS `CONNECT` proxy. Omitting it means the visa service needs direct internet egress; `zplc` warns, and `--Werror` makes that fatal for deployments that care. Omission keeps the integration test simple (fake IdP on localhost, no proxy) without making a permissive posture silent. |
-| `client` | **rejected** | the adapter talks to Google directly; there is no on-net client-facing service |
+| `client` | **rejected** | `ph-cli` talks to Google directly; there is no on-net client-facing service |
 | `provider` | **rejected** | no ZPR actor provides Google |
 | `cert_path` | **rejected** | with `CONNECT`, the tunneled TLS to Google is what gets verified, against system roots; the visa-service-to-proxy hop needs no pinned certificate because ZPR already protects it |
 | `jwks_uri` | **required** | the visa service does no discovery; see *Architecture* |
@@ -661,7 +675,7 @@ silently transfer a departed employee's network access to their replacement.
 
 **No new `zpr-*` L7 builtin.** `ZPR_L7_BUILTINS`
 (`zpr-compiler/src/protocols.rs:35`) exists to generate *on-net communication
-rules*. With the adapter as RP there is no on-net authentication traffic to
+rules*. With `ph-cli` as RP there is no on-net authentication traffic to
 permit, and adding an entry would recreate the hand-rolled-protocol shape being
 retired.
 
@@ -768,12 +782,11 @@ to — unacceptable for a system whose goal is auditability).
 
 ### Wire format changes
 
-**Two blobs need no ZDP header change.** `ZdpAcquireZprAddressHeader` carries a
-single `blob_len` (`handlers.rs:501`), but the field is already "a base64
-encoded json object" (`handlers.rs:487`) and `decode_blob` (`auth.rs:301`)
-already parses to `serde_json::Value` before dispatching on `blob_type`. Let it
-accept a top-level **array** as well as an object. Legacy single-object blobs
-keep parsing; the node→VS leg is already `List(AuthBlob)`.
+**Two blobs need no new framing.** `ConnectRequest.blobs` and
+`ReauthRequest.blobs` are already `List(AuthBlob)`. A Zode's login sends its
+device blob and its OIDC blob together in one `reauthorize`. (The design
+carried them from adapter to node in a ZDP `AcquireZprAddress`; that message
+is gone, see *Implementation status*.)
 
 **New blob type:**
 
@@ -791,17 +804,14 @@ application and their own user population.
 
 **Service descriptor and ASA TLV.** `ServiceDescriptor`
 (`zpr-common/src/vsapi_types/services.rs:17`) assumes an on-net service with a
-ZPR address; Google has an issuer URL instead. And the ZDP `ASA` TLV carries
-only a `SocketAddr` (`handlers.rs:285`), so the scheme the node already holds
-never reaches the adapter. Both need an off-net IdP shape carrying issuer,
-`client_id`, and scopes. The `TODO` at `actor_mgr.rs:571` anticipates exactly
-this.
+ZPR address; Google has an issuer URL instead. The off-net IdP shape is
+`OidcClientConfig` (issuer, `client_id`, `client_secret`, scopes,
+`allow_offline_access`) on the visa service's auth-service list, which the
+Zode reads over its VS-API session. No ZDP TLV is involved.
 
-**AAA address becomes conditional.** `link_state.rs:1178` hard-fails
-non-bootstrap authentication when no AAA address is present. The AAA mechanism
-exists so an adapter can reach an *on-net* auth service before it owns a ZPR
-address; with OIDC over normal IP it is unnecessary. That gate must become
-mode-aware rather than mandatory.
+**No AAA address.** The AAA mechanism exists so a docked adapter could reach
+an *on-net* auth service before it owns a ZPR address; OIDC over normal IP
+never needed it, and nothing docks since zl-zipline#234.
 
 ### Security requirements
 
@@ -819,22 +829,17 @@ Non-negotiable, in addition to the above:
 - Use a vetted JWT library. Do not hand-roll JWS parsing. Algorithm confusion
   and unverified `aud` are the classic failure modes here, and this is the code
   option A adds in exchange for keeping the visa service off the internet.
-- On a docked adapter's connect, the OIDC `nonce` is derived from the node's
-  challenge in `ZdpInitAuthenticationPayload`, binding the token to this ZPR
-  authentication attempt (see *Design decisions* for why it is the node's,
-  not the visa service's, there). A Zode's own login is the exception: its
-  `nonce` is one the visa service issued through `getLoginNonce`, bound to
-  that node's actor and VS-API session, single-use and expiring (see
-  *Design decisions*). An ordinary renewal carries no fresh nonce.
+- A Zode's login `nonce` is one the visa service issued through
+  `getLoginNonce`, bound to that node's actor and VS-API session, single-use
+  and expiring (see *Design decisions*). An ordinary renewal carries no fresh
+  nonce.
 - PKCE S256 mandatory. The verifier never leaves `ph-cli`.
 - Loopback redirect only, on `127.0.0.1`, single use, `state` verified.
 - **Ordinary TLS verification against system roots for all Google traffic.**
-  `auth.rs:482` and `auth.rs:519` currently set
-  `danger_accept_invalid_certs(true)` with a `TODO`, which existed because the
-  legacy `OAuthRsa` service used a self-signed certificate. Against Google that
-  flag turns the token exchange into an unauthenticated channel. It must not
-  reach the OIDC path, and it should be deleted along with the hardcoded
-  certificate at `auth.rs:44`.
+  The legacy `OAuthRsa` client set `danger_accept_invalid_certs(true)` for its
+  self-signed certificate; against Google that flag turns the token exchange
+  into an unauthenticated channel. It is deleted, with the hardcoded
+  certificate (zipline#15).
 - **The JWKS proxy must be a `CONNECT` forward proxy, never a reverse proxy,
   and the JWKS URL must never be rewritten.** This is the intuitive design and
   it is catastrophic: a reverse proxy — or any scheme that substitutes the
@@ -894,15 +899,14 @@ CN's trusted-service attributes.** That is the regression test for the
 escalation at `connection_control.rs:452`, and it should be written before the
 #310 restructure.
 
-**Adapter unit tests.** Multi-blob JSON array round-trip *and* legacy
-single-object blobs still parsing; PKCE S256 derivation against RFC 7636
-vectors; loopback callback rejected on `state` mismatch; listener bound to
-`127.0.0.1` only.
+**`ph-cli` unit tests** (`adapter/cli/src/oidc.rs`). PKCE S256 derivation
+against RFC 7636 vectors; loopback callback rejected on `state` mismatch;
+listener bound to `127.0.0.1` only.
 
 **Integration test with a fake IdP** — the only new infrastructure. A small
 local OpenID Provider serving a discovery document, an authorization endpoint
-that auto-redirects with no UI, a token endpoint, and a JWKS. Following
-`zpr-core/integration-test/one-node-test.sh`, the whole flow then runs in CI
+that auto-redirects with no UI, a token endpoint, and a JWKS. In the netns
+integration tests (`zpr-core/integration-test/`), the whole flow then runs in CI
 with no Google and no browser: `--no-browser` plus an HTTP client that follows
 the redirect to the loopback URL. It is also the only practical way to test
 JWKS key rotation and the stale-cache path.
@@ -914,12 +918,10 @@ renewed `id_token` with an advancing `iat`, a fixed `auth_time` and no
 `nonce` claim (§12.2's SHOULD NOT, which is also what Google does), and
 `--revoke-refresh` models the user withdrawing the application's access.
 
-That is now the **whole loop**: with the node→adapter credential hop in place
-(zipline#66) and `authorize_connect` returning the real authentication expiry
-as `authExpires` (zipline#86 — it previously returned the ZPR-address
-attribute's ~100-year default, so the node never scheduled a renewal),
-`one-node-oidc-renewal-test.sh` exercises login, silent renewal and
-revocation end to end, and passes.
+That is now the **whole loop**: `zode-login-test.sh` exercises a Zode's
+login, logout and silent renewal end to end, and `zode-oidc-test.sh` covers
+JWKS key rotation and a withdrawn refresh grant, after which the Zode logs
+the user out at the expiry.
 
 **What CI cannot cover.** Real Google. This needs a manual release checklist: a
 real Workspace domain for the happy path, a consumer gmail account to verify
@@ -932,9 +934,9 @@ likely to model wrongly.
 
 | Item | Why deferred |
 |---|---|
-| Graceful degradation on user-auth expiry | Needs partial revocation in the visa service; `revokeAuthentication` is per actor. Disconnect was chosen instead (see *Credential lifetimes*) — and install-driven re-authentication kept the rule: re-auth is all-or-nothing over the actor's namespaces (zipline#118) |
+| Per-namespace revocation in the visa service | `revokeAuthentication` is per actor, and install-driven re-authentication is all-or-nothing over the actor's namespaces (zipline#118). A Zode gets graceful degradation without it: at the expiry it logs the user out and keeps the device (see *Credential lifetimes*) |
 | OS-keyring persistence for the refresh token | The token is kept in the agent process's memory; persistence is additive (a storage trait behind a flag) |
-| VS-pushed renewal via `requestAuthentication` | **Done for policy install** (zipline#121/#123): the VS fans out `requestAuthentication` on every install and the node re-authenticates itself and its docked adapters. Node-driven pull still covers clock-driven renewal and works while the VS is disconnected |
+| VS-pushed renewal via `requestAuthentication` | **Done for policy install** (zipline#121/#123): the VS fans out `requestAuthentication` on every install and the Zode re-authenticates itself, with a renewal while a user is logged in. Zode-driven pull still covers clock-driven renewal |
 | A user-held keypair bound to `sub` at first login | The cryptographically stronger alternative to skipping the nonce on `reauthorize`; revisit if that relaxation fails security review |
 | Remove `ac @1` from `AuthBlob` and the `Authentication` service kind from the policy schema | Schema breaks; the producing client is already deleted (zipline#15) and the compiler no longer emits the kind, so this waits for a coordinated bump |
 | `[bootstrap]` entries declared as user credentials | Admissible by design; no current need |
@@ -943,17 +945,17 @@ likely to model wrongly.
 
 ### Open questions
 
-- Does a `CONNECT`-capable proxy with a ZPR adapter already exist in the target
+- Does a `CONNECT`-capable proxy behind a Zode already exist in the target
   environments, or does one need standing up? Providing it is the deployer's
   burden, and `zplc` will warn if the trusted service declares no `service`.
 - Which HTTP client does the visa service use for the JWKS fetch, and does it
   support `CONNECT` proxying with end-to-end TLS? (`reqwest` does, and is
-  already a dependency on the adapter side.)
+  already a dependency of `ph` and `ph-cli`.)
 - Google's "Desktop app" client type has historically required a
   `client_secret` at the token endpoint even for public clients. Per RFC 8252 it
   is not confidential and can be distributed, but this must be confirmed
-  against Google's current requirements, and it changes what the node ships to
-  the adapter.
+  against Google's current requirements. (Policy may carry one; see *Design
+  decisions*.)
 - Should `ph-cli auth-agent` ship a `systemd` user unit, or is registration
   left to the deployment?
 
@@ -968,21 +970,17 @@ shipped. Full plan text is in git history:
 [zipline#40](https://github.com/org-zpr/zl-zipline/issues/40)). Decisions
 already argued in the sections above are not repeated here.
 
-**For a docked adapter, the OIDC nonce is bound to the node's link challenge,
-not to a visa-service value.** The design above assumed the visa service
-supplies the nonce; on the adapter connect path it cannot, because the 48-byte `nonce||ctime||hmac` in
-`ZdpInitAuthenticationPayload` is the *node's* HMAC challenge and only the node
-holds the link key. So the adapter sends
-`nonce = base64url_nopad(SHA-256(challenge))` (`oidc_nonce_for_challenge`), the
-node verifies the challenge's HMAC and age exactly as for a self-signed blob and
-recomputes the hash into `OidcBlob.nonce`, and the visa service requires the
-token's `nonce` to equal it. The token is bound to this link's attempt,
-freshness is enforced by the one party that can check it, and the visa service
-needs no new state. ([zipline#12](https://github.com/org-zpr/zl-zipline/issues/12),
+**History: a docked adapter's OIDC nonce was bound to the node's link
+challenge.** Before zl-zipline#234 removed the adapter dock, the adapter sent
+`nonce = base64url_nopad(SHA-256(challenge))` over the node's HMAC challenge
+in `ZdpInitAuthenticationPayload`, the node checked the challenge and put the
+hash in `OidcBlob.nonce`, and the visa service required the token's `nonce`
+to equal it. The visa service's connect path still checks `OidcBlob.nonce`.
+([zipline#12](https://github.com/org-zpr/zl-zipline/issues/12),
 [zipline#13](https://github.com/org-zpr/zl-zipline/issues/13))
 
 **For a Zode's own login, the nonce comes from the visa service.** The
-link-challenge binding works because the docking node is a separate, honest
+link-challenge binding worked because the docking node was a separate, honest
 party: a stolen `id_token` carries someone else's nonce and fails. On a Zode
 the endpoint is its own docking node, so it would mint its own nonce, and a
 subverted Zode could replay a stolen `id_token` with its nonce until the
@@ -994,15 +992,15 @@ classified as a login, before the device proof and the token are checked. A node
 authority it holds, including one whose provider policy no longer declares,
 and a node's reauthorizations of its own actor are serialized so two
 concurrent logins cannot both succeed.
-This reverses the decision above for that one path; docked adapters keep the
-link-challenge binding. Accepting the replay risk for v1 and deferring the
+With the adapter dock gone (zl-zipline#234) this is the only login path.
+Accepting the replay risk for v1 and deferring the
 visa-service nonce was considered and rejected by the operator.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **A Zode's login changes only its own actor.** `reauthorize` keeps the
 exact-set rule for every adapter; only a node renewing its own actor may gain
 or drop the `user` namespace, and the device RSA blob is mandatory either way.
-A node cannot log a user into, or out of, an adapter docked to it. Switching
+A node cannot log a user into, or out of, any other actor. Switching
 users in place is refused (the OIDC blob of a logged-in actor goes to the
 renewal arm, which demands the same `sub`); log out, then in.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
@@ -1026,15 +1024,9 @@ tell "misconfiguration" from "wrong account" from "try again".
 **`client_secret` is optional and carried end to end as public data.** Google's
 native-app guidance marks it optional for Desktop clients but does not exempt
 them, so rather than guess, policy may carry one (`""` = none) through
-`OidcConfig` → `OidcClientConfig` → the adapter. Per RFC 8252 §8.5 it is not a
+`OidcConfig` → `OidcClientConfig` → the Zode → `ph-cli`. Per RFC 8252 §8.5 it is not a
 secret for a public client. ([zipline#2](https://github.com/org-zpr/zl-zipline/issues/2),
 [zipline#16](https://github.com/org-zpr/zl-zipline/issues/16))
-
-**The node's authentication timeout sits above the human's.** The node arms
-one timer for the whole out-of-band authentication, originally 120 s — sized
-for machines, and shorter than a person at a consent screen. It is raised to
-330 s so the adapter's 300 s `OIDC_USER_INTERACTION_TIMEOUT` expires first and
-reports *why*. ([zipline#12](https://github.com/org-zpr/zl-zipline/issues/12))
 
 **The fake IdP serves real TLS rather than the compiler growing an escape
 hatch.** The integration test needed a local issuer, which is not `https`.
@@ -1046,46 +1038,42 @@ stays absolute. ([zipline#16](https://github.com/org-zpr/zl-zipline/issues/16))
 old may the human's login be" and was already enforced at validation, so
 silent renewal needed no new `policy.capnp` field and no schema bump anywhere;
 `reauthorize`, `ReauthRequest.blobs` and `Connection.authExpires` already
-existed on the wire. (The node→adapter hop did not, and needed the
-`RenewAuthenticationRequest`/`Response` ZDP pair — the one place "no schema
-change" turned out wrong.) ([zipline#40](https://github.com/org-zpr/zl-zipline/issues/40),
-[zipline#66](https://github.com/org-zpr/zl-zipline/issues/66))
+existed on the wire. (The node→adapter hop of the old adapter dock did not,
+and needed a ZDP renewal pair, zipline#66; that pair went with the dock in
+zl-zipline#234.) ([zipline#40](https://github.com/org-zpr/zl-zipline/issues/40))
 
 **`ph-cli auth-agent` is how a human logs in; `connect` is the scripted form.**
 Renewal happens only while an `AuthAgent` is registered and its process alive.
-`auth-agent` calls `startLink` itself, so it starts the link *and* stays
-resident to renew; `connect` returns once the link is up and exists for CI and
-scripts, where its exit codes (2 declined, 3 timeout, 4 IdP unreachable, 5 VS
-rejected token, 6 policy denied, 7 device blob rejected) are the point. Running
-`connect` after `auth-agent` on the same link replaces the live registration
-with one about to exit. ([zipline#40](https://github.com/org-zpr/zl-zipline/issues/40),
-[zipline#46](https://github.com/org-zpr/zl-zipline/issues/46))
+Both call the admin `login` RPC. `auth-agent` stays resident to renew;
+`connect` returns when the login finishes and exists for CI and scripts,
+where its exit codes (2 declined, 3 timeout, 4 IdP unreachable, 5 visa
+service rejected the token, 6 policy denied, 1 anything else) are the point
+(`adapter/cli/src/oidc.rs` `exit_code_for_auth_failure`). A second login
+while logged in is refused. ([zipline#40](https://github.com/org-zpr/zl-zipline/issues/40),
+[zipline#46](https://github.com/org-zpr/zl-zipline/issues/46),
+[zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233))
 
 **The legacy `ac @1` blob arm stays in `vs.capnp`.** The `OAuthRsa`
 client that produced it is deleted, but removing a union arm is a schema break,
 so it waits for a coordinated bump (see *Deferred*).
 ([zipline#15](https://github.com/org-zpr/zl-zipline/issues/15))
 
-**A dock-link reconnect re-prompts the user; the token is not reused (wontfix).**
-Every connect is bound to the node's fresh link challenge (the visa service
-requires `id_token.nonce` to equal the challenge hash), and a refresh-grant
-`id_token` SHOULD NOT carry a nonce (OIDC Core §12.2), so neither a cached
-token nor a silent refresh can satisfy a new connect. Accepting one would need
-a connect-time analogue of the reauth path's session binding, bound to a
-*recently disconnected* session rather than a live one: a visa-service change
-that widens the connect path's trust surface. That is not worth it. Since
-zipline#157, a fatal local activation failure hard-stops rather than
-reconnect-looping, so a re-prompt costs one login per genuine link flap.
-`test_reconnect_within_token_lifetime_rerequests_interaction` in
-`adapter/ph/src/link_state.rs` locks this behavior in.
-([zipline#157](https://github.com/org-zpr/zl-zipline/issues/157),
-[zipline#166](https://github.com/org-zpr/zl-zipline/issues/166))
+**A new login re-prompts the user; the token is not reused (wontfix).**
+Every login must carry a fresh nonce from the visa service, and a
+refresh-grant `id_token` SHOULD NOT carry a nonce (OIDC Core §12.2), so
+neither a cached token nor a silent refresh can satisfy a new login.
+Accepting one would need a login-time analogue of the renewal's session
+binding, bound to a *recently replaced* session rather than a live one: a
+visa-service change that widens the trust surface. That is not worth it.
+Decided for the old adapter dock's link reconnect
+([zipline#166](https://github.com/org-zpr/zl-zipline/issues/166)); it holds
+for a Zode whose VS-API session is replaced (below).
 
 **A Zode's own login rides on the VS-API session, not on a link.** The login
 is a `reauthorize` of the node's own actor over its VS-API session. It does
-not use `startLink`, a link's `ActorAuthorization` or the ZDP renewal
-exchange, which the one-mode change
-([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234)) removes.
+not use a link, a link's actor authorization or a ZDP renewal exchange; the
+one-mode change ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
+removed those with the adapter dock.
 It reuses what stays: the `AuthAgent` capability and its bridge,
 `AuthFailureReason`, the renewal-deadline helpers and the provider list the
 node already holds. Decided with it (gate g116): a replaced session marks the
@@ -1098,6 +1086,16 @@ visa-service change (keeping the user namespace on a node re-authentication,
 or resuming with `open`); that was not taken.
 ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233))
 
+**Login is the Zode form only; the adapter relying party is removed.** With
+`ph zode` the only mode, no actor docks on a Zode, so the adapter's login
+over a dock link went: the adapter relying party, the `AcquireZprAddress` /
+`InitAuthentication` evidence path, node-side renewal of docked actors and
+the ZDP renewal pair. The renewal lead is a fixed 300 s
+(`zode_login::AUTH_RENEWAL_LEAD`, clamped to half the lifetime); the old
+`[node] auth_renewal_lead_seconds` knob sized renewals of docked actors and
+is refused as an unknown key, with no backwards compatibility.
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
+
 
 ## Implementation status
 
@@ -1106,7 +1104,9 @@ Re-checked against the forks' `zipline` branches on 2026-09-17 (`zl-zpr-compiler
 `zl-zpr-common` 0.27.0, `zl-zpr-core` 0.7.0).
 The *A Zode's own login* entry below was checked on 2026-11-14 against
 `feature/zodes` (`zl-zpr-visaservice` `v0.22.0-zodes.6`, `zl-zpr-common`
-`zl-v0.32.0-zodes.4`) plus `zl-zpr-core` #120.
+`zl-v0.32.0-zodes.4`) plus `zl-zpr-core` #120. The zl-zipline#234 entries
+were checked on 2026-11-18 against `zl-zpr-core` `feature/zodes` (2a9d380)
+plus the last #234 core PR.
 **The OIDC design in this document is implemented**: the umbrella epic
 [zipline#1](https://github.com/org-zpr/zl-zipline/issues/1) is closed, and the
 oidc + file interplay epic
@@ -1115,21 +1115,20 @@ code half, including the end-to-end fixture. Where the design sections above
 and the code disagree, the code wins; the decisions that changed the design
 during the build are under *Design decisions*.
 
-**The auth flow moved out of the link state machine** in zl-zpr-core#96, which
-merged upstream zpr-core #1410 ("Separate actor authorization from link
-establishment"). The design sections above describe the adapter's OIDC login
-inside `link_state.rs` (`WaitForUserAuth`, `ReceivedInitAuth`,
-`process_authentication_failure` tearing the link down). Now the link is Active
-after Hello, and the actor authenticates afterwards in its own state machine
-(`actor_auth.rs`); the zipline parts live in `auth_agent.rs` (OIDC through the
-AuthAgent, failure reasons), `actor_activation.rs` (granted-address checks) and
-`actor_renewal.rs` (renewal). A failed login no longer closes the link: with
-auto-connect off it ends the attempt, and `ph-cli connect` succeeds once the
-*actor* is `Authorized`, retrying on a live link instead of restarting it. The
-Grant's failure codes became `AuthenticationStatus` (`Rejected`, `Retryable`,
-`PolicyDenied`) instead of zipline's `ResponseCode` additions, and the OIDC IdP
-advertisement moved from Hello TLV 9 to 11. See `docs/ZDP.md` ("Link and
-docking-session bring-up").
+**Adapter docking and the adapter relying party are removed**
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234)). The
+design sections above were written for an adapter logging in over its dock
+link. Now `ph zode` is the only mode and login is the Zode form only
+(zl-zipline#233, below): the Zode authenticates its own actor to the visa
+service, and `ph-cli` is the relying party for it. Gone with the dock: the
+AcquireZprAddress / InitAuthentication evidence path, adapter auto-connect
+and idle mode, renewal of docked actors, and ZDP types 138-145 (including
+the zipline#66 renewal pair `RenewAuthenticationRequest`/`Response`, 144/145),
+which are reserved and refused as unknown types (`adapter/ph/src/zdp.rs`).
+`ph-cli connect` and `auth-agent` take no link id, and exit code 7 is gone.
+`[node] auth_renewal_lead_seconds` is refused as an unknown key. What stays:
+`auth_agent.rs` (the AuthAgent bridge and `AuthFailureReason`),
+`actor_renewal.rs` (renewal timing) and `zode_login.rs`.
 
 **Silent re-authentication** was built separately, umbrella
 [zipline#40](https://github.com/org-zpr/zl-zipline/issues/40) (closed), and is
@@ -1191,16 +1190,18 @@ what the *Credential lifetimes and re-authentication* section above describes.
   `user.zpr.authority` stamped from the vouching service,
   `POLICY_MIN_COMPILER_MINOR` raised to 17 (zipline#11); `zl-zpr-visaservice`
   0.19.0.
-- **The adapter and CLI flows** — the `AuthAgent` capability and the `ph-cli`
-  relying-party flow (`adapter/cli/src/oidc.rs`), `--no-browser` for headless
-  runs (zipline#20), and adapter idle mode (zipline#28).
+- **The CLI flow** — the `AuthAgent` capability and the `ph-cli`
+  relying-party flow (`adapter/cli/src/oidc.rs`), and `--no-browser` for
+  headless runs (zipline#20). Adapter idle mode (zipline#28) went with the
+  adapter (zl-zipline#234).
 - **Authority ownership across refresh** — `derive_user_authority` keeps the
   authenticating service's authority; a decorating attribute store never
   displaces it (zipline#24–#26).
 - **Address-keyed admin surface** — the admin actor API and dashboard are keyed
   on ZPR address, so an OIDC-only actor with no CN is visible (zipline#31,
   zipline#32).
-- **End-to-end fixtures** — the one-node fake-IdP harness (zipline#16) and the
+- **End-to-end fixtures** — the fake-IdP harness (zipline#16; now used by
+  `zode-login-test.sh` and `zode-oidc-test.sh`) and the
   oidc + file trusted-service interplay test (zipline#27, `zl-zpr-core`
   02b730d): a `zpdump` pruning-regression pre-check, connect and visa
   assertions, and refresh legs covering the authority-collision regression
@@ -1212,11 +1213,11 @@ implements a node's own user login and logout through `reauthorize`, with the
 ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233),
 `adapter/ph/src/zode_login.rs`):
 
-- **CLI.** On a Zode, `ph-cli connect` and `ph-cli auth-agent` take no link
-  id: they call the admin RPC `login` with the interactive `CliAuthAgent`.
-  `connect` exits with the usual exit codes; `auth-agent` stays resident.
+- **CLI.** `ph-cli connect` and `ph-cli auth-agent` take no link id: they
+  call the admin RPC `login` with the interactive `CliAuthAgent`. `connect`
+  exits with the usual exit codes; `auth-agent` stays resident.
   `ph-cli logout` and `ph-cli login-status` are new. A second login while
-  logged in is refused. In adapter mode the three RPCs refuse.
+  logged in is refused. There is no other login.
 - **Login.** ph picks the first advertised OIDC provider, calls
   `getLoginNonce`, asks the agent interactively for a token bound to that
   nonce, and sends `reauthorize` with the device leg plus the OIDC blob. The
@@ -1225,13 +1226,15 @@ ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl
   `min(OIDC_USER_INTERACTION_TIMEOUT, nonce expiry)`. A
   `temporarilyUnavailable` answer is retried once with a new nonce.
 - **Renewal.** A timer renews silently ahead of expiry
-  (`renewal_deadline`, the adapter's renewal lead) with a non-interactive
+  (`renewal_deadline` with a fixed 300 s lead, `zode_login::AUTH_RENEWAL_LEAD`,
+  clamped to half the lifetime; there is no setting) with a non-interactive
   agent request and the login's nonce, which the renewal arm ignores.
   Overlapping renewals share one and are spaced a second apart, since
   same-second refresh tokens can share an `iat`. A failed renewal is retried
   until the expiry; **at the expiry ph logs the user out itself** (`[SS]`
-  only), and retries a refused logout, so no stale user authority stays on
-  the actor.
+  only). The user authority goes only when the visa service accepts that
+  device-only `reauthorize`; a refused one is retried every 10 s, and until
+  then the user authority stays on the actor.
 - **Logout** sends the device leg alone. The machine stays connected.
 - **Session replaced.** After every successful node authentication (a VS-API
   reconnect, a visa-service restart, a rejoin, a K2 re-authentication) ph
@@ -1272,15 +1275,14 @@ restart that drops the login and prompts the resident agent again.
   ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232)).
 - **Authentication-expiry sweep and real `revokeAuthentication`** —
   `vs/src/auth_sweep.rs`, one batched revoke per docking node, removal only on
-  a positive ack, and a concurrent renewal wins (zipline#44). The node's
-  `RevokeAuth` handler is real.
-- **Node-side renewal plumbing** — `LinkData` tracks `auth_expires` and a
-  precomputed renewal deadline at
-  `auth_expires - min(auth_renewal_lead, lifetime/2)`; the check rides the
-  existing 3 s keep-alive tick, one attempt in flight at a time, bounded by
-  the remaining window; a dead `AuthAgent` bridge clears the registration
-  rather than being retried; `showLink` reports `Auth expires:` and the last
-  authentication failure (zipline#45).
+  a positive ack, and a concurrent renewal wins (zipline#44). It covers
+  adapter actors only; since zl-zipline#234 none dock, and a Zode acks a
+  `revokeAuthentication` as a no-op (`vss_worker::process_revoke_auth`).
+- **Renewal timing** — `actor_renewal.rs`: the renewal deadline at
+  `auth_expires - min(lead, lifetime/2)` and the bound on one attempt
+  (zipline#45). It once drove per-link renewal of docked actors with
+  `[node] auth_renewal_lead_seconds`; it now serves only the Zode's login,
+  with the fixed 300 s lead.
 - **`ph-cli auth-agent` refresh grants** — `offline_access` and `max_age` on
   the authorization request when policy allows it, the `refresh_token` kept in
   the agent process's memory keyed by issuer, `interactive = false` satisfied
@@ -1291,28 +1293,6 @@ restart that drops the login and prompts the resident agent again.
   `grant_type=refresh_token` with an advancing `iat`, a fixed `auth_time` and
   no `nonce` claim (OIDC Core §12.2's SHOULD NOT, which is what Google does),
   plus `--revoke-refresh` (zipline#47).
-- **Node→adapter credential request — the renewal loop closes** — R7's
-  end-to-end test proved the two halves never met: the renewal tick, the
-  tracked `auth_expires`, the stashed renewal identity and the visa-service
-  connection all live on the **node's** `NodeToAdapter` link, while the
-  `AuthAgent` `ph-cli` registers lives on the **adapter's** `AdapterToNode`
-  link, so the node reached its deadline with no agent to ask. R8
-  (zipline#66) added the missing hop: ZDP `RenewAuthenticationRequest = 144`
-  / `RenewAuthenticationResponse = 145` (`adapter/ph/src/zdp.rs`; 142/143
-  until zl-zpr-core#96 gave those numbers to upstream's Start/Abandon
-  Authentication). The node
-  sends one on the renewal deadline with a fresh challenge; the adapter
-  answers from its registered `AuthAgent` through the R6 bridge with
-  `interactive = false`, or `AuthenticationStatus::Retryable` (formerly
-  `ResponseCode::AuthUnavailable`) when there is no
-  agent or no advertised IdP, so the node records *why* renewal was
-  impossible rather than seeing a dropped packet; the node verifies the
-  echoed challenge and completes with `reauthorize` against the issuer
-  stashed at login (`RenewalIdentity`). One attempt is in flight at a time
-  (`RenewalState`'s in-flight flag in `actor_renewal.rs`, cleared on success
-  and on failure, and bounded so a
-  hung agent cannot pin it past expiry), and the link stays Active
-  throughout.
 - **`authorize_connect` returns the authentication expiry as `authExpires`** —
   zipline#86 (`zl-zpr-visaservice` PR #31). Root cause of the renewal never
   firing even with every hop in place: `authorize_connect` answered with the
@@ -1323,11 +1303,7 @@ restart that drops the login and prompts the resident agent again.
   `Connection::new` sites now share `connect_auth_expires(actor)`:
   `get_authentication_expiration()` (the minimum over both authorities and the
   identity keys) with the address expiry only as the no-authentication
-  fallback. With this fix `one-node-oidc-renewal-test.sh` was observed passing
-  end to end (2026-09-23, Docker harness): leg 2 logged
-  `link 6: silently re-authenticated; new expiry ...` with the VS-side
-  `reauthorize from Some("node")`, and leg 3's grant revocation disconnected
-  the actor within one sweep (`auth sweep: checked 3 actors, revoked 1`).
+  fallback.
 
 **Superseded:**
 
@@ -1344,26 +1320,17 @@ restart that drops the login and prompts the resident agent again.
 **Not yet:**
 
 - CI runs the netns end-to-end legs against the visa service *release*, not
-  against a visa service branch. `one-node-oidc-test.sh` and
-  `one-node-oidc-renewal-test.sh` first passed in `zl-zpr-core` CI on
-  2026-10-29 (`zl-zpr-core#88`, `org-zpr/zl-zipline#208`), and
-  `oidc-file-interplay-test.sh`, `fake-idp-smoke-test.sh` and
-  `attr-query-test.sh` the same day (`zl-zpr-core#89`,
-  `org-zpr/zl-zipline#210`). CI does not have `zpdump`, so the interplay and
-  attribute-query tests skip their `zpdump` pre-check there. A visa service
-  change still needs the local netns tier ("Gate escalation" in
-  `skills/zpr/SKILL.md`).
-- **The renewal ZDP messages are not in the RFC.**
-  `RenewAuthenticationRequest = 144` and `RenewAuthenticationResponse = 145`
-  are implemented and unit-tested but carry a `TODO: add to RFC 6`
-  (`adapter/ph/src/zdp.rs`), so RFC 6 does not yet describe a message pair
-  that is on the wire. They are zipline-only numbers, chosen to avoid upstream
-  #1410's 142/143.
+  against a visa service branch. The OIDC legs are `zode-login-test.sh`,
+  `zode-oidc-test.sh`, `oidc-file-interplay-test.sh`,
+  `fake-idp-smoke-test.sh` and `attr-query-test.sh`. CI does not have
+  `zpdump`, so the interplay and attribute-query tests skip their `zpdump`
+  pre-check there. A visa service change still needs the local netns tier
+  ("Gate escalation" in `skills/zpr/SKILL.md`).
 - Real-Google validation is a manual release checklist
   (`zl-zpr-core/integration-test/OIDC-RELEASE-CHECKLIST.md`), not automated —
   the fake IdP cannot prove the `hd`-absent rejection against Google's actual
   behavior.
-- The adapter's `OAuthRsa` client, its hardcoded certificate and
+- The `OAuthRsa` client in `ph`, its hardcoded certificate and
   `danger_accept_invalid_certs` are deleted (zipline#15), and the compiler no
   longer has the `zpr-oauthrsa` L7 builtin or emits `Authentication` services.
   The `ac @1` arm in `vs.capnp` and the visa service's handling of the

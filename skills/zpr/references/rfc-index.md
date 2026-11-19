@@ -44,5 +44,5 @@ The PDFs have a clean text layer; `pdftotext` extracts them fine.
 3. RFC 15 (then 8 for depth) — the ZPL policy language.
 4. RFC 16 / 13 — identity, authentication, attributes.
 5. RFC 14 — why visas exist; useful before touching `libeval` or `vs`.
-6. RFC 6 / 17 — data protocols and ZDP; needed for adapter/forwarding work.
+6. RFC 6 / 17 — data protocols and ZDP; needed for link/forwarding work.
 7. RFC 7 — topology, address assignment, forwarding.
