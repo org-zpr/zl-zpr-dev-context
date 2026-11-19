@@ -150,7 +150,7 @@ after it were renumbered as a flag day (`zl-v0.32.0-zodes.4`).
 |---|---|---|---|
 | `reportLinkStates @8 (links :List(LinkStateReport)) -> (res :OkOrError)` | Snapshot of the node's link states, replacing its previous report; the router uses a link only while both ends list each other `up`, and an end that has not reported counts as down ([ZODE_LINKS.md](ZODE_LINKS.md) rule 14; [#242](https://github.com/org-zpr/zl-zipline/issues/242), done by [#250](https://github.com/org-zpr/zl-zipline/issues/250)). A link going down revokes the visas crossing it. A **new** `failed` entry (one the node's previous snapshot did not list as `failed`) marks the pair, and the visa service leaves a marked pair out of both ends' `setTopology` until either end (re)connects its VS-API session, which clears the pair and re-sends topology to the other end (rule 13a). A `failed` report never itself sends topology. See [ROUTING.md](ROUTING.md), "Link-state reports" | `authRequired` on a dead handle; `paramError` for more entries than the node's policy-declared links, an empty `peerCn`, or a `peerCn` listed twice. A visa whose revocation fails is quarantined and retried by the visa service; the report still succeeds. An entry whose CN matches no declared peer is kept, not an error, and cannot make a link usable under the current policy | implemented, [#224](https://github.com/org-zpr/zl-zipline/issues/224), [#250](https://github.com/org-zpr/zl-zipline/issues/250); node side [#250](https://github.com/org-zpr/zl-zipline/issues/250) |
 | `getLoginNonce @9 () -> (res :Result(LoginNonce))` | A single-use, expiring nonce for the node's own OIDC login; `LoginNonce { nonce :Text, expiresAt :UInt64 }` (unix seconds). The binding to the node's actor and session lives in the visa service, not in the schema | `authRequired` on a dead handle; `quotaExceeded` when the node holds the maximum number of outstanding nonces | [#232](https://github.com/org-zpr/zl-zipline/issues/232) |
-| `requestBootstrapVisas @10 (peerCn :Text) -> (res :Result(BootstrapVisas))` | The relay asks for the bootstrap visas of a Zode joining over an initial link to it, naming the joiner by the CN on its verified link certificate ([ZODE_LINKS.md](ZODE_LINKS.md) J2, J3, J6). The joiner's address is the one the relay's topology gives that CN. `BootstrapVisas { peer, relay }` holds two visas in each list, the joiner's VS-API flow in both directions, forward first: `peer` for the relay to hand on in ZDP message 146, `relay` for it to install. Every call is a join: see "Bootstrap visas, on demand" below | Checked in this order, so a caller that may not ask learns nothing about the CN: `authRequired` on a dead handle; `invalidOperation` when the caller is not the node the visa service docks on, whatever `peerCn` it sent; `notFound` when `peerCn` is not valid UTF-8 or names no peer in the caller's topology (an unknown CN, the caller's own, an empty one, or a pair left out under rule 13a); `internal` when the mint fails. `vs.capnp` also lists `temporarilyUnavailable`, which the visa service never sends | [#252](https://github.com/org-zpr/zl-zipline/issues/252) |
+| `requestBootstrapVisas @10 (peerCn :Text, observedAddr :SockAddr) -> (res :Result(BootstrapVisas))` | The relay asks for the bootstrap visas of a Zode joining over an initial link to it, naming the joiner by the CN on its verified link certificate ([ZODE_LINKS.md](ZODE_LINKS.md) J2, J3, J6), and reports `observedAddr`, the source address it saw on that link. A granted request records it as the joiner's observed substrate address (see "Lifecycle"; [#264](https://github.com/org-zpr/zl-zipline/issues/264)). The joiner's ZPR address is the one the relay's topology gives that CN. `BootstrapVisas { peer, relay }` holds two visas in each list, the joiner's VS-API flow in both directions, forward first: `peer` for the relay to hand on in ZDP message 146, `relay` for it to install. Every call is a join: see "Bootstrap visas, on demand" below | Checked in this order, so a caller that may not ask learns nothing about the CN: `authRequired` on a dead handle; `invalidOperation` when the caller is not the node the visa service docks on, whatever `peerCn` it sent; `notFound` when `peerCn` is not valid UTF-8 or names no peer in the caller's topology (an unknown CN, the caller's own, an empty one, or a pair left out under rule 13a); `paramError` when `observedAddr` is unparseable or undialable (nothing is recorded or minted); `internal` when the mint fails. `vs.capnp` lists the same errors in the same order | [#252](https://github.com/org-zpr/zl-zipline/issues/252) |
 
 How the nonce is checked on `reauthorize`, and the exception to the exact-set
 rule it serves, are under *A Zode's own login and logout* below.
@@ -372,19 +372,24 @@ address source — a rejected pin reads "static", a rejected grant reads
 "granted" — so the log tells the two apart
 (`vs/src/connection_control.rs`, `authorize_connection`).
 
-A node also reports its **substrate address**, the address its peers dial, in
-the `substrate_addr` parameter of `connect` and `open`. Both record it through
-one function, `accept_reported_substrate` (`vs/src/connection_control.rs`,
-[#255](https://github.com/org-zpr/zl-zipline/issues/255)). An unspecified IP or
-port 0 is a `paramError`, with no fallback. If policy declares the node's
-substrate address, the report must equal it, or the call is a `paramError`.
-Otherwise the report stands. The address is stored on the node's actor and
-changes only with the node's next `connect` or `open`. A rejoin keeps the actor,
-so the old address stays known until then. It decides which links the node's
-peers are offered and what they dial (ZODE_LINKS.md rule 13b; ROUTING.md,
-"Substrate address changes"). Nothing checks that the address belongs to the
-node; the link's certificate check bounds what a false one can do, and whether
-that is enough is [#264](https://github.com/org-zpr/zl-zipline/issues/264).
+A node's **substrate address**, the address its peers dial, never comes from
+the node ([#264](https://github.com/org-zpr/zl-zipline/issues/264)). The
+relay reports the source address it saw on the node's initial link as
+`observedAddr` on `requestBootstrapVisas`, and the visa service records it
+when it grants the request (`Assembly::observed_substrate`, canonicalized from
+IPv4-mapped IPv6; an unspecified IP or port 0 is a `paramError`). `connect`
+and `open` then record the node's `zpr.substrate_addr` claim through one rule,
+`substrate_addr_for` (`vs/src/connection_control.rs`): policy's address, else
+the observation, else the claim already stored on the node's actor, else none
+(no claim, no direct links). A differing observation under a policy address
+is logged at `info`. `connect` refuses any parameter it does not know, and
+`open` takes none. A rejoin's bootstrap request updates the stored claim at
+once, and a node's observation is forgotten when it disconnects. The stored
+claim counts as known only while the node has a live VSS worker. It decides
+which links the node's peers are offered and what they dial (ZODE_LINKS.md
+rule 13b; ROUTING.md, "Substrate address changes"). So the
+`zpr.substrate_addr` claim, which policy can read, is now policy's or the
+relay's, never the node's word.
 
 The visa service's own address is the one neither source supplies: it is
 fixed by configuration, so an actor whose *authenticated* CN is `vs.zpr` is
@@ -1388,7 +1393,9 @@ because no adapter docks on a Zode.
   `reportLinkStates` ([#250](https://github.com/org-zpr/zl-zipline/issues/250),
   [ZODE_LINKS.md](ZODE_LINKS.md)). Since
   [#255](https://github.com/org-zpr/zl-zipline/issues/255) `Link.peer` is the
-  peer's policy address or the address it reported, or unset on a relay link
+  peer's policy address or, since
+  [#264](https://github.com/org-zpr/zl-zipline/issues/264), the address the
+  relay observed on its initial link, or unset on a relay link
   when neither is known, and a direct link is offered only when both ends'
   addresses are known (ZODE_LINKS.md rule 13b).
 
@@ -1405,7 +1412,7 @@ because no adapter docks on a Zode.
 | Policy lifecycle | `vs/src/policy_mgr.rs`, `visa_reconciler.rs` |
 | Connection admission | `vs/src/connection_control.rs`, `auth.rs`, `login_nonce.rs` |
 | Routing, transit | `vs/src/topology_mgr.rs`, `router.rs`; `libeval/src/policy.rs` (`transitNodes`) |
-| A node's reported substrate address (`accept_reported_substrate`) | `vs/src/connection_control.rs` |
+| A node's substrate address (`substrate_addr_for`); the relay's observations (`Assembly::observed_substrate`, recorded in `request_bootstrap_visas`) | `vs/src/connection_control.rs`, `vs/src/visa_bootstrap.rs` |
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |

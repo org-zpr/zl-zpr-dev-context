@@ -168,6 +168,16 @@ removal. It carries `v0.22.0-zodes.9`'s #268 re-proposal. If the merge of
 visaservice#72 differs in content from `64df4c3` (because its base moved), a
 `-zodes.11` is cut from the merge and a one-line core PR moves the pin;
 otherwise no re-cut is needed. zipline's pins do not move with it.
+`v0.22.0-zodes.11` is `6b85e4e`, the head of
+org-zpr/zl-zpr-visaservice#73 (#264, pd plan p56: a Zode's substrate address
+is the relay's observation, and `requestBootstrapVisas` carries
+`observedAddr`), cut **before it merged** so that org-zpr/zl-zpr-core#139 in
+the same merge set can run CI; that PR moves `VISA_SERVICE_RELEASE` to it. It
+is a flag day: it refuses a `connect` that carries `substrate_addr`, and an
+older relay's `requestBootstrapVisas` without `observedAddr`. zipline moves
+with the set (org-zpr/zipline#289, package 2.0.9): core `d0f6121` (core#139
+without its CI-pin commit), the visa service at `6b85e4e` and the compiler at
+`1ff3140`.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
@@ -511,7 +521,12 @@ Two consequences worth knowing:
    together in #252. It is on common `bdbcc18`. The fifth is
    `zl-v0.32.0-zodes.5` (org-zpr/zl-zipline#255, `Link.peer` optional), on
    common `f75533a`; core, visaservice and compiler move to it together in
-   #255's merge set. All three consumers (`zl-zpr-core`,
+   #255's merge set. The sixth is `zl-v0.32.0-zodes.6`
+   (org-zpr/zl-zipline#264, `requestBootstrapVisas` gains `observedAddr`,
+   `pname::SUBSTRATE_ADDR` gone), on common `9bf6fba`, cut from the head of
+   zl-zpr-common#17 before it merged (re-cut from the merge if the content
+   differs); core, visaservice and compiler move to it together in #264's
+   merge set, the compiler with no other change. All three consumers (`zl-zpr-core`,
    `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
@@ -716,26 +731,32 @@ zl-zipline#234; pin the demo at `feature/zodes` with a `ph zode` core. The
 ported demo also needs a visa service with zl-zipline#284's Zode departure
 (zl-zpr-visaservice#72, `cf4b4e7`): without it a stopped web Zode stays
 registered and `test-dns.sh` section 3 times out waiting for NXDOMAIN
-(`DNS.md`, "Query semantics"). `build-sets/2026-11-19.yaml` pins a known-good
-set.
+(`DNS.md`, "Query semantics"). `build-sets/2026-11-19T2133.yaml` pins a
+known-good set. Since zl-zipline#264 the demo's relay publishes no port: its
+Zodes dial it on the demo network, which is not NATed, so the relay observes
+each at its real container address (zl-zpr-demo#11).
 
-Last recorded full run on `feature/zodes`: `build-sets/2026-11-19.yaml`
-(zl-zipline#235, 2026-11-19, `--test unit,netns,docker`, about 16 minutes on
-the 8-core workspace host). Every tier passed on its first run, with no
-re-runs: `unit` in the four built repositories; `netns` on the host route
-(`privilege: userns`), all fourteen scripts a `feature/zodes` core carries, with the seven
-`zipline`-only scripts skipped as absent from the checkout; and `docker`
-(stage, deploy, test, teardown) on the ported `dns-demo`. Its notes record
-the revisions that are not manifest entries: zl-zpr-common, zl-zpr-vsapi,
+Last recorded full run on `feature/zodes`: `build-sets/2026-11-19T2133.yaml`
+(zl-zipline#264's merge set, 2026-11-19, `--test unit,netns,docker`, about 16
+minutes on the 8-core workspace host). It pins the set's PR heads: core
+`740eab1`, the visa service `6b85e4e` (= `v0.22.0-zodes.11`), the compiler
+`1ff3140`, the demo `06b59d1` and CoreDNS `39d49be`. Every tier passed on
+its first run, with no re-runs: `unit` in the four built repositories;
+`netns` on the host route (`privilege: userns`), all fourteen scripts a
+`feature/zodes` core carries, with the seven `zipline`-only scripts skipped
+as absent from the checkout; and `docker` (stage, deploy, test, teardown) on
+the ported `dns-demo`. Its notes record the revisions that are not manifest entries: zl-zpr-common, zl-zpr-vsapi,
 zl-zpr-policy, the zipline commit that pins the same set, and the
 zl-zpr-dev-context commit that supplied `zpr-dev`. On this repository's
 `feature/zodes` it is the newest file in `build-sets/`, so a bare `zpr-dev
 build` builds it when the context checkout (`<workspace>/zl-zpr-dev-context`
 unless `--context` says otherwise; not the current directory) is on
 `feature/zodes`. From another worktree, pass `--context <worktree>` or
-`--manifest <worktree>/build-sets/2026-11-19.yaml`. Either way, run a
+`--manifest <worktree>/build-sets/2026-11-19T2133.yaml`. Either way, run a
 `zpr-dev` built from `feature/zodes`: the `zipline` one's netns drift guard
-rejects the Zode scripts it does not list.
+rejects the Zode scripts it does not list. The run before it,
+`build-sets/2026-11-19.yaml` (zl-zipline#235), was green the same way at the
+`feature/zodes` tips before #264.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
@@ -786,7 +807,8 @@ and whose `zl-zpr-coredns` entry pins a commit on its `main` (shared
 libraries such as `zl-zpr-common` are not entries, see spec-003), and run
 `zpr-dev build --manifest <file> --test all`; in step 5, reproduce with the
 same `--test all`, so a tier that cannot run fails instead of skipping.
-`build-sets/2026-11-19.yaml` is such a set.
+`build-sets/2026-11-19.yaml` and `build-sets/2026-11-19T2133.yaml` are such
+sets.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
 gates against the live checkouts (read-only, seconds), and `--dry-run` prints
@@ -845,7 +867,7 @@ The simplest source for the visa-service binaries is a `zl-zpr-visaservice`
 release tarball (`make release` there, or download a published release) unpacked
 into `integration-test/`. The Zode scripts need a Zodes visa service: use the
 release core CI pins (`VISA_SERVICE_RELEASE` in core's
-`.github/workflows/adapter.yml`, `v0.22.0-zodes.9` at the time of writing),
+`.github/workflows/adapter.yml`, `v0.22.0-zodes.11` at the time of writing),
 not the latest stable release, which cannot drive Zode links. Then:
 
 ```bash

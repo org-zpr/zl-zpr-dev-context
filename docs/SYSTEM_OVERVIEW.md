@@ -395,8 +395,11 @@ Zodes master plan §5.11).
   `-i/--tun-if`, `-z/--zpr-addr` (repeatable: the Zode's own IPv6 address
   first; a relay adds `fd5a:5052::1`, and no other Zode lists it),
   `-l/--logging`, `--io-engine`, `--km-impl`, `-c/--config-file`,
-  `--auth-private-key`, `--advertised-substrate-addr`, `--forwarding`,
-  `--initial-link`, `--relay`, and the `enable-security-testing` flags. So a
+  `--auth-private-key`, `--forwarding`,
+  `--initial-link`, `--relay`, and the `enable-security-testing` flags
+  (`--advertised-substrate-addr` is gone since
+  [#264](https://github.com/org-zpr/zl-zipline/issues/264): no Zode names its
+  own substrate address). So a
   caller switches by replacing the word `node` with `zode`. `ph-cli counters`,
   `link show [id]` and `tun` keep their output formats, except that
   `link show` no longer prints `Actor state:` or `Last auth failure:` (no
@@ -573,10 +576,10 @@ on Linux. The plan made a Windows node single-homed, with a
 concrete `self_addr` and the wildcard bind refused.
 [zipline#150](https://github.com/org-zpr/zl-zipline/issues/150) (done,
 zl-zpr-core#119) lifted that: the engine uses `WSARecvMsg`/`WSASendMsg` with
-pktinfo, and a wildcard `self_addr` is allowed. A relay with a wildcard
-`self_addr` still needs `advertised_substrate_addr`. A Zode with an
-initial link needs neither: it reports its initial link's local address
-([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). No service wrapper in `ph` itself
+pktinfo, and a wildcard `self_addr` is allowed, on a relay too. No Zode
+names its own substrate address: a relay's is policy's, and a Zode with an
+initial link is known at the address the relay observes on that link
+([ZODE_LINKS.md](ZODE_LINKS.md), "Observed substrate addresses (#264)"). No service wrapper in `ph` itself
 ([zipline#147](https://github.com/org-zpr/zl-zipline/issues/147); ZIPLINE's
 MSI runs `ph zode` under its own service from package 2.0.6, [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256); an
 older MSI runs `ph node`, so a `ph zode`-only `ph.exe` dropped into it does not start).
@@ -785,16 +788,16 @@ Wi-Fi.
 ([zipline#164](https://github.com/org-zpr/zl-zipline/issues/164))
 
 **A network change is handled by the rejoin.** A Zode on a Mac (or any OS)
-with a wildcard `self_addr`, an initial link, no `advertised_substrate_addr`
-and no substrate address in policy survives a change of its address (an
-advertised address wins, and the visa service refuses a report that differs
-from a policy address). The keep-alive closes the initial link, the redial
-goes out from the new address, and the rejoin's `connect` or `open` reports that address
+with a wildcard `self_addr`, an initial link and no substrate address in
+policy survives a change of its address. The keep-alive closes the initial
+link, the redial goes out from the new address, and the relay observes that
+address on the rejoin (since #264; before, the rejoin's `connect` or `open`
+reported it)
 ([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). Sends from the old
 address fail with `EADDRNOTAVAIL` on macOS (measured on 26.5.2), and are
 dropped and counted, not fatal. Verified by hand on 2026-11-14:
 `macos-node-test.md` section 6 (now section 2 of `macos-zode-test.md`), where such a Zode starts, joins through a
-relay on Linux and reports its real LAN address. The network switch itself
+relay on Linux and reported its real LAN address (before #264). The network switch itself
 was checked in netns on Linux, not on the Mac.
 ([zl-zipline#230](https://github.com/org-zpr/zl-zipline/issues/230);
 moving the Mac's address by hand is
@@ -825,6 +828,30 @@ ZIPLINE adapters. Networks and machines from before Zodes were cut over at the
 flag day ([org-zpr/zipline#254](https://github.com/org-zpr/zipline/issues/254)):
 the web server re-provisioned each such network in place, and its machines
 registered again as Zodes.
+
+### A Zode's substrate address is what the relay observes
+
+A Zode never tells the visa service the address its peers should dial. The
+relay reports the source address it sees on each Zode's initial link, and a
+policy address overrides it
+([zl-zipline#264](https://github.com/org-zpr/zl-zipline/issues/264); the
+reasoning is in ZODE_LINKS.md and SECURITY_MODEL.md, *Design decisions*).
+Two consequences for whoever deploys ZPR:
+
+- **The relay must see each Zode's true source address.** Put no source NAT
+  or proxy between the Zodes and the relay: no masquerade in front of the
+  relay, and not Docker's userland proxy on a published port. Behind one, the
+  relay observes every Zode at the NAT's address, every direct link fails,
+  and all traffic goes through the relay. If such a NAT cannot be avoided,
+  declare the Zodes' substrate addresses in policy. On the libvirt testbed,
+  libvirt masqueraded the VMs' traffic into the Docker relay, so the relay saw
+  both VMs at the bridge gateway; a `RETURN` rule in libvirt's `LIBVIRT_PRT`
+  chain for VM-to-Docker-subnet traffic fixed it (ZODE_LINKS.md, "On real
+  machines").
+- **A server behind a port-forward needs a policy address** if its NAT does
+  not keep the forwarded port for outbound traffic, and so does a multi-homed
+  server. Two Zodes behind the same NAT link directly only if the NAT
+  hairpins; otherwise they use the relay.
 
 ### Deferred
 

@@ -153,13 +153,14 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     Such a `setTopology` comes from a policy install, a peer's VS-API session
     start, or, since zl-zipline#268, the visa service's re-proposal of a link
     reported `down` (rule 13a).
-13b. **The visa service proposes a direct link only when it can work.** It needs a known substrate address for the peer the owner must dial, from policy or reported by that peer. No address means no direct link, and traffic goes through the relay. The visa service never asks a Zode to make a connection it can't possibly make. *(Operator, 2026-11-12; #255 drops visaservice#65's `[::]:0` fallback.)* In detail (gate g115 q2-q4):
+13b. **The visa service proposes a direct link only when it can work.** It needs a known substrate address for the peer the owner must dial, from policy or observed by the relay ([#264](https://github.com/org-zpr/zl-zipline/issues/264)). No address means no direct link, and traffic goes through the relay. The visa service never asks a Zode to make a connection it can't possibly make. *(Operator, 2026-11-12; #255 drops visaservice#65's `[::]:0` fallback.)* In detail (gate g115 q2-q4):
     - A node's **known address** is its policy substrate address (DNS-resolved).
-      Failing that, it is the address the node reported in its last `connect` or
-      `open`, stored on its node actor. Nothing else counts, and nothing is
-      guessed. Only the node's next `connect` or `open` replaces a reported
-      address; a rejoin keeps the actor, so the old address stays known until
-      then (see "Known limit" under "Links from known addresses (#255)").
+      Failing that, it is the relay's observation of the node's initial link
+      (J2), stored on its node actor, and only while the node has a live VS-API
+      session. Nothing else counts, nothing is guessed, and the node itself
+      never supplies one (#264). A rejoin replaces the observed address when the
+      relay asks for the joiner's bootstrap visas, before the joiner's next
+      `connect` or `open`.
     - A **relay link**, one end of which is the relay, is always proposed: the
       endpoint dials its configured initial link, and the relay must hold the
       joiner's CN before the joiner connects (rule 4, J2). `peer` is the other
@@ -168,29 +169,30 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     - A **direct link**, between two endpoints, is proposed only when **both** ends
       have a known address. Each end's `peer` is the other end's address. The visa
       service does not work out which end owns the link: that stays the Zodes' rule.
-    - When a node's VS-API session starts, its address may just have become known,
-      so the visa service sends `setTopology` to each of its policy peers that has
-      a live VSS connection. Nothing is sent when a session ends. Once a node
-      with no policy address has disconnected and its actor is gone, the next
-      topology built for any reason leaves out its direct links; within a
-      rejoin, its old address may still be proposed until the new `connect` or
-      `open`. A node with a policy address keeps its direct links whether or not
-      it has a session: its address is known from policy.
+    - When a node's VS-API session starts, and again when its VSS worker starts,
+      its address may just have become known, so the visa service sends
+      `setTopology` to each of its policy peers that has a live VSS connection.
+      Nothing is sent when a session ends. Once a node with no policy address has
+      no live session, the next topology built for any reason leaves out its
+      direct links. A node with a policy address keeps its direct links whether
+      or not it has a session: its address is known from policy.
     - As built, "can work" means a **known, dialable** address: a specific IP
-      and a non-zero port, from policy or from a report. The visa service cannot
-      check that the address is reachable. An unreachable or stale address (the
-      retained address above) gives a failed dial, and the pair falls to rule
-      13a.
-    - Whether a Zode can misuse the address it reports is
-      [#264](https://github.com/org-zpr/zl-zipline/issues/264). A wrong address
-      only steers where a peer dials: the link still needs the reporter's CA-signed
-      certificate with the expected CN (rule 3).
+      and a non-zero port, from policy or from the relay's observation. The visa
+      service cannot check that the address is reachable. An unreachable address
+      (an observation behind a NAT that does not hairpin, or one that a source
+      NAT in front of the relay rewrote) gives a failed dial, and the pair falls
+      to rule 13a. A policy address is the operator's fix.
+    - A Zode cannot choose the address its peers dial
+      ([#264](https://github.com/org-zpr/zl-zipline/issues/264)). And a
+      wrong address only steers where a peer dials: the link still needs the
+      peer's CA-signed certificate with the expected CN (rule 3).
 13a. **The visa service owns the retry policy.** It remembers links reported
     `failed` and leaves them out of the topology it proposes until something about
     that pair changes: a peer reconnects, or in v2 a ZBOLT/rendezvous step says
     the pair can try again. A peer's substrate address changes only that way:
     it is fixed for the life of a VS-API session, and a new one arrives with a
-    rejoin's `connect` or `open`. (`updateSubstrateAddr` was removed from the
+    rejoin, when the relay reports the address it observed on the new initial
+    link (J2). (`updateSubstrateAddr` was removed from the
     schema in #252, after #223 was closed.) A `failed` report never itself causes a topology send,
     so the two can't loop. Dropping the link from topology closes it under rule 12.
     A policy install is not a pair change: it keeps the marks.
@@ -241,17 +243,15 @@ keep-alive notices, as for any dead link. After 3 missed keep-alives, about
 12 s, the laptop closes the initial link and clears its state (rule 9). Until
 then, sends from the old address fail, and each one is dropped and counted;
 none stops `ph`. The laptop keeps redialing the relay with backoff (rule 11).
-A laptop Zode has a wildcard `self_addr` and no `advertised_substrate_addr`,
-so each dial takes the local address the OS picks for the relay, which is the
-new network's. (An advertised address, or a concrete `self_addr`, is reported
-as it is and does not follow the change.) Meanwhile the relay sees a dead
-link, clears its state and waits. The new initial link goes through the join
-hand-off again (rule 11a). The laptop then reconnects its VS-API session (rule
-16), and the visa service either resumes it or demands a fresh login. Either
-way, the `connect` or `open` reports the initial link's new local address as
-the laptop's substrate address. Policy gives a laptop no substrate address, so
-the visa service keeps the reported one (rule 13b), and the relay's next
-topology carries it. Topology arrives again. Direct links that
+A laptop Zode has a wildcard `self_addr`, so each dial takes the local
+address the OS picks for the relay, which is the new network's. Meanwhile the
+relay sees a dead link, clears its state and waits. The new initial link goes
+through the join hand-off again (rule 11a), and the relay's bootstrap request
+carries the source address it observed on that link, the laptop's new address
+as the relay sees it (J2). The laptop then reconnects its VS-API session (rule
+16), and the visa service either resumes it or demands a fresh login. Policy
+gives a laptop no substrate address, so the observation is its substrate
+address (rule 13b), and the relay's next topology carries it. Topology arrives again. Direct links that
 were up before are attempted once by their owners (rule 13).
 
 **Two reachable Zodes get a direct link.** Both receive `setTopology` naming each
@@ -465,7 +465,12 @@ J2. **The relay requests the bootstrap visas.** Once the link is up, the relay
     directions. The request names the joiner by its **link-verified CN**. The
     joiner's ZPR address is the relay's topology `zprAddr` for that CN, never
     anything the joiner claims. *Built:* the request is a separate VS-API call,
-    `requestBootstrapVisas(peerCn)`, not a `visaRequest` (gate g89 q2). The
+    `requestBootstrapVisas(peerCn, observedAddr)`, not a `visaRequest` (gate
+    g89 q2). `observedAddr` is the source address of the joiner's initial link
+    as the relay's substrate socket saw it, read from the link that keyed with
+    that CN; the relay sends it only while that link is Active for the CN. The
+    visa service records it as the joiner's substrate address unless policy
+    declares one (#264, rule 13b). The
     answer holds two lists of two visas: `peer` (the joiner's copies) and
     `relay` (the relay's own). The relay waits at most
     `BOOTSTRAP_REQUEST_TIMEOUT` (5 s).
@@ -571,8 +576,8 @@ J8. **`Link.visas` is removed from the schema.** Topology no longer carries
   for the core visas:* the previous join's VS-API visas and VSS visas are
   revoked, not pushed again. The rejoin brings new ones (J5a, and J5b on the
   next `registerVss`). Every other visa is marked not installed and pushed
-  again. The comment on `requestBootstrapVisas` in `vs.capnp` still says the
-  VSS visa is pushed again.
+  again. Since zl-zpr-vsapi#8 (#264, folding in #260) the comment on
+  `requestBootstrapVisas` in `vs.capnp` says so too.
 - **The `Bootstrap Visas` message** is a new ZDP control message, type 146
   (the value core#104 used), defined in [ZDP.md](ZDP.md). Its body holds
   exactly two visas.
@@ -882,10 +887,10 @@ re-proposes the node's links** (gate g115 q3). An address changes only by a
 rejoin (rule 13a), so a session start is the one moment a peer's link can
 become possible. The visa service then sends `setTopology` to the node's policy
 peers that have a live VSS connection. This replaces what visaservice#65 did
-with `updateSubstrateAddr`. Nothing is sent when a session ends. The address is
-stored on the node's actor, which a rejoin keeps, so after a rejoin ends a
-session the old address stays known until the next `connect` or `open`
-replaces it (see "Known limit" under "Links from known addresses (#255)").
+with `updateSubstrateAddr`. Nothing is sent when a session ends. *Superseded in
+part by #264 (below):* the node no longer reports the address, the relay's
+bootstrap request replaces it at a rejoin, and a VSS worker start re-proposes
+too.
 
 **Relay links are always proposed; direct links need both addresses** (gate
 g115 q4). The relay link is the joiner's way in, so it cannot wait for an
@@ -1064,6 +1069,61 @@ path); freeing a transit visa at its expiry (the stream-ID reuse of #271);
 a proactive re-request before expiry (not needed for enforcement); and a
 dedicated 1 s sweep task (g184 q7).
 
+**A Zode's substrate address is what the relay observes; policy is the
+only override** (#264, operator, pd plan p56, approach A). Before, a Zode
+told the visa service its own substrate address on `connect` and `open`, and
+nothing checked it. The visa service handed it to the Zode's peers as
+`Link.peer`, so a malicious Zode could point every peer it was proposed to at
+any host and port. Now:
+
+- **Why the relay, not the visa service.** "Take it from the socket" is right,
+  but the visa service sees no substrate socket of a Zode: the VS-API session
+  runs over ZPR, so it sees only the Zode's ZPR address. The relay does see
+  one. Every Zode but the relay joins over an initial link to it, from the same
+  UDP socket it listens on, so the source the relay sees is where the Zode can
+  be reached from outside: its own address with no NAT, or the NAT's mapping.
+  A spoofed source cannot complete the handshake, because the replies go to
+  the spoofed address, so the observation is always an address the CN holder
+  itself sends from and receives at.
+- **Carried on `requestBootstrapVisas`.** The relay already calls it at J2,
+  once the joiner's CN is verified and before the joiner's `connect` or
+  `open`, and every rejoin repeats it. Rejected: the relay's link-state report
+  (coalesced and asynchronous; it could land after `connect`, so the first
+  topology would lack the address) and a new `reportObservedAddr` call (the
+  same data at the same moment, plus an RPC and an ordering problem).
+- **Policy is the only override.** Keeping `advertised_substrate_addr`,
+  cross-checked against the observation, was rejected by the operator. A
+  server whose NAT does not keep its forwarded port for outbound traffic, or a
+  multi-homed server, declares its address in policy. The visa service logs a
+  differing observation at `info` so the operator can spot the case.
+- **No Zode sends where it shouldn't** (operator, hard requirement). A Zode
+  sends to a substrate address only if it is its own configured initial link,
+  a policy address, a relay observation of a link that keyed with a verified
+  CN, or the source of an inbound packet it answers. The relay never dials
+  (rule 4); only the owner dials, and only to `Link.peer` (rules 1, 2, 6, 13a);
+  a link never roams to a later packet's source; and an observed address counts
+  only while its Zode has a live session, so a vanished Zode's old IP, perhaps
+  reassigned, is never proposed.
+- **Two Zodes behind one NAT lose their direct link** unless the NAT
+  hairpins (operator, builder check q2). Restoring it would need a
+  Zode-supplied LAN address, which would let a Zode aim its peers at any
+  internal host. ZIPLINE connects machines at different places; two on one LAN
+  do not need it.
+- **The relay must see each Zode's true source address.** Any source NAT or
+  proxy between the Zodes and the relay makes the relay observe every Zode at
+  that box's address, so no direct link can form (each dial goes to the NAT)
+  and all traffic goes through the relay. Docker's userland proxy, or a
+  masquerade in front of a published port, does exactly that. The operator fix
+  in such a deployment is policy addresses. Found on the libvirt testbed
+  (org-zpr/zipline#289; see "On real machines").
+- **No backwards compatibility.** `connect` refuses a leftover
+  `substrate_addr`, and `ph` refuses `advertised_substrate_addr` as an unknown
+  key.
+- **Not done.** NAT traversal (TBOLT/ZBOLT, v2), and the issue's mitigations
+  2-4 (rate-limiting changes, a public-address check, protecting rule 13a from
+  re-reports), which defend against a Zode choosing its address, which it no
+  longer can. Mitigation 1, the dialer's CN check, already existed.
+
 ## Implementation status
 
 Built on `feature/zodes` in three core PRs (zl-zpr-core#105 keying and
@@ -1147,8 +1207,9 @@ And in `zl-zpr-core/adapter/ph/src/config.rs`, `SHUTDOWN_DEREGISTER_TIMEOUT`
   the relay's CN and IPv4 substrate address, and `zipline service-run` passes
   them as `--initial-link <relay_cn>@<relay_addr>`, beside the Zode
   certificate (`--certificate-file`, `--private-key-file`, `--ca-file`) the
-  same registration issued. It never sets `--self-addr` or
-  `--advertised-substrate-addr` on an endpoint
+  same registration issued. It never sets `--self-addr` on an endpoint, and
+  no Zode names its own substrate address (`ph` has no option for it since
+  [#264](https://github.com/org-zpr/zl-zipline/issues/264))
   ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
   SECURITY_MODEL.md, *Design decisions*).
 - **Relay.** `relay = true` in `[node]`, or `ph zode --relay true`. Default off.
@@ -1348,8 +1409,8 @@ merge set C, which merges together with this document.
   (800 ms, `config.rs`).
 
 **Wire.** ZDP type 146 `Bootstrap Visas` ([ZDP.md](ZDP.md)). In `vs.capnp`,
-`VSHandle.requestBootstrapVisas @10 (peerCn :Text) -> (res
-:Result(BootstrapVisas))` and `struct BootstrapVisas { peer @0 :List(Visa);
+`VSHandle.requestBootstrapVisas @10 (peerCn :Text, observedAddr :SockAddr)
+-> (res :Result(BootstrapVisas))` (`observedAddr` since #264) and `struct BootstrapVisas { peer @0 :List(Visa);
 relay @1 :List(Visa); }`; common refuses any list that does not hold exactly
 two visas. `Link.visas` and `VSHandle.updateSubstrateAddr` are gone. The
 members after them were renumbered (`Link.zprAddr` @3, `Link.peerCn` @4,
@@ -1385,45 +1446,47 @@ refuses the forward-only binds by design, so only zb and zc are checked.
 - J11: only the ingress swaps its forwarding entry; other hops bind the new
   visa beside the old (gate g89 q10). A key change refuses the rebind.
 - "`reconnect` after a link wipe": the previous join's VS-API and VSS visas
-  are revoked and replaced, not pushed again. `vs.capnp`'s comment still says
-  the VSS visa is pushed again.
-- `requestBootstrapVisas` errors: `vs.capnp` lists `invalidOperation`,
-  `notFound`, `internal` and `temporarilyUnavailable`. The visa service also
-  answers `authRequired` on a dead handle, and never answers
-  `temporarilyUnavailable`. The relay closes the link on any error, so the
-  difference has no effect.
+  are revoked and replaced, not pushed again. `vs.capnp`'s comment says the
+  same since zl-zpr-vsapi#8 (#264, folding in #260).
+- `requestBootstrapVisas` errors: since zl-zpr-vsapi#8, `vs.capnp` lists what
+  the visa service answers, in the order it checks: `authRequired` (a dead
+  handle), `invalidOperation`, `notFound`, `paramError` (an undialable
+  `observedAddr`, #264) and `internal`. The relay closes the link on any
+  error.
 
 Visa-service pre-releases for core CI while set C is open are in
 [BUILD.md](BUILD.md).
 
 ### Links from known addresses (#255)
 
-Rule 13b with reported addresses. The schema is zl-zpr-vsapi#7 and
+Rule 13b with known addresses. #255 took them from the node's own report;
+since #264 they are policy's or the relay's observation, never the node's
+word (see "Observed substrate addresses (#264)" below). The schema is zl-zpr-vsapi#7 and
 zl-zpr-common#16 (tag `zl-v0.32.0-zodes.5`), both merged. The visa service's half
 (zl-zpr-visaservice#68), core (zl-zpr-core#121) and the compiler (zl-zpr-compiler#27,
 zplc 0.21.0) are p37's merge set, which merges together with this document.
 
 | Concern | Location |
 |---|---|
-| The one rule for a reported address on `connect` and `open` (`accept_reported_substrate`, `require_dialable_substrate`) | `zl-zpr-visaservice/vs/src/connection_control.rs`, called from `vs/src/vsapi_worker.rs` |
+| The one rule for a node's address on `connect` and `open` (`substrate_addr_for`, since #264; `require_dialable_substrate`) | `zl-zpr-visaservice/vs/src/connection_control.rs`, called from `vs/src/vsapi_worker.rs` |
 | A node's known address (`known_substrate_addr`); which links are proposed and with which `peer` (`proposed_links`) | `zl-zpr-visaservice/vs/src/vss_worker.rs` |
 | A peer with no policy address kept as `None` (`resolve_peers`) | `zl-zpr-visaservice/vs/src/policy_mgr.rs` |
-| Re-proposal on session start (`repropose_links_to_peers`) | `zl-zpr-visaservice/vs/src/vsapi_worker.rs` |
+| Re-proposal on session start, and since #264 on VSS worker start (`repropose_links_to_peers`) | `zl-zpr-visaservice/vs/src/vsapi_worker.rs` |
 | `Link.peer: Option<SockAddr>`, the decoder's refusal of an unspecified IP or port 0 | `zl-zpr-common` `vsapi_types` |
 | An owned link with no `peer` skipped (`apply_topology`); `LinkRecord.dial_addr` is an `Option` | `zl-zpr-core/adapter/ph/src/zode_links.rs`, `zode_link_record.rs` |
 
 **Tests.** Unit tests in each PR, written first. In netns, `zodes.zplc` gives zb
 no substrate address (gate g115 q6). `zode-link-test.sh` checks that the
 relay's topology names zb with `peer` unset before zb connects, that zb joins
-and authenticates, and that the relay's next topology carries the address zb
-reported. A direct link between two endpoints from reported addresses has unit
-tests only. Its netns scenario is left to #254 or later.
+and authenticates, and that the relay's next topology carries zb's address
+(since #264, the one the relay observed). A direct link between two endpoints
+from known addresses has unit tests only. Its netns scenario is left to #254
+or later.
 
-**Known limit.** A rejoin ends a session but keeps the node's actor, so the
-address it reported stays known until its next `connect` or `open` replaces it.
-In that window a direct peer may be proposed the old address. The dial fails
-and the pair falls to rule 13a, which that next session start clears (a
-`ponytail` note on `known_substrate_addr`).
+*The known limit is gone (#264).* #255 kept a rejoined node's old reported
+address known until its next `connect` or `open`. Now the relay's bootstrap
+request replaces it at the rejoin itself, and an observed address counts only
+while its node has a live session.
 
 ### Network change (#230)
 
@@ -1435,24 +1498,64 @@ zl-zpr-core#123.
 
 | Concern | Location |
 |---|---|
-| The reported substrate address: `advertised_substrate_addr` if set, else a concrete `self_addr`, else, for a Zode with a wildcard `self_addr` and an initial link, the initial link's current local address with `self_addr`'s port. A wildcard relay with no advertised address is a startup error (`ReportedSubstrateAddr`) | `zl-zpr-core/adapter/ph/src/config.rs` |
-| The initial link's local address (`initial_link_local_addr`) | `zl-zpr-core/adapter/ph/src/zode_links.rs` |
-| `connect` and `open` read the address at each call, not once at startup (`SubstrateAddrSource`) | `zl-zpr-core/libnode2/src/vsconn.rs`, wired in `adapter/ph/src/main.rs` |
+| The new address: the relay observes it on the new initial link and reports it on `requestBootstrapVisas` (since #264; until then the Zode reported its initial link's local address itself, through `ReportedSubstrateAddr`, `initial_link_local_addr` and `SubstrateAddrSource`, all deleted) | see "Observed substrate addresses (#264)" below |
 | A send error from a vanished source address is dropped, counted in `OutPacksDrop` and logged at most once per interval, instead of stopping `ph` (`is_network_change_send_error`): network or host unreachable, network down, address not available, and `EINVAL` for a send that named its source (Linux IPv6). Every other send error is still fatal | `zl-zpr-core/adapter/ph/src/fastpath_io.rs` |
 | Detection: the keep-alive closes the initial link after `KEEP_ALIVE_MAX_MISSES`. A comment there notes that OS address or route notifications could detect it sooner | `zl-zpr-core/adapter/ph/src/link_state.rs` |
-| netns scenario 8: zb, with a wildcard `self_addr` and no advertised address, moves to another subnet. It keeps running, drops its sends from the old address, rejoins with a new hand-off, and the relay's next topology carries zb's new address | `zl-zpr-core/integration-test/zode-link-test.sh` |
+| netns scenario 8: zb, with a wildcard `self_addr`, moves to another subnet. It keeps running, drops its sends from the old address, rejoins with a new hand-off, the relay's bootstrap request carries zb's new observed address, and the relay's next topology carries it | `zl-zpr-core/integration-test/zode-link-test.sh` |
 
-A concrete `self_addr` is still allowed for a Zode with a static address, and
-does not follow a network change (gate g114 q5). Detection takes up to about
+A concrete `self_addr` is still allowed for a Zode with a static address. It
+binds that address, so it does not follow a network change (gate g114 q5). Detection takes up to about
 12 s, plus the redial backoff (at most 30 s) after a long outage. Direct links
 to a Zode at its new address need peers to receive the new `Link.peer`, which
 the visa service sends with the topology it re-proposes on that Zode's session
-start (#255). Windows and macOS were checked by hand: a Zode with a wildcard
-`self_addr` and no advertised address starts, joins through the relay and
-reports its real local address (`windows-zode-test.md` and
+start (#255) and VSS worker start (#264). Windows and macOS were checked by
+hand before #264: a Zode with a wildcard `self_addr` starts, joins through
+the relay and is known at its real local address (`windows-zode-test.md` and
 `macos-zode-test.md`, section 2 "a Zode with a wildcard address", with the
 results under Findings). Network-change runs on those two hosts are
 [zl-zipline#263](https://github.com/org-zpr/zl-zipline/issues/263).
+
+### Observed substrate addresses (#264)
+
+A Zode never tells anyone its own substrate address. The relay reports what
+its socket saw on the Zode's initial link, and policy overrides it (rule 13b,
+J2; ROUTING.md, "Substrate address changes"). The merge set is
+zl-zpr-vsapi#8, zl-zpr-common#17 (tag `zl-v0.32.0-zodes.6`),
+zl-zpr-visaservice#73 (pre-release `v0.22.0-zodes.11`), zl-zpr-core#139,
+zl-zpr-compiler#28 (common pin only), org-zpr/zipline#289 (package 2.0.9),
+zl-zpr-demo#11 and this document (pd plan p56).
+
+| Concern | Location |
+|---|---|
+| `requestBootstrapVisas @10 (peerCn, observedAddr)`; the method's errors and the `VSHandle` comment on where the address comes from | `zl-zpr-vsapi/vs.capnp` |
+| The relay reads the joiner's link `substrate_addr` from the peer table and passes it as `observedAddr`, only while that link is Active for the joiner's CN (`start_relay_hand_off`) | `zl-zpr-core/adapter/ph/src/bootstrap_handoff.rs`, `libnode2/src/vsconn.rs` |
+| `connect` and `open` carry no `substrate_addr`; `advertised_substrate_addr` and `--advertised-substrate-addr` are gone, and a config that still sets the key is refused by the unknown-key check | `zl-zpr-core/libnode2/src/vsconn.rs`, `adapter/ph/src/config.rs`, `main_args.rs`, `main_argparse.rs` |
+| The observation recorded on a granted request, canonicalized from IPv4-mapped IPv6, an undialable one refused with `paramError` (`request_bootstrap_visas`, `Assembly::observed_substrate`); forgotten when the node disconnects | `zl-zpr-visaservice/vs/src/visa_bootstrap.rs`, `assembly.rs`, `connection_control.rs` |
+| The one rule on `connect` and `open`: policy, else observation, else the stored claim, else none (`substrate_addr_for`); unknown `connect` params and any `open` param refused | `zl-zpr-visaservice/vs/src/connection_control.rs`, `vsapi_worker.rs` |
+| A stored claim counts as known only while its node has a live VSS worker (`known_substrate_addr`); `db::Node.substrate_addr` is an `Option` | `zl-zpr-visaservice/vs/src/vss_worker.rs`, `db/node.rs` |
+
+**Tests.** Unit tests in each PR, written first. Core: a relay given a
+`setTopology` with `Link.peer` set on every link dials none of them; a packet
+from another source never moves a keyed link (no roaming); the hand-off
+passes the link's peer address; config refuses `advertised_substrate_addr`.
+Visa service: the observation is recorded, canonicalized and refused when
+undialable; the address order on `connect` and `open`; a rejoin updates the
+stored claim; a node with no live session has no known observed address.
+In netns, `zode-link-test.sh` checks that the relay's bootstrap request
+carries zb's observed address, on the first join and after the network
+change, and that the relay's next topology carries it as `Link.peer`.
+
+**Already there: the dialer's CN check.** The issue's first mitigation, that
+a dialer refuses a peer whose certificate CN differs from the `Link.peerCn`
+it dialed, existed before #264: `check_keyed_peer` refuses
+`Refusal::WrongCn` (`zl-zpr-core/adapter/ph/src/zode_links.rs:147`, test
+`test_check_keyed_peer_dialer`).
+
+**Same LAN, one NAT.** Two Zodes behind one NAT are both observed at the
+NAT's public address. They link directly only if the NAT hairpins; otherwise
+their traffic goes through the relay. Before #264 they reported their LAN
+addresses and linked directly, so this is a deliberate regression (see
+*Design decisions*).
 
 ### The relay hosts the visa service (#229)
 
@@ -1537,6 +1640,17 @@ What the real machines showed beyond the netns test:
   report: `LINK_REPROPOSE_DELAY` plus the owner's `LINK_UP_WINDOW`) leaves
   the pair marked failed until either end reconnects (rule 13a). The demo restarts one Zode. A policy push does not
   clear the mark.
+- **Nothing may NAT the Zodes' traffic to the relay** (#264,
+  org-zpr/zipline#289). On the libvirt testbed the VMs reach the relay
+  container's published port through libvirt's masquerade, which Docker then
+  DNATs, so the relay observed both VMs at the Docker bridge gateway
+  (`172.33.0.1`). The VS proposed that address as `Link.peer`, the direct
+  dial failed, rule 13a marked the pair, and traffic flowed through the relay
+  (a 64 MiB download matched its SHA-256). Before #264 each Zode reported its
+  own address, so the NAT did not matter. The testbed fix is a `RETURN` rule
+  in libvirt's `LIBVIRT_PRT` chain that exempts VM-to-Docker-subnet traffic
+  from the masquerade. In a deployment that cannot avoid such a NAT, give the
+  Zodes policy addresses.
 - **Block inbound only.** A host firewall that drops a Zode's *outgoing*
   substrate UDP makes the kernel fail `ph`'s send with EPERM, and `ph`
   panics on it (#270). The demo's block drops only what comes in from the
@@ -1783,8 +1897,6 @@ inside its 60 s deadline.
   with ZIPLINE-provisioned per-customer certificates. Since gate g100 that TLS
   is the only end-to-end protection of a node's traffic to and from the visa
   service: its core visas carry no A2A keys.
-- **#264** whether a Zode can misuse the substrate address it reports
-  (rule 13b).
 - **#270** `ph` treats an EPERM from a substrate send as fatal, so a host
   firewall that drops one peer's outgoing traffic crash-loops the Zode.
 - **#273** deleting a service hosted on a Zode makes the visa service
