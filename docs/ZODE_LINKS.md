@@ -1021,7 +1021,7 @@ new `ping` reused the bound stream). Now:
   PFT entries. A visa with no stream entering over a Zode link (this Zode
   is the ingress, or the visa has no stream left) is freed by the first
   sweep after its expiry, and its local streams are withdrawn, so the
-  actor's next packet binds afresh: under another live visa that covers it, a new one, or
+  actor's next packet binds afresh: under another live visa the lookup finds, a new one, or
   none.
 - **A transit hop keeps the stream-ID slot for a grace** (D4). A visa with
   a stream entering over a Zode link is freed only

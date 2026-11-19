@@ -791,8 +791,8 @@ not read the RFCs as a description of current guarantees.
   a J11 commit refuses one, including a visa just fetched by ID. A sweep
   on the link keep-alive (at least 10 s apart) then frees expired
   visas: at the ingress on its first run after the expiry, withdrawing the local streams so the next packet
-  is matched afresh (a new visa request, unless another live visa covers
-  it); at a hop a stream enters over a Zode link, only
+  is matched afresh (a new visa request, unless the lookup finds another
+  live visa); at a hop a stream enters over a Zode link, only
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is the clock
   skew between Zodes it is designed to tolerate, not a bound the code
@@ -904,7 +904,9 @@ not read the RFCs as a description of current guarantees.
   compares each packet with the Zode's current wall clock and records
   nothing once an entry has expired, so if the clock steps back before
   the sweep frees the visa, its streams forward again until the clock
-  passes the expiry once more. Skew between Zodes only moves the cutoff
+  passes the expiry once more. Skew between Zodes moves the cutoff, and an
+  upstream lagging by more than the 60 s stream-ID grace can still send
+  on an ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
 - **Clean-up after a visa is removed.** A freed local stream ID is not
   quarantined before reuse
