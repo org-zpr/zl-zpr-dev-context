@@ -418,8 +418,10 @@ Zodes master plan §5.11).
   on the TUN as it is, so before upgrading, give such a hand-configured
   address a prefix that covers `vs.zpr` (or add an on-link route to it).
   On real machines, a Windows Zode on ZIPLINE package 2.0.6
-  ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) reached `vs.zpr` without the route.
-  TODO(coordinator, p52 t317): confirm from the real-host run.
+  ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256))
+  reached `vs.zpr` and resolved names with no /128 route: its address had
+  PrefixLength 32 and the on-link `fd5a:5052::/32` route (2026-11-19 run;
+  [ZODE_LINKS.md](ZODE_LINKS.md), "On real machines").
 - **AAA is kept, unused** (Zodes master plan §5.4): see
   [ZODE_LINKS.md](ZODE_LINKS.md), *Design decisions*.
 

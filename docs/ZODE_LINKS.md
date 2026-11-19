@@ -1417,12 +1417,22 @@ adapter 2.0.4, and the visa service at `65fe475` (`v0.22.0-zodes.9`).
   Package 2.0.6 pins core `13d27db` (the zl-zipline#234 merge, `ph zode`
   only), the visa service at `65fe475`, the compiler at `3e16a94` and
   CoreDNS at `39d49be`. The Linux and Windows Zodes, the relay container and
-  the DNS container all run `ph zode`. On a fresh network, a Windows Zode
-  reached `vs.zpr` and the DNS Zode with no /128 visa-service route, only
-  the on-link `fd5a:5052::/32`.
-  TODO(coordinator, p52 t317): confirm the /128-free check above, and add
-  the Linux-Linux, Linux-Windows and Windows-Linux results and their
-  `runs/` directories.
+  the DNS container all run `ph zode` (2026-11-19, ubuvm1, ubuvm2 and
+  Windows). On a fresh network, a Windows Zode reached `vs.zpr` and the DNS
+  Zode with no /128 visa-service route, only the on-link `fd5a:5052::/32`;
+  its address had PrefixLength 32, and it resolved names by DNS
+  ([checks](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-checks)). The demo results:
+  - Linux-Linux: 17/17 steps ([L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-L)).
+  - Linux client, Windows server: 16/17 on the first run
+    ([L-W-1](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-1)). The step 3 direct download got a TCP reset with no
+    restart before it, so
+    [#277](https://github.com/org-zpr/zl-zipline/issues/277) covers more than
+    a restart: TCP to or from a Windows Zode can be reset mid-transfer. The
+    re-run passed 17/17 ([L-W-2](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-2)).
+  - Windows client, Linux server, by DNS name: 17/17 ([W-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-W-L)).
+
+  #277 is open. It has reset 2 of the Windows runs: 2026-11-18 W-L-1
+  (step 5, after a restart) and 2026-11-19 L-W-1 (step 3, no restart).
 
 What the real machines showed beyond the netns test:
 
