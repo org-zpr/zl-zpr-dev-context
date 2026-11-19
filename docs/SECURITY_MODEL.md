@@ -839,8 +839,8 @@ not read the RFCs as a description of current guarantees.
     Only the Zode link responder answers there: `mgmt/dispatch.rs` refuses
     and counts (`UnknownPeer`) any first handshake that is not a Zode
     handshake. Before zl-zipline#234 an unmarked handshake reached a legacy
-    adapter-docking responder, as it still does on a ZIPLINE MSI older than
-    2.0.6, which ships a `ph node` core. 2.0.6 ships the `ph zode`-only core
+    adapter-docking responder, as it still does on a ZIPLINE MSI whose
+    service runs `ph node` (the 2.0.x Zode packages before 2.0.6). 2.0.6 ships the `ph zode`-only core
     ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)).
   - **Why that is acceptable.** A Zode link survives keying only with a
     certificate signed by the network's CA whose CN is in the Zode's current
