@@ -732,6 +732,21 @@ handling. ([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229),
 [#240](https://github.com/org-zpr/zl-zipline/issues/240); ZODE_LINKS.md, "The
 relay hosts the visa service (#229)")
 
+**A visa is enforced until its expiry on every packet, not only when a flow
+starts.** The visa service bounds a user flow's visas by the login's expiry
+and forgets a visa when it expires, so it never revokes an expired one: the
+Zodes must stop it themselves. Each forwarding entry carries the bound
+visa's expiry and the fast path checks it per packet, so access ends at the
+visa's expiry on flows that were already open too, which the login's
+expiry bounds from above. A packet is dropped once the fast-path worker's
+clock sample reaches the expiry: the clock is read once per wakeup, so a
+batch that began just before the expiry still passes, and a skewed clock
+moves the cutoff
+([#281](https://github.com/org-zpr/zl-zipline/issues/281)) (operator, gate g184;
+[#274](https://github.com/org-zpr/zl-zipline/issues/274)). The sweep that
+frees expired visas reclaims memory and enforces nothing. Rationale and the
+rejected options: ZODE_LINKS.md, "Design decisions" (pd plan p53).
+
 **The visa service mints a Zode's login nonce.** Every endpoint is a node, so
 "a compromised docking node" now includes every laptop; a nonce the endpoint
 mints itself cannot stop it replaying a stolen `id_token`. The operator chose
@@ -765,22 +780,35 @@ not read the RFCs as a description of current guarantees.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
   revocation of visas, endpoints, and trusted services without a policy
   install. See [VISA_SERVICE.md](VISA_SERVICE.md).
-- **Visa expiry, when a flow is matched** — a Zode never matches a new flow
-  to a visa that has already expired. At the flow's ingress the expired visa
-  is ejected and its adapter streams are withdrawn, and the lookup runs
-  again: a new visa is requested unless that lookup finds a live one.
-  Further down the path, each hop checks once, when it handles the
-  `Stream ID Request`: an expired visa it holds is refused, and one it
-  must fetch by ID is looked up live at the visa service. A refusal there
-  leaves the hop's existing streams under the visa in place. No hop checks
-  again when the bind commits, so a bind whose checks all passed before
-  the visa expired is not stopped by the expiry
-  ([#271](https://github.com/org-zpr/zl-zipline/issues/271); ZODE_LINKS.md,
-  "Visa expiry at match time (#271)"). Before #271 `ph` never checked
-  expiry when binding a flow (a joiner already refused an expired
+- **Visa expiry on every use of a visa** — every Zode on a stream's path
+  drops its packets from the visa's expiry on, by its own clock: each
+  forwarding entry carries a copy of the bound visa's expiry, checked on
+  every packet at the ingress, at transit and at egress delivery, and
+  counted as `Visa Expired`. A J11 rebind moves the next hop and the
+  expiry together, atomically, so a renewed stream lives as long as its
+  new visa and one whose rebind failed stops at the old visa's expiry. A
+  Zode never matches a new flow to an expired visa (#271), and a bind or
+  a J11 commit refuses one, including a visa just fetched by ID. A sweep
+  on the link keep-alive (at least 10 s apart) then frees expired
+  visas: at the ingress on its first run after the expiry, withdrawing
+  the local streams, so once the actor has processed the withdrawal its
+  traffic is matched afresh (a new visa request, unless the lookup finds
+  another live visa); at a hop a stream enters over a Zode link, only
+  60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
+  while an upstream Zode may still send on it. That grace is the clock
+  skew between Zodes it is designed to tolerate, not a bound the code
+  enforces: an upstream lagging by more than 60 s could still send on a
+  reused ID. Expiry is an absolute instant compared with
+  each Zode's clock, so a skewed clock stops a stream early or late
+  ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
+  [#271](https://github.com/org-zpr/zl-zipline/issues/271),
+  [#274](https://github.com/org-zpr/zl-zipline/issues/274), and
+  ZODE_LINKS.md, "Visa expiry on every use (#274)". Before #271 `ph` never
+  checked expiry when binding a flow (a joiner already refused an expired
   bootstrap hand-off: ZODE_LINKS.md J4, ZDP.md "Bootstrap Visas"), and
   since the visa service never revokes an expired visa, a Zode kept
-  admitting new flows under it.
+  admitting new flows under it; before #274 a stream bound before the
+  expiry kept forwarding after it.
 - **Authentication expiry is enforced, not just recorded.** A periodic sweep
   in the visa service revokes the authentication of every connected adapter
   whose expiration has passed and drops the actor, batched one
@@ -873,15 +901,20 @@ not read the RFCs as a description of current guarantees.
 
 **Not yet, or verify before relying on it:**
 
-- **Visa expiry on every use of a visa.** Expiry is checked only when a Zode
-  would bind under a visa (*Implemented*, above). Nothing removes an expired
-  visa otherwise, so the streams already bound under it keep flowing until a
-  new flow matches it, a link they cross drops, or an R16 reset
-  (ZODE_LINKS.md) drops every visa outside the Zode's two VS-API flows; the
-  visa service, which forgets a visa at expiry, cannot revoke it. Enforcing
-  expiry on every use of a visa, so bound streams do not outlive it, is
-  planned Zodes epic work
-  ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+- **A backward clock step can reopen an expired stream.** The fast path
+  compares each packet with the Zode's current wall clock and records
+  nothing once an entry has expired, so if the clock steps back before
+  the sweep frees the visa, its streams forward again until the clock
+  passes the expiry once more. Skew between Zodes moves the cutoff, and an
+  upstream lagging by more than the 60 s stream-ID grace can still send
+  on an ID the downstream Zode has freed and reused
+  ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
+- **Clean-up after a visa is removed.** A freed local stream ID is not
+  quarantined before reuse
+  ([#282](https://github.com/org-zpr/zl-zipline/issues/282)), and the
+  destination's DLT entry is not reclaimed
+  ([#283](https://github.com/org-zpr/zl-zipline/issues/283)), whether the
+  visa expired, was revoked, or lost its link.
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
   seconds denies every visa request that needs it, unless a refresh of
@@ -978,6 +1011,7 @@ not read the RFCs as a description of current guarantees.
 | A2A integrity | `zl-zpr-core/adapter/ph` — `zdp.rs`, `fastpath.rs`, `adapter_tables.rs` |
 | Link crypto and key management | `zl-zpr-core/adapter/ph` — `km_noise.rs`, `km_cert_exchange.rs`, `pki.rs` |
 | Per-packet visa enforcement | `zl-zpr-core/libnode2`, and the node side of `ph` in `zl-zpr-core/adapter/ph` |
+| Visa expiry on every packet; the expiry sweep | `zl-zpr-core/adapter/ph` — `fastpath.rs` (`forward`), `forwarding_tables.rs` (`PftPep`), `visa_table.rs` (`bind`, `commit_supersede`, `handle_expirations`), `visa_mgmt.rs` |
 | What policy can express | `zl-zpr-compiler` — see [ZPL.md](ZPL.md) |
 
 [ZDP.md](ZDP.md), "Flow setup", traces a flow's first packet and is the best

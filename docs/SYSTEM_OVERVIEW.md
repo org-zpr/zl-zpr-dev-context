@@ -236,12 +236,10 @@ header without pushing past the substrate MTU.
 
 **10. End.** Visas expire on a timestamp every recipient can see, so no
 "expired" message is ever sent; Zodes stop forwarding and tear down the
-flow's streams, and further traffic looks new. (In `ph` today a Zode checks
-expiry only when a new flow matches a visa, with no timer: ZODE_LINKS.md,
-"Visa expiry at match time (#271)". Checking it on every use of a visa,
-so bound streams stop at expiry too, is
-[zl-zipline#274](https://github.com/org-zpr/zl-zipline/issues/274), part of
-the Zodes epic.) Revocation is separate — an administrative
+flow's streams, and further traffic looks new. (In `ph` every Zode checks a
+stream's expiry on every packet, and a sweep on the link keep-alive frees
+expired visas: ZODE_LINKS.md, "Visa expiry on every use (#274)".)
+Revocation is separate — an administrative
 action or a policy change — and is pushed to the affected nodes, which stop
 immediately.
 

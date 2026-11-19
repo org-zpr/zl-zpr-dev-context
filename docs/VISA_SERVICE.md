@@ -485,24 +485,29 @@ On expiry a node stops forwarding and tears down the tethers to its adapters;
 further traffic looks new and triggers a fresh request. Nodes can be configured
 to re-request before expiry.
 
-*Built differently* ([#271](https://github.com/org-zpr/zl-zipline/issues/271)):
-a Zode checks expiry only when it would use a visa for a new binding, with no
-timer. A new flow that matches an expired visa at its ingress Zode ejects
-that visa, withdraws its streams and looks again, so it triggers a
-fresh request unless that lookup finds a live visa. Further down the path,
-each hop checks once, when it handles the `Stream ID Request`: an expired
-visa it holds is refused, and one it must fetch by ID is looked up live
-here. No hop checks again when the bind commits. (A joiner's check of its
-bootstrap hand-off, J4, is separate and older.)
-At each Zode, streams already bound under an expired visa keep forwarding
-until a new flow matches it there, that Zode loses a link they cross, or an
-R16 reset drops every visa outside the Zode's two VS-API flows
-(ZODE_LINKS.md). Checking expiry on every use of a visa, so bound streams do
-not outlive it, is planned Zodes-epic work, not done yet
-([#274](https://github.com/org-zpr/zl-zipline/issues/274)). The visa service
-forgets a visa when it expires, so it never revokes an expired one; before
-#271 a Zode kept using expired visas for good. See ZODE_LINKS.md, "Visa
-expiry at match time (#271)".
+*Built* ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
+[#274](https://github.com/org-zpr/zl-zipline/issues/274)): as designed, on
+expiry every Zode on the path stops forwarding, by its own clock: each
+forwarding entry carries the bound visa's expiry, and every packet is
+checked against it. A new flow that matches an expired visa at its ingress
+Zode ejects that visa and looks again, and a `Stream ID Request`, a bind or
+a J11 rebind commit for an expired visa is refused, including a visa
+fetched by ID. A sweep on the link keep-alive, at least 10 s apart, then
+frees expired visas and, at the ingress, withdraws their streams from the
+Zode's actor, so further traffic looks new and is matched afresh: it
+triggers a fresh request unless the lookup finds another live visa.
+(A joiner's check of its bootstrap hand-off, J4, is separate and older.)
+Two differences remain. A hop whose stream enters over a Zode link holds
+the expired visa, and its stream ID, for a 60 s grace before freeing it,
+so the ID is not reused while an upstream Zode with a lagging clock may
+still send on it (the skew it tolerates; a larger lag is not caught); its
+packets are dropped meanwhile. And no Zode
+re-requests a visa before it expires: a Zode's core visas are renewed by
+the visa service (J9), and other flows ask again after the expiry. The visa
+service forgets a visa when it expires, so it never revokes an expired one;
+before #271 a Zode kept using expired visas for good, and before #274
+streams bound before the expiry kept forwarding. See ZODE_LINKS.md, "Visa
+expiry on every use (#274)".
 
 *Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
 visa service refreshes an attribute only once it has expired, and denies a
@@ -1271,17 +1276,13 @@ because no adapter docks on a Zode.
   For a Zode's core visas the visa service pushes the new visa as an ordinary install, and the Zode
   supersedes the older visa with the same five-tuple (ZODE_LINKS.md J9, J11;
   [#252](https://github.com/org-zpr/zl-zipline/issues/252)).
-- **Nodes enforce visa expiry only at a match.** The design has a node stop
-  forwarding on expiry. A Zode instead ejects an expired visa, with its
-  streams, when a new flow matches it at the ingress; a transit hop refuses
-  a new `Stream ID Request` for one but keeps its existing streams. No
-  timer sweeps the table, so live streams under an expired visa keep
-  flowing until an ingress match ejects it, a link they cross drops, or an
-  R16 reset drops every visa outside the Zode's two VS-API flows
-  ([#271](https://github.com/org-zpr/zl-zipline/issues/271); see *Expiration,
-  revocation, renewal*). Enforcing expiry on every use of a visa is planned
-  Zodes-epic work, not done yet
-  ([#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+- **A transit hop frees an expired visa late, and no node re-requests
+  early.** As designed, every Zode stops forwarding a stream at its visa's
+  expiry ([#271](https://github.com/org-zpr/zl-zipline/issues/271),
+  [#274](https://github.com/org-zpr/zl-zipline/issues/274)). But a hop whose
+  stream enters over a Zode link keeps the expired visa and its stream ID
+  for a 60 s grace, and no node re-requests a visa before it expires (see
+  *Expiration, revocation, renewal*).
 - **No actor docks on a node.** The design has adapters dock on nodes, and
   the visa service still implements the adapter roles: adapter
   authentication through a node, pool and granted addresses,
