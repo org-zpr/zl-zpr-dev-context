@@ -177,7 +177,8 @@ is a flag day: it refuses a `connect` that carries `substrate_addr`, and an
 older relay's `requestBootstrapVisas` without `observedAddr`. zipline moves
 with the set (org-zpr/zipline#289, package 2.0.9): core `d0f6121` (core#139
 without its CI-pin commit), the visa service at `6b85e4e` and the compiler at
-`1ff3140`.
+`1ff3140`. zipline#289's head `38a9a2e` is the run's `5f29650` plus the
+real-host run records only.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and

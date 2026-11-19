@@ -459,7 +459,9 @@ without it.
 
 A node's **known address** (`vss_worker::known_substrate_addr`) is its policy
 address, DNS-resolved, or failing that the claim on its node actor, **but only
-while the node has a live VS-API session** (a live VSS worker). A Zode that
+while the node has a live VS-API session** (as built, a live VSS worker;
+gating it on registration instead is
+[#287](https://github.com/org-zpr/zl-zipline/issues/287)). A Zode that
 vanished without rejoining may have lost that IP to someone else (DHCP or
 CGNAT reassignment), and peers must not be pointed at the new holder. The visa
 service puts the known address in `Link.peer` and decides from it which links

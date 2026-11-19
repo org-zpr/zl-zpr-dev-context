@@ -773,14 +773,18 @@ J2 and *Design decisions*):
   a policy address, such an observation, or the source of an inbound packet
   it answers. The relay never dials; only a link's owner dials, and only to
   `Link.peer`; a keyed link never roams to a later packet's source; and an
-  observed address counts only while its Zode has a live VS-API session, so a
-  vanished Zode's IP, perhaps reassigned by DHCP or CGNAT, is never proposed.
+  observed address counts only while its Zode has a live VS-API session (as
+  built, a live VSS worker), so once the visa service sees a vanished Zode's
+  session end, its IP, perhaps reassigned by DHCP or CGNAT, is no longer
+  proposed. Until the worker notices, a topology built meanwhile may still
+  carry it.
 - **Policy is the only override**, for a NAT that does not keep a forwarded
   port for outbound traffic or a multi-homed server. A Zode-supplied address
   cross-checked against the observation was rejected (operator), and so was a
   Zode-supplied LAN address for two Zodes behind one NAT: it would let a Zode
   aim its peers at any internal host. Such a pair links directly only if the
-  NAT hairpins, and otherwise goes through the relay.
+  NAT hairpins or policy declares their LAN addresses, and otherwise goes
+  through the relay.
 - **Deployment requirement: the relay must see each Zode's true source
   address.** A source NAT or proxy in front of the relay, Docker's userland
   proxy included, makes it observe every Zode at that box's address. Direct
@@ -789,8 +793,10 @@ J2 and *Design decisions*):
   check. On the libvirt testbed, libvirt's masquerade of the VMs' traffic to
   the relay container's published port did this (org-zpr/zipline#289); the
   testbed fix is a `RETURN` rule in libvirt's `LIBVIRT_PRT` chain for
-  VM-to-Docker-subnet traffic. A deployment that cannot avoid the NAT gives
-  its Zodes policy addresses.
+  VM-to-Docker-subnet traffic, after which the relay observed the VMs at their
+  real addresses and the direct links formed (ZODE_LINKS.md, "On real
+  machines"). A deployment that cannot avoid the NAT gives its Zodes policy
+  addresses.
 - **Not needed any more:** the issue's mitigations 2-4 (rate-limiting address
   changes, a public-address check at the visa service, protecting rule 13a
   from re-reports) all defend against a Zode choosing its address. Mitigation
@@ -912,7 +918,14 @@ not read the RFCs as a description of current guarantees.
   `open` take policy's address first, then the observation, then the stored
   claim (`substrate_addr_for`). `connect` refuses any unknown parameter,
   including the old `substrate_addr`; `ph` has no option to set one. A stored
-  claim counts only while its node has a live session. The address only goes
+  claim counts only while its node has a live VSS worker; gating it on the
+  worker rather than on registration lets a VSS-only outage during a policy
+  push flap a healthy direct link
+  ([zl-zipline#287](https://github.com/org-zpr/zl-zipline/issues/287),
+  deferred: availability only, not a check). The claim does not record its
+  source, so a visa-service store kept across the upgrade may still hold a
+  claim a pre-#264 Zode reported, until that Zode's next bootstrap request
+  replaces it. `feature/zodes` is a flag day: start it with an empty store. The address only goes
   into peers' `Link.peer`, and the link still needs the node's CA-signed
   certificate with the CN policy gives it
   ([zipline#264](https://github.com/org-zpr/zl-zipline/issues/264); see

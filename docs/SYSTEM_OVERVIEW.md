@@ -399,7 +399,9 @@ Zodes master plan §5.11).
   `--initial-link`, `--relay`, and the `enable-security-testing` flags
   (`--advertised-substrate-addr` is gone since
   [#264](https://github.com/org-zpr/zl-zipline/issues/264): no Zode names its
-  own substrate address). So a
+  own substrate address, and `ph` refuses the flag and the
+  `advertised_substrate_addr` config key; remove them, and declare any address
+  override in policy). So a
   caller switches by replacing the word `node` with `zode`. `ph-cli counters`,
   `link show [id]` and `tun` keep their output formats, except that
   `link show` no longer prints `Actor state:` or `Last auth failure:` (no
@@ -845,13 +847,15 @@ Two consequences for whoever deploys ZPR:
   and all traffic goes through the relay. If such a NAT cannot be avoided,
   declare the Zodes' substrate addresses in policy. On the libvirt testbed,
   libvirt masqueraded the VMs' traffic into the Docker relay, so the relay saw
-  both VMs at the bridge gateway; a `RETURN` rule in libvirt's `LIBVIRT_PRT`
-  chain for VM-to-Docker-subnet traffic fixed it (ZODE_LINKS.md, "On real
-  machines").
+  both VMs at the bridge gateway and no direct link formed. A `RETURN` rule in
+  libvirt's `LIBVIRT_PRT` chain for VM-to-Docker-subnet traffic fixed it: the
+  relay then saw the VMs at their own addresses, and the L-L and L-W demos
+  passed 17/17 over direct links (ZODE_LINKS.md, "On real machines").
 - **A server behind a port-forward needs a policy address** if its NAT does
   not keep the forwarded port for outbound traffic, and so does a multi-homed
   server. Two Zodes behind the same NAT link directly only if the NAT
-  hairpins; otherwise they use the relay.
+  hairpins or policy declares their LAN addresses; otherwise they use the
+  relay.
 
 ### Deferred
 

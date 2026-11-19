@@ -1102,12 +1102,13 @@ any host and port. Now:
   CN, or the source of an inbound packet it answers. The relay never dials
   (rule 4); only the owner dials, and only to `Link.peer` (rules 1, 2, 6, 13a);
   a link never roams to a later packet's source; and an observed address counts
-  only while its Zode has a live session, so a vanished Zode's old IP, perhaps
-  reassigned, is never proposed.
+  only while its Zode has a live session, so once the visa service sees a
+  vanished Zode's session end, its old IP, perhaps reassigned, is no longer
+  proposed.
 - **Two Zodes behind one NAT lose their direct link** unless the NAT
-  hairpins (operator, builder check q2). Restoring it would need a
-  Zode-supplied LAN address, which would let a Zode aim its peers at any
-  internal host. ZIPLINE connects machines at different places; two on one LAN
+  hairpins or policy declares their LAN addresses (operator, builder check
+  q2). Restoring it without policy would need a Zode-supplied LAN address,
+  which would let a Zode aim its peers at any internal host. ZIPLINE connects machines at different places; two on one LAN
   do not need it.
 - **The relay must see each Zode's true source address.** Any source NAT or
   proxy between the Zodes and the relay makes the relay observe every Zode at
@@ -1551,9 +1552,16 @@ it dialed, existed before #264: `check_keyed_peer` refuses
 `Refusal::WrongCn` (`zl-zpr-core/adapter/ph/src/zode_links.rs:147`, test
 `test_check_keyed_peer_dialer`).
 
+**Known limit: an observation is gated on the VSS worker** (zl-zipline#287,
+deferred by the operator). `known_substrate_addr` honours an observed address
+only while the Zode has a live VSS worker, not while it is registered. So a
+brief VSS-only outage that overlaps a policy push leaves a healthy direct link
+out of its peer's topology; the peer closes it, and the next VSS worker start
+re-proposes it. A needless flap through the relay, which heals itself.
+
 **Same LAN, one NAT.** Two Zodes behind one NAT are both observed at the
-NAT's public address. They link directly only if the NAT hairpins; otherwise
-their traffic goes through the relay. Before #264 they reported their LAN
+NAT's public address. They link directly only if the NAT hairpins or policy
+declares their LAN addresses; otherwise their traffic goes through the relay. Before #264 they reported their LAN
 addresses and linked directly, so this is a deliberate regression (see
 *Design decisions*).
 
@@ -1646,11 +1654,18 @@ What the real machines showed beyond the netns test:
   DNATs, so the relay observed both VMs at the Docker bridge gateway
   (`172.33.0.1`). The VS proposed that address as `Link.peer`, the direct
   dial failed, rule 13a marked the pair, and traffic flowed through the relay
-  (a 64 MiB download matched its SHA-256). Before #264 each Zode reported its
-  own address, so the NAT did not matter. The testbed fix is a `RETURN` rule
-  in libvirt's `LIBVIRT_PRT` chain that exempts VM-to-Docker-subnet traffic
-  from the masquerade. In a deployment that cannot avoid such a NAT, give the
-  Zodes policy addresses.
+  (a 64 MiB download matched its SHA-256;
+  [2026-11-19-264-L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-L)). Before #264 each Zode reported
+  its own address, so the NAT did not matter. The testbed fix is a `RETURN`
+  rule in libvirt's `LIBVIRT_PRT` chain that exempts VM-to-Docker-subnet
+  traffic from the masquerade. With it (package 2.0.9, core `d0f6121`, visa
+  service `6b85e4e`), the relay observed the VMs at their real addresses
+  (`192.168.122.212`, `.92` and `.39`, port 5000), the direct links formed, and
+  L-L and L-W both passed 17/17: the 256 MiB direct download raised the
+  relay's received bytes by 38 KB, against 291 MB when the direct link was
+  blocked ([L-L-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-L-natfix),
+  [L-W-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-W-natfix)). In a deployment that cannot
+  avoid such a NAT, give the Zodes policy addresses.
 - **Block inbound only.** A host firewall that drops a Zode's *outgoing*
   substrate UDP makes the kernel fail `ph`'s send with EPERM, and `ph`
   panics on it (#270). The demo's block drops only what comes in from the
@@ -1897,6 +1912,9 @@ inside its 60 s deadline.
   with ZIPLINE-provisioned per-customer certificates. Since gate g100 that TLS
   is the only end-to-end protection of a node's traffic to and from the visa
   service: its core visas carry no A2A keys.
+- **#287** (visa service) an observed address is gated on the Zode's VSS
+  worker, not its registration, so a VSS-only outage during a policy push
+  flaps a healthy direct link (see "Observed substrate addresses (#264)").
 - **#270** `ph` treats an EPERM from a substrate send as fatal, so a host
   firewall that drops one peer's outgoing traffic crash-loops the Zode.
 - **#273** deleting a service hosted on a Zode makes the visa service
