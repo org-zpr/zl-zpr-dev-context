@@ -796,6 +796,9 @@ ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server \
     integration-test/zode-ping-test.sh
 ```
 
+`zode-ping-test.sh` starts one Zode with `--io-engine io_uring` and checks
+that it uses it, so it also needs a kernel and sandbox that allow `io_uring`.
+
 Other entry points, each a standalone script:
 
 | Script | Covers |

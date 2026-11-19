@@ -185,9 +185,10 @@ deployment's CA. A Zode accepts only a Zode handshake: any other first
 handshake message is refused. The relay hosts the visa service itself, on its
 own TUN at `fd5a:5052::1` (`vs.zpr`; see *Design decisions*).
 
-**4. An endpoint joins.** A Zode's actor authenticates to the visa service:
-the machine with its bootstrap key, and a person who logs in on it with an
-OIDC token ([OIDC.md](OIDC.md)). The visa service authenticates the endpoint via
+**4. An endpoint joins.** A Zode's actor authenticates to the visa service
+with the machine's bootstrap key; no identity provider is needed for that.
+A person who logs in on the Zode later adds an OIDC token, a separate step
+([OIDC.md](OIDC.md)). The visa service authenticates the endpoint via
 trusted services, which return tokens carrying policy-specified attributes.
 Some are marked *identity attributes*, and the visa service uses them to query
 other trusted services and complete the profile. It then asks policy: may this
@@ -413,7 +414,9 @@ Zodes master plan §5.11).
   decision to #234). Since zl-zipline#272 every Windows TUN address carries
   its /32, which puts `vs.zpr` on-link as on Linux and macOS, so the extra
   route only covered a hand-configured address with a longer prefix. It went
-  with the route-owner check that guarded it.
+  with the route-owner check that guarded it. `ph` leaves an address already
+  on the TUN as it is, so before upgrading, give such a hand-configured
+  address a prefix that covers `vs.zpr` (or add an on-link route to it).
 - **AAA is kept, unused** (Zodes master plan §5.4): see
   [ZODE_LINKS.md](ZODE_LINKS.md), *Design decisions*.
 
@@ -572,7 +575,8 @@ pktinfo, and a wildcard `self_addr` is allowed. A relay with a wildcard
 initial link needs neither: it reports its initial link's local address
 ([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). No service wrapper in `ph` itself
 ([zipline#147](https://github.com/org-zpr/zl-zipline/issues/147); ZIPLINE's
-MSI runs `ph zode` under its own service).
+MSI runs `ph` under its own service, still as `ph node` until [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256); a
+`ph zode`-only `ph.exe` dropped into an older MSI install does not start).
 Functional parity with Linux is the bar; throughput through one unbatched
 socket was measured and recorded, not fixed (findings below).
 ([zipline#149](https://github.com/org-zpr/zl-zipline/issues/149))
@@ -650,7 +654,9 @@ output is localized; the wait loop is `sys/dad.rs`, unit-tested on Linux.
 ([zipline#162](https://github.com/org-zpr/zl-zipline/issues/162))
 
 **Two inbound firewall rules.** UDP 5000 (link listener, LAN interface) is
-required — without it every inbound link hits a handshake timeout. TCP 8183 (VSS
+required on a Zode that accepts inbound links (a relay, or a Zode a direct
+link is dialed to) — without it every inbound link hits a handshake timeout.
+A Zode that only dials its initial link does not need it. TCP 8183 (VSS
 listener) is scoped to the Wintun interface, which Windows places on the
 Public profile where unsolicited inbound is dropped; the rule cannot be
 added before the node has created the adapter, and persists once created.
