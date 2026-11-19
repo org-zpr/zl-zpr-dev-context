@@ -839,9 +839,9 @@ not read the RFCs as a description of current guarantees.
     Only the Zode link responder answers there: `mgmt/dispatch.rs` refuses
     and counts (`UnknownPeer`) any first handshake that is not a Zode
     handshake. Before zl-zipline#234 an unmarked handshake reached a legacy
-    adapter-docking responder, and it still does on a ZIPLINE MSI that
-    ships a `ph node` core, until
-    [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256).
+    adapter-docking responder, as it still does on a ZIPLINE MSI older than
+    2.0.6, which ships a `ph node` core. 2.0.6 ships the `ph zode`-only core
+    ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)).
   - **Why that is acceptable.** A Zode link survives keying only with a
     certificate signed by the network's CA whose CN is in the Zode's current
     topology, and only from the link's owner (rule 3). Everything else on the
@@ -940,9 +940,12 @@ not read the RFCs as a description of current guarantees.
   ([org-zpr/zipline#251](https://github.com/org-zpr/zipline/issues/251);
   *Design decisions*, above). `zipline register` writes the Zode's link key,
   its certificate, the CA certificate, its ZPR address and the relay's CN and
-  substrate address, and `zipline service-run` starts `ph` with them (still
-  as `ph node`, which a `ph zode`-only core refuses, until
-  [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256) switches it).
+  substrate address, and `zipline service-run` starts `ph zode` with them.
+  Since [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256),
+  ZIPLINE package 2.0.6 pins core `13d27db` (the zl-zipline#234 merge,
+  `ph zode` only) and runs `ph zode` on Linux and
+  Windows Zodes and in its relay and DNS containers. The real-machine runs
+  are in ZODE_LINKS.md, "On real machines".
   The network's generated policy lists every registered Zode in the relay's
   topology and pins its address
   ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)).

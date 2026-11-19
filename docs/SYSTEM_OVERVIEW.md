@@ -298,8 +298,7 @@ where `n` is one more than the network's count of addresses handed out so far
 and an address is unique within its network, so a deleted Zode's address is
 never handed to another machine: DNS answers and open connections elsewhere may
 still name it. `zipline register` writes the address into the Zode's
-`zipline.toml`, and `ph zode --zpr-addr` claims it (zipline runs `ph node` until
-[org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256) switches it). The visa service honours
+`zipline.toml`, and `ph zode --zpr-addr` claims it. The visa service honours
 the claim only once the network's policy pins the address to the Zode's CN as
 the node's `zpr_address`, and only if it passes the static-address checks
 above. ZIPLINE's generated policy writes that pin for every registered Zode
@@ -418,6 +417,9 @@ Zodes master plan §5.11).
   with the route-owner check that guarded it. `ph` leaves an address already
   on the TUN as it is, so before upgrading, give such a hand-configured
   address a prefix that covers `vs.zpr` (or add an on-link route to it).
+  On real machines, a Windows Zode on ZIPLINE package 2.0.6
+  ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) reached `vs.zpr` without the route.
+  TODO(coordinator, p52 t317): confirm from the real-host run.
 - **AAA is kept, unused** (Zodes master plan §5.4): see
   [ZODE_LINKS.md](ZODE_LINKS.md), *Design decisions*.
 
@@ -576,8 +578,8 @@ pktinfo, and a wildcard `self_addr` is allowed. A relay with a wildcard
 initial link needs neither: it reports its initial link's local address
 ([ZODE_LINKS.md](ZODE_LINKS.md), "Network change (#230)"). No service wrapper in `ph` itself
 ([zipline#147](https://github.com/org-zpr/zl-zipline/issues/147); ZIPLINE's
-MSI runs `ph` under its own service, still as `ph node` until [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256); a
-`ph zode`-only `ph.exe` dropped into an older MSI install does not start).
+MSI runs `ph zode` under its own service from package 2.0.6, [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256); an
+older MSI runs `ph node`, so a `ph zode`-only `ph.exe` dropped into it does not start).
 Functional parity with Linux is the bar; throughput through one unbatched
 socket was measured and recorded, not fixed (findings below).
 ([zipline#149](https://github.com/org-zpr/zl-zipline/issues/149))
@@ -614,8 +616,9 @@ machines this meant a Windows Zode could not reach the DNS Zode
   `fd5a:5052::/32` route itself, as Linux and macOS do. One fix in
   `add_address_impl` covers every caller: node/Zode self-addressing, the
   granted actor address and the AAA. Unit tests and Windows CI cover the
-  argv; the first real-host check is the #271 retest, with Windows as the
-  client by DNS name.
+  argv. On real machines the #271 retest (ZIPLINE package 2.0.5,
+  2026-11-18) passed with Windows as the client by DNS name; see
+  [ZODE_LINKS.md](ZODE_LINKS.md), "On real machines".
 - **One argv builder.** The netsh argv comes from
   `sys/addr_hint.rs::netsh_add_address_args`, which is compiled on every OS
   so its tests run on Linux. The manual-fix hint, which had the same bug, is
@@ -862,7 +865,9 @@ from zl-zipline#234, each with an open issue unless noted:
 full suite of end-to-end security features is not yet implemented. Read the
 RFCs as design intent, not as a description of current behavior.
 
-Working today: Zodes (`ph zode`, the only mode since zl-zipline#234) over
+Working today: Zodes (`ph zode`, the only mode since zl-zipline#234; ZIPLINE
+package 2.0.6 pins core `13d27db` and runs it on Linux and Windows and in its
+relay and DNS containers, [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) over
 Noise-secured Zode links, end-to-end (A2A) integrity, bootstrap authentication, visa issuance and distribution with route
 selection, revocation and reconciliation on policy change, the ZPL compiler,
 and file-backed attribute sources.
