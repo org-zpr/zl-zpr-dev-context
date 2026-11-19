@@ -507,7 +507,12 @@ cannot be bound for forwarding. A refused request gets an error
 
 Forwarding is on **Stream ID alone** (6.4 §5.14): the ingress link plus the
 Stream ID in the header determine the outbound link and the Stream ID to write.
-Nothing else is consulted; the substrate's own IP routing is invisible to ZDP.
+Nothing else is consulted for the next hop; the substrate's own IP routing is
+invisible to ZDP. The forwarding entry also carries its visa's expiry, and from
+that instant on every packet on the Stream ID is dropped silently and counted
+(`Visa Expired`), at every hop, until the entry is freed
+([zl-zipline#274](https://github.com/org-zpr/zl-zipline/issues/274);
+ZODE_LINKS.md, "Visa expiry on every use (#274)").
 Stream ID 0 goes to the control plane. An unknown Stream ID is dropped
 silently and counted (`UnknownStreamId`), **by design**: the RFC says send
 `Destination Unreachable` upstream, but its own editorial note warns that doing

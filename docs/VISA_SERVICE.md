@@ -500,7 +500,8 @@ triggers a fresh request unless another live visa covers it.
 Two differences remain. A hop whose stream enters over a Zode link holds
 the expired visa, and its stream ID, for a 60 s grace before freeing it,
 so the ID is not reused while an upstream Zode with a lagging clock may
-still send on it; its packets are dropped meanwhile. And no Zode
+still send on it (the skew it tolerates; a larger lag is not caught); its
+packets are dropped meanwhile. And no Zode
 re-requests a visa before it expires: a Zode's core visas are renewed by
 the visa service (J9), and other flows ask again after the expiry. The visa
 service forgets a visa when it expires, so it never revokes an expired one;

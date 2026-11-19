@@ -794,8 +794,10 @@ not read the RFCs as a description of current guarantees.
   is matched afresh (a new visa request, unless another live visa covers
   it); at a hop a stream enters over a Zode link, only
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
-  while an upstream Zode may still send on it. That grace is a bound on
-  clock skew between Zodes: expiry is an absolute instant compared with
+  while an upstream Zode may still send on it. That grace is the clock
+  skew between Zodes it is designed to tolerate, not a bound the code
+  enforces: an upstream lagging by more than 60 s could still send on a
+  reused ID. Expiry is an absolute instant compared with
   each Zode's clock, so a skewed clock stops a stream early or late
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
   [#271](https://github.com/org-zpr/zl-zipline/issues/271),
