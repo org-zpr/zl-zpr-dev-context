@@ -689,7 +689,7 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen on `feature/zodes`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen on `feature/zodes`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; on `feature/zodes` also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
@@ -743,8 +743,9 @@ instead.
 merges into `zipline`). `--tip` resolves `zipline` and so selects the old
 core, and a bare `--manifest` reproduce runs the default tiers, which on a
 Docker host include the failing `docker` tier. So in step 2, write a
-manifest that pins each repository's `feature/zodes` revision (or the set's
-pre-release tags) and run `zpr-dev build --manifest <file> --test
+manifest that pins the `feature/zodes` revision (or the set's pre-release
+tag) of each repository that has one, and an ordinary commit or tag for the
+rest (`zl-zpr-coredns` and `zl-zpr-demo` have no `feature/zodes`), and run `zpr-dev build --manifest <file> --test
 unit,netns`; in step 5, reproduce with the same `--test unit,netns`.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
