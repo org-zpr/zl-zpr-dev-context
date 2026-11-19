@@ -790,9 +790,10 @@ not read the RFCs as a description of current guarantees.
   Zode never matches a new flow to an expired visa (#271), and a bind or
   a J11 commit refuses one, including a visa just fetched by ID. A sweep
   on the link keep-alive (at least 10 s apart) then frees expired
-  visas: at the ingress on its first run after the expiry, withdrawing the local streams so the next packet
-  is matched afresh (a new visa request, unless the lookup finds another
-  live visa); at a hop a stream enters over a Zode link, only
+  visas: at the ingress on its first run after the expiry, withdrawing
+  the local streams, so once the actor has processed the withdrawal its
+  traffic is matched afresh (a new visa request, unless the lookup finds
+  another live visa); at a hop a stream enters over a Zode link, only
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is the clock
   skew between Zodes it is designed to tolerate, not a bound the code
