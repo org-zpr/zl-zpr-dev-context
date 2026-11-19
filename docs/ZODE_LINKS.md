@@ -1163,7 +1163,7 @@ relay with its `forwarding` on and off (F1, F2, F8).
 
 | Rule | Location (`zl-zpr-core/adapter/ph/src/`) |
 |---|---|
-| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; address matching on the Internal local-actor link only, the one non-Zode link left (`actor_auth`, and the kept, unused AAA arm) | `assembly.rs::find_egress_link` |
+| F1 egress to a Zode: an up link record whose verified CN's topology `zprAddr` is the next hop; address matching on the Internal links only (`actor_auth`, and the kept, unused AAA arm): the local-actor link and its pair inside the process, which carry no Zode link record; a configured local address resolves to the local-actor link | `assembly.rs::find_egress_link` |
 | F1 warning when a `setTopology` lacks the initial link's CN | `zode_links.rs::apply_topology` (`initial_link_missing_from_topology`) |
 | F2 guards, in order: no visa or no egress, the previous hop (#253: `check_prev_hop`, F1's `find_zode_egress_link` for the visa's `prev_hop` must give the ingress link; `Visa::prev_hop`), the loop guard (egress == ingress is refused), a forward-only visa from or to an adapter, and a refusal when transaction IDs run out. Every refused `Stream ID Request` is counted once, as `StreamIdRequestRejected`, in `bind_reject` | `mgmt/node.rs::prepare_next_hop_bind` |
 | F3 bindings beside the visa (`StreamBinding { ingress, egress }`), recorded by `requested_tether_granted`; `revoke_for_link` revokes on either side, except the node's built-in visa-service visas (IDs below `MIN_VISA_ID`). Rule 9's cleanup of the bootstrap visas carried over an initial link is #252's `bootstrap_handoff::revoke_for_lost_link` | `visa_table.rs` (`VisaTable::bind`, `revoke_for_link`), `mgmt/node.rs` |

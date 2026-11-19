@@ -696,10 +696,8 @@ The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
 fallback of the `netns` tier. **It fails, rather than skips, on a build set
 whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
 `dns-demo` still starts `ph node` and `ph adapter`, and zl-zpr-demo is
-unmaintained, so no port is planned. Run such sets with `--test unit,netns`,
-and cut and reproduce them from a manifest that pins the `feature/zodes`
-revisions (`zpr-dev build --manifest <file> --test unit,netns`): the
-`--tip` recipe below resolves `zipline` and so selects the old core.
+unmaintained, so no port is planned. Run such sets with `--test unit,netns`
+(see "Cutting a Zodes set" below).
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
@@ -740,6 +738,14 @@ instead.
 5. Reproduce before relying on it: `zpr-dev build --manifest
    build-sets/<date>.yaml` must resolve to the same shas and recompute the
    same `pins:` block.
+
+**Cutting a Zodes set** (a core with only `ph zode`, until `feature/zodes`
+merges into `zipline`). `--tip` resolves `zipline` and so selects the old
+core, and a bare `--manifest` reproduce runs the default tiers, which on a
+Docker host include the failing `docker` tier. So in step 2, write a
+manifest that pins each repository's `feature/zodes` revision (or the set's
+pre-release tags) and run `zpr-dev build --manifest <file> --test
+unit,netns`; in step 5, reproduce with the same `--test unit,netns`.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
 gates against the live checkouts (read-only, seconds), and `--dry-run` prints
@@ -813,7 +819,7 @@ Other entry points, each a standalone script:
 
 | Script | Covers |
 |---|---|
-| `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different packet I/O engine on each Zode, and `ph-cli tun` output (zipline#202) |
+| `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different `--io-engine` setting on each Zode (`auto`, `io_uring`, `posix_unbatched`; `auto` picks `io_uring` where the host supports it), and `ph-cli tun` output (zipline#202) |
 | `zode-oidc-test.sh` | OIDC on a logged-in Zode (zl-zipline#234, the port of `one-node-oidc-test.sh` and `one-node-oidc-renewal-test.sh`): JWKS key rotation at the IdP, and the IdP withdrawing a login's refresh grant |
 | `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked (a logged-in Zode whose bootstrap key was removed, so that both its renewal and the bootstrap-key fallback fail). A logged-in Zode whose renewal fails but whose bootstrap key still passes stays connected without the login (OIDC.md); no script covers that case end to end. Takes several minutes: real installs under a continuous ping |
 | `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy, with a user logged in on a Zode |
@@ -828,8 +834,9 @@ Other entry points, each a standalone script:
 | `zode-rejoin-test.sh` | a Zode never matches a new flow to an expired visa (zl-zipline#271, `docs/ZODE_LINKS.md` "Visa expiry at match time (#271)"). zb - relay - zc, with a UDP/53 service on zc that zb may reach only while it holds a `device.hostname` attribute from a file trusted service with a 90 s lifetime (fixture `pregen/zodes-rejoin`), so every visa for it expires during the run, as a ZIPLINE network's DNS visas do. After the visas expire, zb is killed and rejoins (A), then zc is stopped and rejoins (B); each time zb gets every reply, and the other Zode logs that it ejected its expired visa. It failed on core 6e7baba with "visa N not found". Takes about four minutes, most of it waiting for visas to expire |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
-Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,
-`NETEM_PARAMS` for link impairment.
+Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`.
+The Zode scripts refuse a non-empty `NETEM_PARAMS` (`zode_preflight` in
+`lib/zode_funcs.sh`); link impairment was for the old `one-node-*` scripts.
 
 The OIDC tests need a `vs` built from a `zl-zpr-visaservice` that carries the
 feature under test; a stale binary left in `integration-test/` from an earlier
