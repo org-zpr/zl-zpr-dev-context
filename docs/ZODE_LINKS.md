@@ -1110,12 +1110,14 @@ any host and port. Now:
   q2). Restoring it without policy would need a Zode-supplied LAN address,
   which would let a Zode aim its peers at any internal host. ZIPLINE connects machines at different places; two on one LAN
   do not need it.
-- **The relay must see each Zode at an address its peers can dial.** Any source NAT or
-  proxy between the Zodes and the relay makes the relay observe every Zode at
-  that box's address, so no direct link can form (each dial goes to the NAT)
-  and all traffic goes through the relay. Docker's userland proxy, or a
-  masquerade in front of a published port, does exactly that. The operator fix
-  in such a deployment is policy addresses. Found on the libvirt testbed
+- **The relay must see each Zode at an address its peers can dial.** A Zode's
+  own NAT is fine when its mapping accepts the peers' traffic. A source NAT or
+  proxy that the peers cannot dial back through, in front of the relay, makes
+  the relay observe every Zode at that box's address, so no direct link can
+  form (each dial goes to the NAT) and all traffic goes through the relay.
+  Docker's userland proxy, or a masquerade in front of a published port, does
+  exactly that. The operator fix in such a deployment is to remove that NAT
+  or, with hand-written policy, to declare policy addresses. Found on the libvirt testbed
   (org-zpr/zipline#289; see "On real machines").
 - **No backwards compatibility.** `connect` refuses a leftover
   `substrate_addr`, and `ph` refuses `advertised_substrate_addr` as an unknown
@@ -1648,8 +1650,8 @@ What the real machines showed beyond the netns test:
   report: `LINK_REPROPOSE_DELAY` plus the owner's `LINK_UP_WINDOW`) leaves
   the pair marked failed until either end reconnects (rule 13a). The demo restarts one Zode. A policy push does not
   clear the mark.
-- **Nothing may NAT the Zodes' traffic to the relay** (#264,
-  org-zpr/zipline#289). On the libvirt testbed the VMs reach the relay
+- **The testbed's masquerade in front of the relay hid the Zodes' addresses**
+  (#264, org-zpr/zipline#289). On the libvirt testbed the VMs reach the relay
   container's published port through libvirt's masquerade, which Docker then
   DNATs, so the relay observed both VMs at the Docker bridge gateway
   (`172.33.0.1`). The VS proposed that address as `Link.peer`, the direct

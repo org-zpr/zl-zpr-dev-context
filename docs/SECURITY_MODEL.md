@@ -786,8 +786,10 @@ J2 and *Design decisions*):
   NAT hairpins or policy declares their LAN addresses, and otherwise goes
   through the relay.
 - **Deployment requirement: the relay must see each Zode at an address its
-  peers can dial.** A source NAT or proxy in front of the relay, Docker's
-  userland proxy included, makes it observe every Zode at that box's address. Direct
+  peers can dial.** A Zode's own NAT is fine when its mapping accepts the
+  peers' traffic. A source NAT or proxy in front of the relay that the peers
+  cannot dial back through, Docker's userland proxy included, makes the relay
+  observe every Zode at that box's address. Direct
   links then fail (each owner dials the NAT) and rule 13a sends the traffic
   through the relay: a loss of direct links, not of reachability or of any
   check. On the libvirt testbed, libvirt's masquerade of the VMs' traffic to
