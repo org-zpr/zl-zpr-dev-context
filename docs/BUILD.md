@@ -174,7 +174,10 @@ is the relay's observation, and `requestBootstrapVisas` carries
 `observedAddr`), cut **before it merged** so that org-zpr/zl-zpr-core#139 in
 the same merge set can run CI; that PR moves `VISA_SERVICE_RELEASE` to it. It
 is a flag day: it refuses a `connect` that carries `substrate_addr`, and an
-older relay's `requestBootstrapVisas` without `observedAddr`. zipline moves
+older relay's `requestBootstrapVisas` without `observedAddr`. Start it with an
+empty visa-service state store (Valkey): a stored `zpr.substrate_addr` claim
+does not record its source, so one a pre-#264 Zode reported could otherwise
+outlive the upgrade (SECURITY_MODEL.md, *Implementation status*). zipline moves
 with the set (org-zpr/zipline#289, package 2.0.9): core `d0f6121` (core#139
 without its CI-pin commit), the visa service at `6b85e4e` and the compiler at
 `1ff3140`. zipline#289's head `38a9a2e` is the run's `5f29650` plus the

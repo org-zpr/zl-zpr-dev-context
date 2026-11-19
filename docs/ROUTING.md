@@ -447,11 +447,13 @@ is what a relay or a lone node needs, so it is not an error. When policy
 declares an address and the observation differs, the visa service logs both
 at `info`: that is how an operator spots a NAT that needs a policy address.
 `connect` refuses any parameter it does not know, a leftover `substrate_addr`
-included, and `open` takes none. The claim is written only at `connect` and
-`open` (and at a rejoin's bootstrap request), so a policy push that removes a
-node's policy address does not switch it to the observation: the stored
-claim, which then holds the removed policy address, stays until the node
-rejoins.
+included, and `open` takes none. Peers' `Link.peer` and the stored claim
+change at different times. Adding or changing a node's policy address changes
+`Link.peer` in the next topology at once, because `known_substrate_addr` reads
+policy first. The claim is rewritten only at `connect`, `open` and a rejoin's
+bootstrap request, so after a policy push removes a node's policy address,
+its peers are proposed the stored claim (still the removed policy address)
+until the node's next `connect`, `open` or rejoin.
 
 The address changes only by a rejoin. An endpoint that changes networks loses
 its initial link, redials from the new network and rejoins (ZODE_LINKS.md rule

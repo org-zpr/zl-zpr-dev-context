@@ -849,7 +849,9 @@ Two consequences for whoever deploys ZPR:
   peers' traffic.) If such a NAT cannot be avoided, declare the Zodes'
   substrate addresses in policy. That is for hand-written policy: ZIPLINE
   2.0.9 generates its policy and declares no endpoint addresses, so on ZIPLINE
-  the NAT has to go. On the libvirt testbed,
+  the NAT has to go. After removing the NAT, restart the affected Zodes: the
+  rejoin gives the relay a fresh observation and clears rule 13a's failed
+  mark, which a policy push does not (ZODE_LINKS.md rule 13a). On the libvirt testbed,
   libvirt masqueraded the VMs' traffic into the Docker relay, so the relay saw
   both VMs at the bridge gateway and no direct link formed. A `RETURN` rule in
   libvirt's `LIBVIRT_PRT` chain for VM-to-Docker-subnet traffic fixed it: the
