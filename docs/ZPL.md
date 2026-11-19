@@ -70,7 +70,7 @@ runtime because attribute values change.
 
 ZPL deliberately holds no configuration. Everything
 installation-specific — static addresses (node addresses in the `.zplc`
-topology; adapter addresses in a trusted service's store, granted as
+topology; actor addresses in a trusted service's store, granted as
 `device.zpr_addr` — never in policy text, zipline#109), protocols, topology,
 trusted sources, which enforcement mechanism covers which part of the
 network — lives in the **configuration description** (the `.zplc` file). The

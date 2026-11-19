@@ -249,8 +249,9 @@ netns scripts only (no repo builds), 4-wide, against the same binaries
 The host route is a little faster, with no image to build or containers to
 start, and it is the one `zpr-dev` picks whenever user namespaces work. The
 difference is small because most of each script's time is fixed `sleep`s:
-the tier takes about as long as its slowest script,
-`one-node-policy-reauth-test.sh`. Width matters far more than the route.
+the tier takes about as long as its slowest script (then
+`one-node-policy-reauth-test.sh`, which zl-zipline#234 replaced with
+`zode-policy-reauth-test.sh`). Width matters far more than the route.
 
 Earlier measurements on the same host (8 cores, Docker fallback route in
 both cases, 2026-09-29, before the host route could run in parallel):
@@ -316,8 +317,9 @@ make diagrams # PlantUML diagrams, needs the plantuml command
 ```
 
 Binaries land in `./target/debug`. The packet handler `ph` is the one thing you
-need to run a node or an adapter. `adapter/cli` (`ph-cli`) needs
-`libpcap-dev`.
+need to run a Zode (`ph zode`, its only mode). `adapter/cli` (`ph-cli`) needs
+`libpcap-dev`. The `adapter/` directory name is historical: since
+zl-zipline#234 there is no separate adapter.
 
 Each member also has its own `Makefile`, so a single component can be built in
 isolation — CI does exactly this, one job per member.
@@ -535,7 +537,8 @@ requirements moved in the same round.
 `zl-zpr-core` no longer patches them to the `mkolehmainen/capnproto-rust`
 FD-passing fork (zl-zpr-core#93), so packet capture to a file is compiled out
 of normal builds: `ph` answers `setCaptureFile` with Unsupported on every
-platform, and `integration-test/capture-test.sh` skips. The fork is 0.26 only
+platform. (`integration-test/capture-test.sh`, which only skipped, was
+deleted with the adapter-docked scripts in zl-zipline#234.) The fork is 0.26 only
 and cannot be combined with 0.27: a `[patch]` does not apply to the
 `capnp = "0.27.3"` requirement, and `zpr` `zl-v0.31.0` re-exports 0.27
 generated code. So a capture-enabled debug build needs the pre-0.27 dependency
@@ -686,7 +689,7 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the ten `zl-zpr-core/integration-test/` scripts, against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen on `feature/zodes`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
@@ -764,8 +767,8 @@ make pregen     # integration-test/pregen: recompile the .zpl fixtures
 
 ### `zl-zpr-core`
 
-`integration-test/` stands up a real ZPRnet — node, visa service, and adapters
-— on network namespaces. It is not run by `make test`; it needs binaries from
+`integration-test/` stands up a real ZPRnet — a relay Zode that hosts the
+visa service, and Zodes that dial it — on network namespaces. It is not run by `make test`; it needs binaries from
 *other* repositories placed next to the scripts:
 
 ```text
@@ -781,20 +784,19 @@ into `integration-test/`. Then:
 
 ```bash
 ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server \
-    integration-test/one-node-v6-test.sh
+    integration-test/zode-ping-test.sh
 ```
 
 Other entry points, each a standalone script:
 
 | Script | Covers |
 |---|---|
-| `one-node-test.sh`, `one-node-v6-test.sh` | device-only authentication, IPv4 / IPv6 |
-| `capture-test.sh` | packet capture |
-| `one-node-oidc-test.sh` | OIDC login through the fake IdP, plus JWKS key rotation |
-| `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy |
-| `one-node-oidc-renewal-test.sh` | silent OIDC renewal and disconnect-on-revocation. Takes several minutes: the renewal cadence is a real wall clock. It was the acceptance criterion for the node-to-adapter credential request, which landed as zipline#66; its CI job is no longer gated off, but the test has not yet been observed passing (see `docs/OIDC.md`, *Not yet*) |
-| `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
-| `node-restart-test.sh` | a node restarting (killed and graceful) under a running visa service brings every link back to Active (zipline#167) |
+| `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different packet I/O engine on each Zode, and `ph-cli tun` output (zipline#202) |
+| `zode-oidc-test.sh` | OIDC on a logged-in Zode (zl-zipline#234, the port of `one-node-oidc-test.sh` and `one-node-oidc-renewal-test.sh`): JWKS key rotation at the IdP, and the IdP withdrawing a login's refresh grant |
+| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
+| `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy, with a user logged in on a Zode |
+| `attr-query-test.sh` | an `oidc` and a `zpr-attr/1` trusted service in one policy: the reference `zpr-attr-server` decorates the logged-in user's identity over pinned TLS (zipline#81) |
+| `a2a-pubkey-test.sh` | security testing: a malicious relay forges the A2A MICV of the pings it forwards between two Zodes, and the receiver must reject them. Needs `ph` built with `enable-security-testing` |
 | `zode-link-test.sh` | the Zode link lifecycle (zl-zipline#250, `docs/ZODE_LINKS.md`): a relay Zode that hosts the visa service in its own namespace, on its own TUN (zl-zipline#229), a Zode with an initial link to it, and a Zode outside the relay's topology. Covers join, restart (rule 5), refusal of an unknown CN (rule 3), substrate loss and redial (rules 9-11), a policy that removes the link (rule 12), link-state reports, J7 with the visa service stopped, and that the relay's sessions with the visa service stay in the host (Zodes plan §7 check 1). All five Zode scripts use the co-located relay |
 | `zode-join-test.sh` | two Zodes joining through the relay at once (zl-zipline#254, `docs/ZODE_LINKS.md` J1-J5, J11): each gets its own hand-off of two visa-service IDs, none of them the other's, starts with only those in its table, authenticates, reports its link, registers its VSS, receives topology, has its bootstrap visa superseded, and pings the visa service. No Zode refuses a Stream ID Request |
 | `zode-line-test.sh` | zb - relay - zc in a line (zl-zipline#254, Zodes plan W1 and W4), in two legs from a clean start. Relay forwarding on: zb and zc ping each other under their own identities, the relay carries the flow on forward-only visas, and no Zode refuses a Stream ID Request. Forwarding off: both still reach the visa service, zb cannot reach zc, and the relay logs that it refuses the forward-only visas |
@@ -826,9 +828,8 @@ sudo sysctl --system
 ```
 
 Do not start the scripts under `sudo`: they gain nothing from it.
-(`remote-node-host-env.sh`, the host side of the manual Windows/macOS node
-documents, is the exception: it stays root-based, because its namespaces
-must be reachable from a real remote machine — see its header.)
+(The manual Windows and macOS guides, `integration-test/windows-zode-test.md`
+and `macos-zode-test.md`, run the relay on a real Linux host instead.)
 
 **Where user namespaces are blocked: run them in Docker.** `zpr-dev build`
 does this automatically: when the host route's prerequisites are missing but
@@ -846,7 +847,7 @@ as new as a current host's) only supplies the tooling and `valkey-server`:
 
 ```bash
 make -C integration-test docker-test                        # every *-test.sh, PASS/FAIL summary
-make -C integration-test docker-test TEST=one-node-test.sh  # one script, args allowed
+make -C integration-test docker-test TEST=zode-ping-test.sh # one script, args allowed
 make -C integration-test docker-shell                       # root shell for debugging
 ```
 
@@ -863,18 +864,18 @@ host's glibc is newer than the image's, the binaries will not load; pass
 
 ## What to build to run a ZPRnet
 
-A minimal ZPRnet is a node and a visa service, so three binaries:
+A minimal ZPRnet is a relay Zode and a visa service, so three binaries:
 
 | Binary | Repository | Role |
 |---|---|---|
-| `ph` | `zl-zpr-core` (`adapter/ph`) | packet handler — runs as node *or* adapter |
+| `ph` | `zl-zpr-core` (`adapter/ph`) | packet handler — runs a Zode (`ph zode`) |
 | `vs` | `zl-zpr-visaservice` (`vs`) | the visa service |
 | `zplc` | `zl-zpr-compiler` | compiles the policy `vs` evaluates |
 
 Plus a running Valkey/Redis for `vs`.
 
-`zl-zpr-core/README.md` has the full walkthrough: generating the bootstrap RSA
-keys, the CA and signed noise certificates, the node and adapter TOML configs,
+`zl-zpr-core/docs/SETUP.md` has the full walkthrough: generating the bootstrap RSA
+keys, the CA and signed noise certificates, the Zode TOML config,
 the visa service TLS credentials, and starting everything in order. That
 procedure is runtime setup rather than build, so it is not duplicated here.
 
