@@ -711,8 +711,10 @@ not expire, see *Authenticating actors*), a 300-second default
 `reauth_deadline` for re-authentication after a policy install, 180-second
 maximum clock skew during node authentication, 20 visas per request, 1024
 request workers and queue depth, a 7-second VSS ping with 3 failures before the
-node is dropped, and a 30-second database lock refresh against a 90-second
-timeout.
+VSS worker exits, and a 30-second database lock refresh against a 90-second
+timeout. A VSS worker that exits removes nothing: link state decides when a
+departed Zode is removed, 10 seconds (`ZODE_DEPARTURE_GRACE`) after it is left
+with no link up (*A departed Zode is removed after a grace (#284)* below).
 
 ### Admin API
 
@@ -1099,6 +1101,13 @@ and denied. The rules:
   Every other visa installed on the joiner is marked not installed, so a
   `reconnect` gets it pushed again. The node actor stays, so
   `reconnect` still works (gate g89 q5).
+- **A rejoin defeats a pending departure check.** The new session that the
+  rejoin stamps is what keeps a Zode that comes back within
+  `ZODE_DEPARTURE_GRACE` (#284): the departure check removes only the session
+  it was scheduled for. A joiner the visa service already removed has no
+  actor (`has_session` is false), so its request simply mints the hand-off.
+  Its `reconnect` is then answered `outOfSync` and it connects as `reset`
+  (ZODE_LINKS.md J10).
 
 The checks, the teardown and the mint run as one step under the core-visa
 issuance lock and then the topology lock, so they are atomic against connect,
@@ -1217,6 +1226,58 @@ filter disagreed. The decisions (gate g121):
 - **Not done:** in a restart, a `Stream ID Request` that reaches the Zode
   before its new VS-API session is up still fails, because there is no
   session to fetch over. It was not seen in the logs or the acceptance runs.
+
+### A departed Zode is removed after a grace (#284)
+
+From the Zodes epic, pd plan p55,
+[zl-zipline#284](https://github.com/org-zpr/zl-zipline/issues/284),
+org-zpr/zl-zpr-visaservice#72 and org-zpr/zl-zpr-core#138. Before #284
+nothing removed a Zode's actor when the Zode went away: a link-down report
+only revoked the visas over that link. So a crashed Zode, and the services
+it provided, stayed registered for good, and CoreDNS kept resolving them.
+The decisions (gates g191, g193, g195):
+
+- **The visa service removes any Zode except the relay once every link of it
+  has been down for `ZODE_DEPARTURE_GRACE` (10 s)** (`vs/src/config.rs`).
+  This covers transit Zodes too, since "no link up" is the same evidence for
+  them. The grace starts when a link report leaves the Zode with no up link.
+  The check is scheduled from `reportLinkStates`, for both ends of a link that
+  went down and for a peer that the reporter newly reports `down`
+  (`schedule_departure_check`).
+- **The removal is exact without history.** After the grace,
+  `remove_if_departed` takes the topology guard. It removes the Zode only if
+  its check is still pending, its `zpr.session` is the one recorded when the
+  check was scheduled, and no link of it is up. All three checks and the
+  removal run under that one guard, so they are atomic against
+  `requestBootstrapVisas`, `connect`, `notify_disconnect` and policy passes.
+  A link coming up (a report, an install or a policy pass) cancels the
+  pending check. Checks are coalesced per session, and a further loss does
+  not extend the grace.
+- **The removal is the ordinary disconnect teardown**, `disconnect_locked`
+  with `DisconnectReason::Timeout`. It removes the actor record (and so its
+  services), trusted-service revisions, the router node, the VSS worker, the
+  visas of the node and its actor, and the managed address. No removal code
+  is new, and like any disconnect it takes the node commit lock.
+- **A graceful stop deregisters at once.** ph sends `notify_disconnect` with
+  reason `NodeShutdown` before it tears its links down. It waits at most 2 s,
+  and failure is ignored. There is one deregistration path.
+- **Why 10 s:** a crash is detected in about 9-12 s, and DNS caches for up to
+  30 s, so a crashed service stops resolving within about 52 s. A grace that
+  is too short costs only a rejoin as `reset`, which drops what any node
+  `authenticate` drops.
+- **Known limits.** These are accepted, and the operator declined the first
+  and third at g195 q2:
+  - an actor-store error while scheduling or checking drops that check;
+  - a Zode that leaves while the visa service is down is never removed, since
+    a restart schedules no checks;
+  - links lost without a report start no check (a rejoin's teardown, a
+    policy change).
+- **Rejected:** removal when the VSS worker gives up on pings, which is a
+  second, later trigger that cannot see rejoins; and a periodic sweep with
+  timestamps.
+
+ZODE_LINKS.md rule 11b and "Zode departure (#284)" have the detail and the
+tests.
 
 ### Deferred
 
@@ -1347,6 +1408,7 @@ because no adapter docks on a Zode.
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
+| Removing a departed Zode (`schedule_departure_check`, `remove_if_departed`; the pending checks in `LinkStateTable`) | `vs/src/vsapi_worker.rs`, `link_state.rs`, `topology_mgr.rs` |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
 | State | `vs/src/db/` |

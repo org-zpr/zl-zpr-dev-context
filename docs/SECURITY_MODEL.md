@@ -754,6 +754,23 @@ a visa-service nonce (`getLoginNonce`) over accepting that risk for v1. See
 *A Zode's own login* above.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
+**A departed Zode is removed on link evidence that a single peer cannot
+forge.** The visa service removes a Zode other than the relay, with the
+ordinary disconnect teardown (reason `Timeout`), once every link of it has
+been down for `ZODE_DEPARTURE_GRACE` (10 s) in the same VS-API session
+([#284](https://github.com/org-zpr/zl-zipline/issues/284); VISA_SERVICE.md,
+"A departed Zode is removed after a grace (#284)"). A link counts as up only
+while both of its ends report it up (ZODE_LINKS.md rule 14). So a subverted
+peer can take down only its own links to a Zode. It can get the Zode removed
+only if it is an end of every link the Zode has, and then it could cut the
+Zode off anyway. That keeps Case 2 containment. A removal destroys nothing
+the Zode cannot get back: the Zode rejoins on its own as `reset`, losing what
+any node `authenticate` drops (a user login, and a managed address that has
+no static grant). A graceful stop deregisters through the caller-scoped
+`notifyDisconnect` above, for the caller only, so it adds no new authority.
+Removal also releases a managed address, which may be handed to another
+actor; DNS answers for the old holder end within the cache TTL (DNS.md).
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
