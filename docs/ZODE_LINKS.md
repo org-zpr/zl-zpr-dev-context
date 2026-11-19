@@ -619,7 +619,9 @@ J11. The visas from J5a (after authentication) and J9 (renewal) have the **same
      visa and, when the answer comes back, moves the stream onto the new next
      hop under the same Stream ID. Every other hop binds the new visa as an
      ordinary F2 bind, a new forwarding entry beside the old one, and keeps the
-     old entry until the old visa is revoked or a link it crosses drops.
+     old entry until the old visa is revoked, a link it crosses drops, or the
+     expiry sweep frees it after its expiry and the stream-ID grace (#274;
+     it forwards nothing from the expiry on).
      Expiry stops a stream at every hop (#274): from the visa's expiry on,
      each Zode drops its packets. The expiry sweep frees the visa at the
      ingress on its first run after the expiry, and at other hops on its
@@ -1032,7 +1034,7 @@ new `ping` reused the bound stream). Now:
 - **No new timer** (operator, g184 q7). The sweep runs on the first link
   keep-alive tick (every 3 s per active Zode link) at least
   `VISA_EXPIRY_SWEEP_INTERVAL` (10 s) after the last sweep, outside the
-  link-state lock, so sweeps are 10 to about 13 s apart. Every stream
+  link-state lock, so sweeps are at least 10 s apart, about 13 s with a fast keep-alive echo. Every stream
   crosses a Zode link, so a visa with a stream is swept while that link
   is up, and losing the link revokes it (F3). While no Zode link is
   active, nothing sweeps: an expired visa with no binding stays in the
@@ -1579,10 +1581,13 @@ skips a stale queue entry for a regranted VS-API ID; and rebuilds the
 lookup only when it freed a visa. Whether a stream enters over a Zode link
 is `PeerState::is_zode_link`, shared with `withdraw_streams` and
 `drop_peer`. So an expired local flow can stay stalled until the next
-sweep, up to about 13 s, before it binds again; its packets are dropped
-meanwhile. The cutoff itself is per packet, at the Zode's wall clock
-sampled once per fast-path wakeup, so it is as exact as that Zode's clock
-(#281).
+sweep, about 13 s with a fast keep-alive echo and longer when the echo
+reply is slow (the keep-alive period runs from the reply), before it binds
+again; its packets are dropped meanwhile. The cutoff itself is per packet,
+at the Zode's wall clock sampled once per fast-path wakeup, so it is as
+exact as that Zode's clock (#281). A backward clock step before the sweep
+frees a visa makes its streams forward again: nothing records that an
+entry has already expired.
 
 **Constants** (`adapter/ph/src/config.rs`): `VISA_EXPIRY_SWEEP_INTERVAL` =
 10 s; `STREAM_ID_REUSE_GRACE` = 60 s.
@@ -1595,7 +1600,7 @@ sampled once per fast-path wakeup, so it is as exact as that Zode's clock
 | The sweep's driver and rate limit (`sweep_expired_visas_if_due`, `sweep_expired_visas`), called from the keep-alive | `adapter/ph/src/visa_mgmt.rs`, `link_state.rs` |
 | `update_visa_table_and_withdraw`, `last_visa_sweep`; `is_zode_link` | `adapter/ph/src/assembly.rs`, `peer_table.rs` |
 | Unit tests: `test_a_packet_on_an_expired_stream_is_dropped_and_counted`, `test_a_packet_on_a_live_stream_is_forwarded`, `test_rebind_moves_the_expiry_with_the_target`, `test_a_racing_reader_reads_the_expiry_and_next_hop_of_one_binding`, `test_bind_refuses_an_expired_visa`, `test_commit_supersede_refuses_an_expired_successor`, `test_commit_supersede_moves_the_expiry`, `test_the_sweep_ejects_an_expired_ingress_visa_at_once`, `test_the_sweep_keeps_an_expired_transit_visa_until_the_grace_passes`, `test_the_sweep_ejects_a_superseded_visa_with_no_binding_at_expiry`, `test_a_stream_id_grant_for_an_expired_visa_is_rejected`, `test_the_expiry_sweep_withdraws_local_streams`, `test_the_expiry_sweep_runs_at_most_once_an_interval` | `adapter/ph/src/fastpath.rs`, `forwarding_tables.rs`, `visa_table.rs`, `mgmt/node.rs` |
-| netns: `zode-oidc-test.sh` leg 2 binds the user flow before the login expires, then, once zb has logged the user out, checks that the flow gets no reply (dropped per packet, or already withdrawn by the sweep), reports zb's `Visa Expired` count (not asserted, for that reason), and waits up to 30 s for a ping that asks for a new visa, which is denied: the sweep's withdrawal. The exact per-packet cutoff is covered by the unit tests. It fails on core 13d27db (every ping answered after the expiry). `zode-rejoin-test.sh` takes its ejection baselines before the expiry wait, since the sweep now ejects during it | `integration-test/zode-oidc-test.sh`, `integration-test/zode-rejoin-test.sh` |
+| netns: `zode-oidc-test.sh` leg 2 binds the user flow before the login expires, then, once zb has logged the user out, checks that the flow gets no reply (dropped per packet, or already withdrawn by the sweep), reports zb's `Visa Expired` count (not asserted, for that reason), and waits up to 30 s for a ping that asks for a new visa (zb's `Visa Requested` count rises) and gets no reply: the sweep's withdrawal. It does not observe the visa service's denial itself. The exact per-packet cutoff is covered by the unit tests. It fails on core 13d27db (every ping answered after the expiry). `zode-rejoin-test.sh` takes its ejection baselines before the expiry wait, since the sweep now ejects during it | `integration-test/zode-oidc-test.sh`, `integration-test/zode-rejoin-test.sh` |
 
 **Known gaps, outside #274.** Both are in the visa removal path
 (`revoke_no_rebuild`) that expiry shares with revocation, link loss and the

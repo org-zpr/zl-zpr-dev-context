@@ -492,7 +492,7 @@ forwarding entry carries the bound visa's expiry, and every packet is
 checked against it. A new flow that matches an expired visa at its ingress
 Zode ejects that visa and looks again, and a `Stream ID Request`, a bind or
 a J11 rebind commit for an expired visa is refused, including a visa
-fetched by ID. A sweep on the link keep-alive, 10 to about 13 s apart, then
+fetched by ID. A sweep on the link keep-alive, at least 10 s apart, then
 frees expired visas and, at the ingress, withdraws their streams from the
 Zode's actor, so further traffic looks new and triggers a fresh request.
 (A joiner's check of its bootstrap hand-off, J4, is separate and older.)
