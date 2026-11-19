@@ -696,7 +696,10 @@ The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
 fallback of the `netns` tier. **It fails, rather than skips, on a build set
 whose core has only `ph zode`** (`feature/zodes` since zl-zipline#234):
 `dns-demo` still starts `ph node` and `ph adapter`, and zl-zpr-demo is
-unmaintained, so no port is planned. Run such sets with `--test unit,netns`.
+unmaintained, so no port is planned. Run such sets with `--test unit,netns`,
+and cut and reproduce them from a manifest that pins the `feature/zodes`
+revisions (`zpr-dev build --manifest <file> --test unit,netns`): the
+`--tip` recipe below resolves `zipline` and so selects the old core.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the

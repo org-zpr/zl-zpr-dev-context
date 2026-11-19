@@ -593,8 +593,8 @@ lifetime, so the visa service can deny the Zode's new visa requests. And a
 stream bound under a user visa before the expiry can keep forwarding past
 both the login's and the visa's expiry: `ph` checks expiry when it matches a
 new flow, not on the forwarding path, so the stream lasts until something
-removes its binding (the periodic sweep is
-[#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+removes its binding. Checking expiry on every use of a visa is planned:
+[#274](https://github.com/org-zpr/zl-zipline/issues/274).
 `zode-oidc-test.sh` tests the expiry with a new flow for this reason.
 
 The visa service's authentication-expiry sweep (`vs/src/auth_sweep.rs`)
