@@ -583,13 +583,19 @@ actor only when the visa service accepts it: if it is refused, ph keeps the
 login recorded and tries again every 10 s (`RENEWAL_RETRY_INTERVAL`) until
 it succeeds, and the visa service's expiry sweep, which skips node actors,
 is no fallback for this. The machine stays connected: once the visa service
-accepts the device-only `reauthorize`, only the user namespace is dropped, so
-new flows match device-only rules and no longer user rules. Two limits
-follow. Until that `reauthorize` succeeds, the expired user authority still
-caps the actor's authentication lifetime, so the visa service can deny the
-Zode's new visa requests. And a stream bound under a user visa before the
-expiry keeps forwarding until that visa ends (visas are immutable;
-`zode-oidc-test.sh` tests the expiry with a new flow for this reason).
+accepts the device-only `reauthorize`, the OIDC login's attributes are
+dropped, so new flows no longer match rules that needed them (the visa
+service re-enriches the actor from its device identity, and a trusted
+service may still supply `user.*` attributes for it; see VISA_SERVICE.md, "A
+Zode's own login and logout"). Two limits follow. Until that `reauthorize`
+succeeds, the expired user authority still caps the actor's authentication
+lifetime, so the visa service can deny the Zode's new visa requests. And a
+stream bound under a user visa before the expiry can keep forwarding past
+both the login's and the visa's expiry: `ph` checks expiry when it matches a
+new flow, not on the forwarding path, so the stream lasts until something
+removes its binding (the periodic sweep is
+[#274](https://github.com/org-zpr/zl-zipline/issues/274)).
+`zode-oidc-test.sh` tests the expiry with a new flow for this reason.
 
 The visa service's authentication-expiry sweep (`vs/src/auth_sweep.rs`)
 revokes expired *adapter* actors on their docking node; node actors are out

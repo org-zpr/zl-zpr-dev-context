@@ -173,9 +173,9 @@ bootstrap keys). `zplc` compiles both together into a signed binary policy
 (`.bin2`). The signing key must match the one the visa service is configured
 with. See [ZPL.md](ZPL.md).
 
-**2. Bootstrap.** A ZPRnet needs a visa service, a relay Zode, and a trusted
-authentication service before ordinary authentication can work. Those come up
-on static configuration: the policy's `[bootstrap]` block maps certificate CNs
+**2. Bootstrap.** A ZPRnet needs a visa service and a relay Zode; a trusted
+authentication service (an IdP) is needed only for user login, not for a
+device-only network. They come up on static configuration: the policy's `[bootstrap]` block maps certificate CNs
 to RSA public keys, and the holder proves possession by signing a challenge.
 The visa service reserves the name `vs.zpr`.
 

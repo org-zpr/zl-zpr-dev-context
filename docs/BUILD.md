@@ -793,7 +793,10 @@ target/debug/ph, target/debug/ph-cli   built here by make
 
 The simplest source for the visa-service binaries is a `zl-zpr-visaservice`
 release tarball (`make release` there, or download a published release) unpacked
-into `integration-test/`. Then:
+into `integration-test/`. The Zode scripts need a Zodes visa service: use the
+release core CI pins (`VISA_SERVICE_RELEASE` in core's
+`.github/workflows/adapter.yml`, `v0.22.0-zodes.9` at the time of writing),
+not the latest stable release, which cannot drive Zode links. Then:
 
 ```bash
 ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server \
