@@ -872,8 +872,9 @@ not read the RFCs as a description of current guarantees.
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is the clock
   skew between Zodes it is designed to tolerate, not a bound the code
-  enforces: an upstream lagging by more than 60 s could still send on a
-  reused ID. Expiry is an absolute instant compared with
+  enforces. Since #282 the freed ID then spends another 60 s in
+  quarantine before reuse, so an upstream lagging by more than 120 s could
+  still send on a reused ID. Expiry is an absolute instant compared with
   each Zode's clock, so a skewed clock stops a stream early or late
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
   [#271](https://github.com/org-zpr/zl-zipline/issues/271),
@@ -994,8 +995,9 @@ not read the RFCs as a description of current guarantees.
   nothing once an entry has expired, so if the clock steps back before
   the sweep frees the visa, its streams forward again until the clock
   passes the expiry once more. Skew between Zodes moves the cutoff, and an
-  upstream lagging by more than the 60 s stream-ID grace can still send
-  on an ID the downstream Zode has freed and reused
+  upstream lagging by more than the stream-ID grace (at a hop the stream
+  entered over a Zode link, 60 s after the expiry plus 60 s of quarantine)
+  can still send on an ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
 - **Clean-up after a visa is removed.** The destination's DLT entry is not
   reclaimed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)),

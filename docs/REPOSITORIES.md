@@ -104,7 +104,9 @@ every merge of `origin/main`. Upstream fixes are taken into core one at a
 time by cherry-pick instead of step 2. This applies once
 [zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merges
 `feature/zodes` into core's `zipline`; until then `zipline` still has adapter
-mode. The other forks are unchanged and merge as above.
+mode. The other forks are unchanged and merge as above. Cherry-picks do not
+move the merge base, so for core `git diff main...zipline` then also lists
+the upstream fixes already picked.
 (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11 in org-zpr/zipline)
 
 **Merge, never rebase.** `zipline` is long-lived and published, so rebasing it

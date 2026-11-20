@@ -410,7 +410,12 @@ it was about the adapter or node role, the entry says what replaced it.
   actor is authorized over a link). **Upgrade `ph` and `ph-cli` together:**
   `adapter/admin-api/cli.capnp` changed the `CmdLineInter` interface ID and
   renumbered its methods, so an older `ph-cli` cannot call a new `ph`, not
-  even for `counters` or `tun`.
+  even for `counters` or `tun`. Command-line options override the config
+  file since core `c7aef44`
+  ([zl-zipline#278](https://github.com/org-zpr/zl-zipline/issues/278));
+  before it, most `[global]` file values won and `--zpr-addr` was prepended
+  to the file's list. ZIPLINE 2.0.9 pins core `d0f6121`, which predates the
+  fix, but passes everything on the command line.
 - **The Zode's own login renews with a fixed 300 s lead**
   (`zode_login::AUTH_RENEWAL_LEAD`). The removed
   `auth_renewal_lead_seconds` had configured both the node-side renewal of
