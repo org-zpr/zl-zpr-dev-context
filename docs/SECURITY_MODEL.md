@@ -321,25 +321,31 @@ authentication that replaces a stored actor holding attributes the new one
 lacks (so every session replacement of a logged-in Zode), and every renewal
 that keeps the login but lost an attribute value (a claim missing from the
 renewed token, a trusted-service attribute missing at re-enrichment), runs
-the attribute-change sweep over every live visa, as an explicit logout and
-the expiry logout do. So visas granted on the dropped attributes are marked
-for revocation at once instead of living until they expire; the sweep
-records the revocation and VSS housekeeping delivers it to the nodes
-asynchronously, and a sweep that cannot finish hands the decision to a
-queued reconcile. The check ignores the
+the visa sweep over every live visa, as an explicit logout and the expiry
+logout do. So visas granted on the dropped attributes are marked for
+revocation instead of living until they expire. The revocation is durable:
+the write records a revocation obligation in the state store before it
+writes, and the reconciler on the event worker sweeps and deletes the
+obligation only once a pass completed, retrying every 30 s and at startup.
+A cancelled RPC, a failed sweep or a visa-service crash cannot lose it. The
+RPC does not wait for the sweep: the revocation follows asynchronously, and
+VSS housekeeping then delivers it to the nodes. The check ignores the
 attributes the visa service stamps itself (`zpr.*`, which change on every
 authentication) and ignores gains: a renewal that only gained a claim is not
 re-checked, so a `never allow` on a newly gained claim waits for the next
-policy or attribute event. The obligation to sweep is not yet durable: a
-visa-service crash, or an RPC cancelled after the actor write but before the
-sweep starts, can lose it, as for a logout. A Reset whose replacing write
-fails after deleting the old actor can also leave peers holding its visas
+policy or attribute event. When a write leaves no actor behind (a Reset
+whose replacing write fails after deleting the old one, an `authenticate`
+undo), the reconciler revokes every visa of the vanished actor
 ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289);
-VISA_SERVICE.md, Design decisions, has the detail). Unit tests:
-`test_session_replacement_revokes_user_visas_on_reconnect`, `..._on_reset`,
-`test_renewal_with_fewer_claims_revokes_visas`,
+VISA_SERVICE.md, "Revocation obligations are durable (#289)"). A grant that
+read state before the write and commits after the sweep listed the visas
+can still escape until it expires
+([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). Unit
+tests: `test_session_replacement_revokes_user_visas_on_reconnect`,
+`..._on_reset`, `test_renewal_with_fewer_claims_revokes_visas`,
 `test_failed_reconnect_write_still_reports_the_drop`,
-`test_attribute_sweep_survives_cancellation` and the `attributes_dropped`
+`test_logout_cancelled_after_the_write_is_still_revoked`,
+`test_restart_reconciles_a_pending_obligation` and the `attributes_dropped`
 tests in zl-zpr-visaservice. End to end, `zode-login-test.sh` scenario 3
 sees a logout revoke the user flow's visa, and scenario 6 runs the session
 replacement path (a visa-service restart)
@@ -878,7 +884,11 @@ not read the RFCs as a description of current guarantees.
   signing, for the components that must connect before trusted services exist.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
   revocation of visas, endpoints, and trusted services without a policy
-  install. See [VISA_SERVICE.md](VISA_SERVICE.md).
+  install. The revocation a state change owes (a policy install, an actor
+  losing attributes, a trusted-service change) is a durable obligation,
+  recorded before the write and retried until a reconciler pass completes it
+  ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289)). See
+  [VISA_SERVICE.md](VISA_SERVICE.md).
 - **Visa expiry on every use of a visa** — every Zode on a stream's path
   drops its packets from the visa's expiry on, by its own clock: each
   forwarding entry carries a copy of the bound visa's expiry, checked on

@@ -79,7 +79,8 @@ background work.
 | `net_mgr` | Addressing. |
 | `connection_control` | New connections to the ZPRnet, node and adapter: authenticate, then authorize against policy. |
 | `login_nonce` | Visa-service-minted OIDC login nonces for a Zode's own login (`getLoginNonce`): bound to actor and VS-API session, single-use, short-lived. In memory. |
-| `event_mgr` | High-level events with system-wide consequences, such as actor joins and leaves. Fire-and-forget: it cannot report success back to a caller. |
+| `event_mgr` | High-level events with system-wide consequences, such as actor joins and leaves. Fire-and-forget: it cannot report success back to a caller. Runs the revocation reconciler (`reconcile_obligations`) on its worker. |
+| `revocation` | Durable revocation obligations (`RevocationLedger`, store in `db/revocation.rs`), the barrier that orders their writers against the reconciler, and the revocation generation (zl-zipline#289). |
 | `visa_reconciler` | Re-evaluates live visas against a policy snapshot and queues revocations for those that no longer hold. |
 | `visareq_worker` | "The beating heart" — one worker per visa request. |
 | `vsapi_worker` / `vss_worker` | The node-facing APIs; one VSS worker per node. |
@@ -198,7 +199,9 @@ actor (the `reauthorize` target is the calling node's address):
 - **Device blob always.** An OIDC blob without it, or a namespace change on any
   actor other than the caller's own, is a `paramError`.
 - **Visas follow.** After every login gain or drop (a namespace change) the
-  visa service re-checks every live visa against the resulting actor (the attribute-change sweep). A visa
+  visa service re-checks every live visa against the resulting actor (the
+  visa sweep of a reconciler pass, from the revocation obligation recorded
+  before the write; see "Revocation obligations are durable (#289)"). A visa
   is revoked when it no longer passes policy: after a logout that is one that
   needed the login's attributes, unless device-keyed re-enrichment restored
   an equivalent attribute. The same sweep runs after a node authentication
@@ -244,22 +247,22 @@ actor (the `reauthorize` target is the calling node's address):
   already be committed), the visa service rolls a login back to the pre-login
   actor (disconnecting the node if even that fails, so no login without
   session anchors stays active), invalidates a reduced logout's revisions,
-  releases the lock, and queues an attribute-change reconcile before it
-  reports the error.
+  releases the lock, and reports the error; the revocation obligation it
+  recorded before the write stays pending for the reconciler.
 - **Role kept.** The node role is fixed at connect: if the policy re-run no
   longer matches a node join policy (say the only one needs the user attribute
   a logout drops), the actor stays a node and gets the services a node would
   get, which may be none.
-- **Current generation, no lost work.** The visa sweep after a gain or drop
-  runs after the node commit lock is released (it needs none of the actor
-  serialization), under the policy snapshot current when it starts. It
-  repeats, up to three passes (`NAMESPACE_SWEEP_ATTEMPTS`), until one finishes
-  with no failed re-check or verdict write under a generation that did not
-  move; an actor-store read error during a pass counts as a failure, not as
-  an absent actor. If none does, the work goes to the event manager as an
-  attribute-change reconcile instead of being dropped; that reconcile queues
-  itself again every 30 s (`RECONCILE_RETRY`) while its own sweep still fails,
-  so a visa whose revocation failed does not stay usable until it expires.
+- **Current generation, no lost work.** A gain or drop records a durable
+  revocation obligation before its actor write, under the node commit lock,
+  and the RPC returns without sweeping. The reconciler, on the event worker,
+  sweeps under the policy snapshot current when it starts and deletes the
+  obligation only once a pass finished with no failed refresh, re-check or
+  revoke write under a generation that did not move; an actor-store read
+  error counts as a failure, not as an absent actor. Until then the
+  auth-expiry sweeper re-kicks it every 30 s, and startup kicks it, so a
+  cancelled RPC, a failed sweep or a crash cannot leave a visa usable until
+  it expires (zl-zipline#289).
 
 The login-nonce store is in memory. A nonce is 32 random bytes (base64url),
 usable until `expiresAt` (300 s, `LOGIN_NONCE_TTL_SECS`), at most 4 unexpired
@@ -278,7 +281,7 @@ it. ph knows this and marks its login `SessionReplaced`, prompting a
 resident `ph-cli auth-agent` for a new login
 ([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)). When
 the replacement drops attributes the stored actor held, the visa service
-runs the attribute-change sweep, so visas granted on the dropped user's
+records a revocation obligation and the reconciler sweeps, so visas granted on the dropped user's
 attributes are marked for revocation (see "A lost attribute re-checks the
 live visas (#265)" under Design decisions). A policy install's
 `requestAuthentication` to a logged-in Zode is answered with a `reauthorize`
@@ -541,8 +544,8 @@ authentications, or by changing topology so an existing path is no longer
 valid. The visa service sends revocation messages over the VSS-API listing
 revoked visa IDs; nodes stop forwarding immediately and tear down the sessions.
 
-A trusted-service change revokes visas too, with no policy install. Its sweep
-refreshes the actors behind live visas and re-evaluates those visas. A refresh
+A trusted-service change revokes visas too, with no policy install. It
+records a revocation obligation, and the reconciler pass refreshes the actors behind live visas and re-evaluates those visas. A refresh
 that changes an actor's attributes also recomputes the services the actor
 provides (`zpr.services`) from the join policies the new attributes match, the
 same computation connect uses. So a service hosted by attribute
@@ -1027,9 +1030,8 @@ service ([org-zpr/zl-zipline#247](https://github.com/org-zpr/zl-zipline/issues/2
 **Login and logout re-check every live visa.** Dropping the user namespace
 must revoke visas that needed it (unless device-keyed re-enrichment restores
 an equivalent attribute), and gaining it can trip a `never allow`. The
-existing attribute-change sweep re-checks every live visa inline, after the
-actor is persisted and the node commit lock released, and an incomplete
-sweep is retried and then handed to the event manager. This costs one full sweep per login or logout; a
+login or logout records a revocation obligation before its write, and the
+reconciler re-checks every live visa (#289, below). This costs one full sweep per login or logout; a
 per-actor sweep was not built because logins are rare. A renewal that keeps
 the login sweeps only when it loses an attribute value (#265, below); one
 that only gains claims runs no sweep.
@@ -1322,37 +1324,25 @@ valid until they expired. The decisions (gate g221, approach A):
   a value the new one lacks. The VS-stamped `zpr.*` attributes are ignored,
   because `zpr.session` changes on every authentication; comparing them would
   sweep on every reconnect. Gains are ignored. `add_node_serialized` reads the
-  stored actor under the node commit lock and returns the check's result;
-  `reauthorize_actor` sweeps when the namespace changed or the check is true.
-- **It reuses the full attribute-change sweep**
-  (`sweep_visas_after_attribute_change`, with its bounded retry and its
-  fallback to a queued reconcile) rather than a per-actor sweep. It runs only
-  on a real loss, so a reconnect that loses nothing costs nothing.
-- **Where `authenticate` runs it.** After the topology guard and the node
-  commit lock are released, and before the session's later fallible steps
-  (the `ActorJoins` enqueue, the denylist re-check). An undo after a failed
-  step removes the actor, and a later sweep would then skip its visas.
-- **A failed write still sweeps.** `add_node_serialized` sets the flag before
-  any write, because an actor update commits the attributes before its other
+  stored actor under the node commit lock and, when the check is true,
+  records a revocation obligation naming the node before its write;
+  `reauthorize_actor` records one when the namespace changed or the check is
+  true.
+- **It reuses the full visa sweep** of a reconciler pass rather than a
+  per-actor sweep. It runs only on a real loss, so a reconnect that loses
+  nothing costs nothing.
+- **A failed write still revokes.** The obligation is recorded before any
+  write, because an actor update commits the attributes before its other
   writes: a reconnect whose write fails part way may already have dropped the
-  login, so `authenticate` sweeps on that error path too.
-- **A started sweep survives a cancelled RPC.** The sweep runs on its own
-  task, which the RPC awaits, so a client that cancels `authenticate` or
-  `reauthorize` mid-sweep cannot drop it half way.
-- **Known ceilings.** Gains are not re-checked (a `never allow` on a newly
-  gained claim waits for the next policy or attribute event). The obligation
-  to sweep is not durable, so it can be lost in a window, as it can for a
-  logout. The window covers a visa-service crash between the actor write and
-  its sweep, and an RPC cancelled after the write but before the sweep starts
-  (in `authenticate`, the docking-hack, router and link-install awaits; in
-  `reauthorize`, the post-write metadata and denylist steps). It also covers a
-  Reset whose replacing write fails after deleting the old actor, because the
-  sweep skips visas whose endpoint no longer resolves while peers may still
-  hold them. A retry compares against the already-reduced actor and sees no
-  loss. The VS-docking hack in `authenticate` (visaservice#195) can also undo
-  the actor before the sweep runs. Durable, retried revocation obligations
-  (covering logout too) are
-  [zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289).
+  login. A Reset whose replacing write fails after deleting the old actor,
+  and an `authenticate` undo that removes the node it just committed, leave
+  an obligation naming an actor that no longer exists; the reconciler revokes
+  every visa of that actor, because the sweep skips visas whose endpoint no
+  longer resolves.
+- **Known ceiling.** Gains are not re-checked (a `never allow` on a newly
+  gained claim waits for the next policy or attribute event). How the
+  revocation itself is made durable is "Revocation obligations are durable
+  (#289)", below.
 
 ### A policy install recalculates a node's services (#273)
 
@@ -1384,34 +1374,99 @@ policy no longer grants the service either. The decisions:
   node to re-authenticate (see "Policy-install re-authentication"), which
   recomputes its services, and the pass's visa sweep revokes the visas to the
   deleted service. A disconnect only cost the Zode about 9 s plus its DNS.
-- **Every pass also runs the ungated visa sweep.** A visa requested between
-  the install and the pass is judged on the node's previous services but
-  carries the new generation, so the generation-gated policy sweep skips it.
-  The pass therefore also runs the ungated sweep an attribute change uses,
-  every time it applies, not only when it changed a node's services, because
-  a pass that failed after recalculating them leaves nothing changed for its
-  retry to notice. A pass superseded by a newer install defers to that
-  install's pass and runs neither the recalculation nor either sweep. The
-  ungated sweep shares the trusted-service-change reconcile's retry
-  (`attribute_sweep_with_retry` in `vs/src/event_mgr.rs`): if it leaves visas
-  undecided, that reconcile is queued again after `RECONCILE_RETRY`, from its
-  own task, because the pass runs on the event worker and must never wait on
-  the worker's own queue. Both sweeps revoke idempotently and only while the
-  policy they judged against is still current. A revoke from the ungated sweep is final, so a newer policy can
-  no longer cancel it the way it cancels a generation-gated one; that is
-  accepted as fail-closed (the endpoint re-requests its visa).
-- **Residual windows, tracked.** A request that read its actors before the
+- **Every pass re-checks every live visa.** A visa requested between the
+  install and the pass is judged on the node's previous services but carries
+  the new generation, so a sweep gated on the policy generation would skip
+  it. The policy step therefore runs inside a reconciler pass, whose one
+  sweep re-checks every live visa whatever its generation, every time, not
+  only when the step changed a node's services: a pass that failed after
+  recalculating them leaves nothing changed for its retry to notice. A pass
+  superseded by a newer install defers to that install's pass. The sweep
+  revokes idempotently and only while the policy it judged against is still
+  current. A revoke is final (`PendingRevoke`), so a newer policy cannot
+  cancel it; that is accepted as fail-closed (the endpoint re-requests its
+  visa). The generation-gated policy sweep and its per-visa verdicts
+  (`checked_vinst`, `revoke_vinst`) were removed by #289.
+- **Residual window, tracked.** A request that read its actors before the
   recalculation and commits its visa after the sweep listed the visas still
   escapes until it expires or a later sweep re-checks it
   ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). A
-  failed pass, or a failed write in its generation-gated sweep, is not
-  retried ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289)).
+  failed pass is retried (#289, below).
 - **Fail-closed.** If recomputing a node's services fails, the node is judged
   on its stored services: at worst it is disconnected, never kept with more
   than the policy grants. A node whose attribute refresh failed in the same
   pass is not recomputed either: its claims are indeterminate, and a policy
   condition a missing key satisfies must not grant it a service. A node no
   join policy matches still gets no services and is still disconnected.
+
+### Revocation obligations are durable (#289)
+
+From the Zodes epic, pd plan p66,
+[zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289), shipped by
+[zl-zpr-visaservice#79](https://github.com/org-zpr/zl-zpr-visaservice/pull/79).
+Before it, every state write that can make live visas unacceptable was
+followed by its own in-memory, best-effort sweep: a logout or session
+replacement swept from the RPC handler with a bounded retry, a policy install
+and a trusted-service change queued an event. A cancelled RPC, a full event
+queue, a failed policy pass or a visa-service crash between the write and its
+sweep lost the revocation, and the visas lived until they expired. The
+decisions (gate g234):
+
+- **One invariant.** A write that can make live visas unacceptable records a
+  revocation obligation durably before it writes, and one reconciler
+  satisfies it: it runs the sweep and deletes the obligation only once the
+  pass completed with no failure. No RPC handler sweeps by itself, and none
+  waits for the sweep: the RPC returns, and revocation follows on the event
+  worker.
+- **The writers.** A policy install (`PolicyMgr`, before its commit, under
+  the node commit lock), `add_node_serialized` when the new actor drops
+  attributes, `reauthorize_actor` on a login, logout or lossy renewal, both
+  trusted-service admin endpoints (the flush and the `changed` notify), and
+  an `authenticate` undo that removes a node it had committed. A failed
+  record fails the write (fail closed): nothing would revoke what it
+  invalidates. The undo is the exception: it logs and removes the node
+  anyway, because keeping a half-authenticated node is worse.
+- **The store.** Valkey counter `revoke:seq` and hash `revoke:pending`
+  (`vs/src/db/revocation.rs`), field = sequence number, value =
+  `{kind: policy | attributes, actors: [...]}`. Records are immutable, so the
+  reconciler deletes exactly the fields it read.
+- **One reconciler, no new timer.** `VsEvent::Reconcile` replaces
+  `PolicyUpdated` and `TrustedServiceChange`. A writer kicks it after its
+  write (a non-blocking `try_send`; a full queue is harmless), the auth-expiry
+  sweeper's loop kicks it every `MIN_VISA_LIFETIME` (30 s), and startup kicks
+  it, so obligations a crash left behind run then, including a policy pass a
+  crash cut short. `reconcile_obligations` (`vs/src/event_mgr.rs`) lists the
+  pending obligations, then: (1) if any is a policy install, the policy pass
+  against the current policy; (2) the attribute refresh of the actors behind
+  live visas and the sweep of every live visa; (3) the revocation of every
+  visa of an actor an obligation names that no longer exists (the sweep skips
+  unresolved actors). A failed refresh, re-check or revoke write, a revoke
+  only quarantined in memory, or a policy generation that moved leaves the
+  work pending. If the policy step completed but a later one did not, the
+  listed obligations are replaced by one attribute obligation, so a retry
+  does not re-push the policy and move its re-authentication deadline out.
+- **The barrier.** A writer holds the read side of a lock
+  (`RevocationLedger::begin` returns the guard) from recording its obligation
+  until its write has committed or failed. A pass takes the write side only to
+  list the obligations, then releases it before it sweeps. So every listed
+  obligation's write has landed, and a pass never deletes an obligation whose
+  write lands after it read the state. The guard is the innermost of the visa
+  service's coordination locks: taken after the topology operation lock and
+  the node commit lock, with no other lock, bounded-queue await or second
+  guard while it is held (tokio's `RwLock` is fair, so that would deadlock
+  with a waiting pass).
+- **The generation, for #248.** `RevocationLedger::generation()` is a SeqCst
+  `u64` bumped under the write side at the start of every pass that lists at
+  least one obligation: after every write recorded before it has committed,
+  and before the pass reads any visa. A visa request that reads it before it
+  reads its actors and policy and again after it stores its visa knows, if it
+  moved, that a revocation may have missed the visa
+  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248) builds
+  on this; nothing reads it yet).
+- **Not done.** The sweep is still a full sweep of every live visa per pass
+  (a `ponytail:` note marks it). A grant that read state before a write and
+  commits after the pass listed the visas still escapes (#248). The link-down
+  quarantine stays in memory; a restart re-derives link state.
 
 ### Attributes are refreshed ahead of expiry (#275)
 
