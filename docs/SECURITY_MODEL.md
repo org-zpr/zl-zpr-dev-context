@@ -1031,14 +1031,15 @@ not read the RFCs as a description of current guarantees.
   whether the visa expired, was revoked, or lost its link. (A freed local
   stream ID is quarantined before reuse on every removal path since core
   `90d9205`, [#282](https://github.com/org-zpr/zl-zipline/issues/282).)
-- **Attribute lifetimes near their end.** The visa service refreshes an
-  attribute only after it has expired, and in the attribute's last 30
-  seconds denies every visa request that needs it, unless a refresh of
-  the attribute's source intervenes
-  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). A flow that a
-  held, unexpired visa already covers is unaffected. This fails closed, but
-  quietly: the deny is counted and listed, with `NoReason`, by
-  `GET /admin/visas/denies`; only its cause is logged, at DEBUG.
+- **Attribute lifetimes near their end.** A visa that would live under 30
+  seconds is denied. The visa service refreshes trusted-service attributes
+  within 45 seconds of expiry, so they no longer cause it
+  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)); it remains for
+  limits the visa service cannot extend: an actor's authentication, an OIDC
+  claim, or a `zpr-attr/1` `expires_at` the service keeps vending unchanged.
+  A flow that a held, unexpired visa already covers is unaffected. This fails
+  closed: the deny is counted and listed, with `NoReason`, by
+  `GET /admin/visas/denies`, and logged at WARN naming what limited it.
 - **A2A confidentiality.** Internal RFC-17 says outright that A2A currently
   protects message integrity only and that encryption could be added later. The
   Case 1 table's payload-encryption row is a design goal, not a current
