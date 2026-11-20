@@ -541,9 +541,11 @@ same computation connect uses. So a service hosted by attribute
 an actor that loses it stops providing the service and its visas are revoked,
 and one that gains it provides the service from its next refresh (zipline#181).
 
-A policy install recomputes the services of every connected node the same way,
-before it judges the node against the new policy (zl-zipline#273; see "A policy
-install recalculates a node's services" under Design decisions). Deleting a
+The policy pass that reconciles an installed policy recomputes the services of
+every connected node the same way, before it judges the node against that
+policy (zl-zipline#273, from zl-zpr-visaservice#76; see "A policy install
+recalculates a node's services" under Design decisions). Builds before it
+disconnect the Zode instead. Deleting a
 service a Zode hosts therefore removes it from that Zode, frees the service's
 entry and revokes the visas to it, and the Zode stays connected.
 
@@ -609,8 +611,8 @@ them to a compiled policy. A policy holds **communication rules** and **join
 policies** — the latter govern whether an actor may connect and what attributes
 and services it receives on joining. The services are recomputed whenever an
 attribute refresh changes the actor's attributes (`Policy::join_services`), and,
-for every connected node, on every policy install before the node is judged
-(zl-zipline#273).
+for every connected node, by the policy pass that reconciles an installed policy,
+before the node is judged (zl-zipline#273).
 
 ### Order of decision
 
@@ -1296,7 +1298,9 @@ tests.
 ### A policy install recalculates a node's services (#273)
 
 From the Zodes epic, pd plan p60,
-[zl-zipline#273](https://github.com/org-zpr/zl-zipline/issues/273). A node's
+[zl-zipline#273](https://github.com/org-zpr/zl-zipline/issues/273), shipped by
+[zl-zpr-visaservice#76](https://github.com/org-zpr/zl-zpr-visaservice/pull/76);
+visa-service builds before it still disconnect the Zode. A node's
 services (`zpr.services`) are stored when it connects. Before #273 they were
 recomputed only by an attribute refresh that changed the node's attributes,
 so after `DELETE /api/v1/services/<name>` the Zode hosting `<name>` still
@@ -1312,9 +1316,11 @@ policy no longer grants the service either. The decisions:
   lock, with the policy the pass judges against, and writes the node back
   only if its services changed. The write frees the `service:<name>` entries
   the node stopped providing.
-- **It adds as well as removes.** A node gets exactly what connecting or
-  re-authenticating under the new policy would give it
-  (`Policy::join_services_for_role` with its fixed role).
+- **It adds as well as removes.** The pass applies the new policy's join
+  rules for the node's fixed role (`Policy::join_services_for_role`) to its
+  stored claims, as connecting would. A re-authentication that renews the
+  claims (an OIDC token that stops asserting an attribute) can still change
+  the set afterwards.
 - **The disconnect protected nothing.** Every install already obliges every
   node to re-authenticate (see "Policy-install re-authentication"), which
   recomputes its services, and the pass's visa sweep revokes the visas to the
@@ -1323,7 +1329,10 @@ policy no longer grants the service either. The decisions:
   the install and the pass is judged on the node's previous services but
   carries the new generation, so the generation-gated policy sweep skips it.
   The pass therefore also runs the ungated sweep an attribute change uses,
-  and on every install, not only when it changed a node's services: a pass
+  every time it applies, not only when it changed a node's services. A pass
+  superseded by a newer install defers to that install's pass and runs
+  neither the recalculation nor either sweep. Running it on every pass
+  matters because a pass
   that failed after recalculating them leaves nothing changed for its retry
   to notice. A revoke from the ungated sweep is final, so a newer policy can
   no longer cancel it the way it cancels a generation-gated one; that is
