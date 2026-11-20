@@ -1334,7 +1334,8 @@ valid until they expired. The decisions (gate g221, approach A):
 - **A failed write still revokes.** The obligation is recorded before any
   write, because an actor update commits the attributes before its other
   writes: a reconnect whose write fails part way may already have dropped the
-  login. A Reset whose replacing write fails after deleting the old actor,
+  login. A Reset whose replacing write fails after deleting the old actor
+  (a Reset of a stored actor records an obligation even without a drop),
   and an `authenticate` undo that removes the node it just committed, leave
   an obligation naming an actor that no longer exists; the reconciler revokes
   every visa of that actor, because the sweep skips visas whose endpoint no
@@ -1420,7 +1421,10 @@ decisions (gate g234):
   worker.
 - **The writers.** A policy install (`PolicyMgr`, before its commit, under
   the node commit lock), `add_node_serialized` when the new actor drops
-  attributes, `reauthorize_actor` on a login, logout or lossy renewal, both
+  attributes or a `Reset` replaces a stored actor (its replacing write deletes
+  the stored actor first, so a failed one leaves the node's visas with no actor
+  to judge them by; this costs a Reset of a known node one sweep),
+  `reauthorize_actor` on a login, logout or lossy renewal, both
   trusted-service admin endpoints (the flush and the `changed` notify), and
   an `authenticate` undo that removes a node it had committed. A failed
   record fails the write (fail closed): nothing would revoke what it
@@ -1444,7 +1448,10 @@ decisions (gate g234):
   only quarantined in memory, or a policy generation that moved leaves the
   work pending. If the policy step completed but a later one did not, the
   listed obligations are replaced by one attribute obligation, so a retry
-  does not re-push the policy and move its re-authentication deadline out.
+  does not re-push the policy. A policy step that does run again (its pass
+  failed later, or its obligation could not be deleted) keeps the
+  generation's first re-authentication deadline (`ReauthRepo::add_obligation`
+  writes only if none is recorded), so retries cannot postpone enforcement.
 - **The barrier.** A writer holds the read side of a lock
   (`RevocationLedger::begin` returns the guard) from recording its obligation
   until its write has committed or failed. A pass takes the write side only to
