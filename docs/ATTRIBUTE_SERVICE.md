@@ -425,8 +425,9 @@ service refreshes one actor at a time today, so nothing would call it.
 
 **The store holds no attribute cache.** The actor's own attribute expiry is the
 cache: `refresh_expired_attributes` (`vs/src/actor_attributes.rs`) re-queries a
-source only when one of its attributes has expired or its revision moved, and
-the visa request path consults it only then. A snapshot cache in the store
+source only when one of its attributes has expired or is within 45 s of
+expiry (`ATTRIBUTE_REFRESH_AHEAD`, [#275](https://github.com/org-zpr/zl-zipline/issues/275)),
+or its revision moved, and the visa request path consults it only then. A snapshot cache in the store
 would be a second TTL to reason about with nothing to buy.
 
 One `reqwest::Client` per store, built the way `KeySource` in
