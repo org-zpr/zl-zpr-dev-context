@@ -531,7 +531,7 @@ the client's silent re-authentication, not by the visa service), or a
 `zpr-attr/1` `expires_at` that the service keeps vending unchanged. That deny
 is counted and listed, with `NoReason`, by `GET /admin/visas/denies`, and is
 logged at WARN with the requesting node, the 5-tuple, the time left and what
-limited it: the attribute key, `source_actor_auth` or
+limited it: the attribute key (an OIDC claim's too), `source_actor_auth` or
 `destination_actor_auth`.
 
 Revocation is different — it is an administrative action or a push from a
@@ -1385,9 +1385,13 @@ approach A):
 - **The deny stays `NoReason` on the wire, but is logged at WARN** with what
   limited the lifetime (`compute_expiration` returns it). A `DenyCode` for it
   would be a vsapi change in core, not needed to diagnose it.
-- **Known ceiling.** Authentication expiry and OIDC claims are renewed by the
-  client, not the visa service, so their last 30 s still deny; the WARN names
-  `source_actor_auth` or `destination_actor_auth`.
+- **Known ceilings.** Authentication expiry and OIDC claims are renewed by the
+  client, not the visa service, so their last 30 s still deny. The WARN names
+  `source_actor_auth` or `destination_actor_auth` for an authentication; for an
+  OIDC claim it names the claim's attribute key, which also wins a tie with the
+  authentication expiry. A source that keeps vending a short expiry (a
+  `zpr-attr/1` `expires_at`) is re-queried on every request in its last 45 s;
+  there is no per-source back-off or coalescing of concurrent lookups.
 
 ### Deferred
 
