@@ -1970,6 +1970,15 @@ nothing is sent there (F5). The unbind goes out:
   `requested_tether_granted` cannot bind (the requestor is gone, the bind
   is refused), and a refused J11 commit.
 
+**A freed slot comes back once its RCU readers are gone.** `DockLookupTable`
+is an RCU slab: an unbound entry is hidden from new readers at once, and its
+slot returns to the free list only once the old readers are reclaimed. With
+the default `rcu-crossbeam-epoch` backend, the ZDP-R retry worker
+(`zdpr_worker::launch`) used to hold a peer-table guard while it waited, which
+pinned the epoch of the `spawn_local` thread whenever a link had nothing to
+retry, so no slot ever came back. It now takes the guard only for
+synchronous work (core#144, local Codex review).
+
 **No DLT ID quarantine** (operator, gate g214). A packet can reach a reused
 slot: the fast path copies the DLT ID out of the PFT entry, and the slot can
 be unbound and granted to another binding before the DLT lookup.
@@ -1993,7 +2002,8 @@ and an occupancy counter are out of scope (gate g214 q6, q7).
 | J11 and unused grants (`rebind_granted`, `install_tether`, `requested_tether_granted`) | `mgmt/node.rs` |
 | The adapter's handler (`handle_unbind_indication`, `adapter::unbind_stream`) | `mgmt/handlers.rs`, `mgmt/adapter.rs` |
 | `expand` returns an error; `actor_input` drops it as `BadStructure` | `compress.rs`, `fastpath.rs` |
-| Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs` |
+| The retry worker holds no RCU guard while it waits (`launch`; `PeerState::zdpr_retry_timer_reset` is an `Arc<Notify>`) | `zdpr_worker.rs`, `peer_table.rs` |
+| Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure`, `test_actor_input_drops_a_packet_on_a_reused_dlt_id_as_micv_failure`, `test_an_idle_worker_does_not_pin_the_rcu_epoch` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs`, `zdpr_worker.rs` |
 
 ### What waits for which issue
 
