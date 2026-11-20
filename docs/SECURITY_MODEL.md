@@ -1007,14 +1007,14 @@ not read the RFCs as a description of current guarantees.
   is expanded with the new binding's classifier and checked with its A2A
   key. `compress::expand` refuses a body too short for that classifier
   (counted `BadStructure`). A body it does expand passes the MICV check
-  only if the expanded packet is the original one: the MICV covers the
-  expanded packet's addresses and ports. So a packet is never delivered as
-  a different five-tuple. A keyed MICV also ties it to the A2A peer: the
-  DLT key is derived from this adapter's key pair and the peer's A2A public
-  key, not made fresh per bind, so a reused slot accepts it only for the
-  same five-tuple and the same peer, as the packet the old binding would
-  have delivered. A binding whose visa supplies no A2A public key is
-  checked with an unkeyed hash, which says nothing about the peer. Since
+  only if the reconstructed bytes are the ones the MICV was computed over
+  and, for a keyed MICV, the key is the same; the key depends only on the
+  A2A peer, not on the bind. So a stale packet is delivered only as
+  exactly the original packet: the new binding's classifier must
+  reconstruct the same addresses and ports (a wildcard port is taken from
+  the packet itself), and a keyed MICV needs the same A2A peer. A binding
+  whose visa supplies no A2A public key is checked with an unkeyed hash,
+  which says nothing about the peer. Since
   core#144 `expand` returns an error instead of panicking on a truncated
   header or an IPv4 header length out of range; it is no general
   validator. That also closes a crash a peer Zode could cause with a short
