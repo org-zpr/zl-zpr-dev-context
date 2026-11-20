@@ -1388,11 +1388,12 @@ policy no longer grants the service either. The decisions:
   a pass that failed after recalculating them leaves nothing changed for its
   retry to notice. A pass superseded by a newer install defers to that
   install's pass and runs neither the recalculation nor either sweep. The
-  ungated sweep is `sweep_visas_after_attribute_change`, the one a lost
-  attribute runs (see "A lost attribute re-checks the live visas (#265)"),
-  so a sweep that leaves visas undecided is retried and then queued as an
-  attribute-change reconcile. Both sweeps revoke idempotently and only while
-  the policy they judged against is still current. A revoke from the ungated sweep is final, so a newer policy can
+  ungated sweep shares the trusted-service-change reconcile's retry
+  (`attribute_sweep_with_retry` in `vs/src/event_mgr.rs`): if it leaves visas
+  undecided, that reconcile is queued again after `RECONCILE_RETRY`, from its
+  own task, because the pass runs on the event worker and must never wait on
+  the worker's own queue. Both sweeps revoke idempotently and only while the
+  policy they judged against is still current. A revoke from the ungated sweep is final, so a newer policy can
   no longer cancel it the way it cancels a generation-gated one; that is
   accepted as fail-closed (the endpoint re-requests its visa).
 - **Residual windows, tracked.** A request that read its actors before the
