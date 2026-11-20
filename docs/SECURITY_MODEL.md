@@ -848,8 +848,11 @@ not read the RFCs as a description of current guarantees.
 - **Link key management** — Noise `Noise_XX_25519_ChaChaPoly_BLAKE2s` (the
   `snow` crate), with X.509 and Ed25519 certificate exchange.
 - **Enforcement at the ingress Zode** — the Zode where a flow enters ZPR
-  verifies each packet against the visa authorizing the flow, and drops and
-  counts mismatches. There are no docks since zl-zipline#234.
+  matches it against a visa when the flow binds, and every Zode on the path
+  drops and counts a packet whose stream it does not know or whose visa has
+  expired. The visa's other constraints are not rechecked per packet
+  (`fastpath.rs::forward` still has a `TODO: policy enforcement`;
+  [ZDP.md](ZDP.md#forwarding)). There are no docks since zl-zipline#234.
 - **Bootstrap authentication** — CN-to-RSA-public-key mapping with challenge
   signing, for the components that must connect before trusted services exist.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
@@ -997,8 +1000,9 @@ not read the RFCs as a description of current guarantees.
   the sweep frees the visa, its streams forward again until the clock
   passes the expiry once more. Skew between Zodes moves the cutoff, and an
   upstream lagging by more than the stream-ID grace (at a hop the stream
-  entered over a Zode link, 60 s after the expiry plus 60 s of quarantine)
-  can still send on an ID the downstream Zode has freed and reused
+  entered over a Zode link, 60 s after the expiry, plus 60 s of quarantine
+  since #282; see *Visa expiry on every use*, above) can still send on an
+  ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
 - **Clean-up after a visa is removed.** The destination's DLT entry is not
   reclaimed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)),
