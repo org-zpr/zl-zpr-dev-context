@@ -64,6 +64,10 @@ git push origin zipline
 `zpr-dev update` does not do this — it only fast-forwards the current branch from
 `origin`, never from upstream.
 
+**Except `zl-zpr-core`, once zl-zipline#237 lands:** it takes upstream fixes
+by cherry-pick instead of step 2 (`docs/REPOSITORIES.md`, "Taking upstream
+changes into zipline").
+
 ## `zpr-dev`
 
 `zpr-dev` makes the workspace reproducible. It clones the repository set listed

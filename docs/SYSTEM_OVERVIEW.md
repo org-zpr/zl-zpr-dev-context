@@ -364,7 +364,7 @@ it was about the adapter or node role, the entry says what replaced it.
 
 `ph zode` is the only `ph` subcommand
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234), plan p51;
-`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11).
+`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §5.11).
 
 - **What was removed.** `ph node`, `ph adapter` and `enum PhMode`; the adapter
   side of a dock (`AdapterToNode`: the tether, actor activation, the RSA
@@ -483,7 +483,7 @@ docs say neither "server Zode" nor "endpoint mode". Hard-coding a role was an
 anti-goal of the Zodes epic: the same binary runs as ZIPLINE's relay, its DNS
 Zode and every endpoint
 ([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216);
-`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.7).
+`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §5.7).
 
 ### Windows support (decided for `ph adapter`)
 

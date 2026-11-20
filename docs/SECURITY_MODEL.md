@@ -628,7 +628,7 @@ g113 q3, q6 and q7; the 2026-11-13 entries in zipline's
 `docs/decisions/adapters.md`)
 
 **On ZIPLINE an endpoint is a node, and the node role gives it nothing an
-adapter didn't have** (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §7 check 4). Every ZIPLINE machine
+adapter didn't have** (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §7 check 4). Every ZIPLINE machine
 authenticates as a node, so it matches its own node join policy. An adapter
 matches every join policy except the ones flagged node.
 `Policy::join_services_for_role` gives a node all of them, and only while it
@@ -872,9 +872,10 @@ not read the RFCs as a description of current guarantees.
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is the clock
   skew between Zodes it is designed to tolerate, not a bound the code
-  enforces. Since #282 the freed ID then spends another 60 s in
-  quarantine before reuse, so an upstream lagging by more than 120 s could
-  still send on a reused ID. Expiry is an absolute instant compared with
+  enforces. Since #282 (core `90d9205`) the freed ID then spends another
+  60 s in quarantine before reuse, so an upstream lagging by more than
+  120 s could still send on a reused ID; on an older core, such as the
+  `d0f6121` that ZIPLINE 2.0.9 pins, the bound is 60 s. Expiry is an absolute instant compared with
   each Zode's clock, so a skewed clock stops a stream early or late
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
   [#271](https://github.com/org-zpr/zl-zipline/issues/271),

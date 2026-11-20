@@ -716,7 +716,8 @@ one TUN. `vs.zpr` has no adapter of its own.
   Endpoints reach the visa service through the relay: a packet from zb to
   `vs.zpr` reaches the relay's local actor, and the relay writes it to the TUN.
 - **The relay's sessions with the visa service stay in the host**
-  (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §7 check 1). `vs.zpr` is a local address, so the kernel routes the relay's
+  (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline,
+  §7 check 1). `vs.zpr` is a local address, so the kernel routes the relay's
   VS-API session to `vs.zpr`, and the visa service's VSS session to the relay,
   over `lo`. Those packets never reach the TUN or `ph`. The visa service's VSS
   sessions to other Zodes leave from `vs.zpr` (VISA_SERVICE.md, "Outbound VSS
@@ -992,7 +993,7 @@ question, and the match-time check already ends the expired case).
 Decisions of pd plan p51
 ([#234](https://github.com/org-zpr/zl-zipline/issues/234)):
 
-**AAA kept, unused** (operator, `git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.4; gate g167 q8). The
+**AAA kept, unused** (operator, `git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §5.4; gate g167 q8). The
 Actor Authentication Address code stays for a future need, but without the
 behaviour only adapter docks used. It is compiled and unit tested. In v1 the
 pool still fills from the live `AAA_PREFIX` push, but nothing allocates or
