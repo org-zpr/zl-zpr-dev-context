@@ -550,6 +550,14 @@ same computation connect uses. So a service hosted by attribute
 an actor that loses it stops providing the service and its visas are revoked,
 and one that gains it provides the service from its next refresh (zipline#181).
 
+The policy pass that reconciles an installed policy recomputes the services of
+every connected node the same way, before it judges the node against that
+policy (zl-zipline#273, from zl-zpr-visaservice#76; see "A policy install
+recalculates a node's services" under Design decisions). Builds before it
+disconnect the Zode instead. Deleting a
+service a Zode hosts therefore removes it from that Zode, frees the service's
+entry and revokes the visas to it, and the Zode stays connected.
+
 For urgent security events the admin API can revoke visas, actors, or trusted
 services without installing a policy. **The effective policy is the installed
 policy plus any administrative disconnects**, and those disconnects clear when
@@ -611,7 +619,9 @@ Given source and destination actors plus packet details, `libeval` compares
 them to a compiled policy. A policy holds **communication rules** and **join
 policies** — the latter govern whether an actor may connect and what attributes
 and services it receives on joining. The services are recomputed whenever an
-attribute refresh changes the actor's attributes (`Policy::join_services`).
+attribute refresh changes the actor's attributes (`Policy::join_services`), and,
+for every connected node, by the policy pass that reconciles an installed policy,
+before the node is judged (zl-zipline#273).
 
 ### Order of decision
 
@@ -1343,6 +1353,65 @@ valid until they expired. The decisions (gate g221, approach A):
   the actor before the sweep runs. Durable, retried revocation obligations
   (covering logout too) are
   [zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289).
+
+### A policy install recalculates a node's services (#273)
+
+From the Zodes epic, pd plan p60,
+[zl-zipline#273](https://github.com/org-zpr/zl-zipline/issues/273), shipped by
+[zl-zpr-visaservice#76](https://github.com/org-zpr/zl-zpr-visaservice/pull/76);
+visa-service builds before it still disconnect the Zode. A node's
+services (`zpr.services`) are stored when it connects. Before #273 they were
+recomputed only by an attribute refresh that changed the node's attributes,
+so after `DELETE /api/v1/services/<name>` the Zode hosting `<name>` still
+offered it, the new policy no longer granted it, and the policy pass
+disconnected the Zode ("connected node … is no longer approved by policy").
+It rejoined about 9 s later. No order of policy pushes avoids this: the final
+policy no longer grants the service either. The decisions:
+
+- **The policy pass recomputes each connected node's services from the new
+  policy before judging it** (`restamp_node_services` in
+  `vs/src/actor_attributes.rs`, called from `policy_pass_locked` in
+  `vs/src/event_mgr.rs`). It runs under the topology guard and the node commit
+  lock, with the policy the pass judges against, and writes the node back
+  only if its services changed. The write frees the `service:<name>` entries
+  the node stopped providing.
+- **It adds as well as removes.** The pass applies the new policy's join
+  rules for the node's fixed role (`Policy::join_services_for_role`) to its
+  stored claims, as connecting would. A re-authentication that renews the
+  claims (an OIDC token that stops asserting an attribute) can still change
+  the set afterwards.
+- **The disconnect protected nothing.** Every install already obliges every
+  node to re-authenticate (see "Policy-install re-authentication"), which
+  recomputes its services, and the pass's visa sweep revokes the visas to the
+  deleted service. A disconnect only cost the Zode about 9 s plus its DNS.
+- **Every pass also runs the ungated visa sweep.** A visa requested between
+  the install and the pass is judged on the node's previous services but
+  carries the new generation, so the generation-gated policy sweep skips it.
+  The pass therefore also runs the ungated sweep an attribute change uses,
+  every time it applies, not only when it changed a node's services, because
+  a pass that failed after recalculating them leaves nothing changed for its
+  retry to notice. A pass superseded by a newer install defers to that
+  install's pass and runs neither the recalculation nor either sweep. The
+  ungated sweep shares the trusted-service-change reconcile's retry
+  (`attribute_sweep_with_retry` in `vs/src/event_mgr.rs`): if it leaves visas
+  undecided, that reconcile is queued again after `RECONCILE_RETRY`, from its
+  own task, because the pass runs on the event worker and must never wait on
+  the worker's own queue. Both sweeps revoke idempotently and only while the
+  policy they judged against is still current. A revoke from the ungated sweep is final, so a newer policy can
+  no longer cancel it the way it cancels a generation-gated one; that is
+  accepted as fail-closed (the endpoint re-requests its visa).
+- **Residual windows, tracked.** A request that read its actors before the
+  recalculation and commits its visa after the sweep listed the visas still
+  escapes until it expires or a later sweep re-checks it
+  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). A
+  failed pass, or a failed write in its generation-gated sweep, is not
+  retried ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289)).
+- **Fail-closed.** If recomputing a node's services fails, the node is judged
+  on its stored services: at worst it is disconnected, never kept with more
+  than the policy grants. A node whose attribute refresh failed in the same
+  pass is not recomputed either: its claims are indeterminate, and a policy
+  condition a missing key satisfies must not grant it a service. A node no
+  join policy matches still gets no services and is still disconnected.
 
 ### Attributes are refreshed ahead of expiry (#275)
 

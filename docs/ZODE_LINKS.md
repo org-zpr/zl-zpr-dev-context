@@ -1948,9 +1948,6 @@ inside its 60 s deadline.
 - **#287** (visa service) an observed address is gated on the Zode's VSS
   worker, not its registration, so a VSS-only outage during a policy push
   flaps a healthy direct link (see "Observed substrate addresses (#264)").
-- **#273** deleting a service hosted on a Zode makes the visa service
-  disconnect that Zode ("no longer approved by policy"); it rejoins about
-  9 s later.
 - **#281** every Zode compares a visa's absolute expiry with its own clock,
   so clock skew moves the instant a stream stops; send a TTL or detect
   skew instead (see "Visa expiry on every use (#274)").
