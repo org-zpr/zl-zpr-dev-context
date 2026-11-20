@@ -197,11 +197,15 @@ actor (the `reauthorize` target is the calling node's address):
   `device.blocked` cannot lift a deny.
 - **Device blob always.** An OIDC blob without it, or a namespace change on any
   actor other than the caller's own, is a `paramError`.
-- **Visas follow.** After every gain or drop the visa service re-checks every
-  live visa against the resulting actor (the attribute-change sweep). A visa
+- **Visas follow.** After every login gain or drop (a namespace change) the
+  visa service re-checks every live visa against the resulting actor (the attribute-change sweep). A visa
   is revoked when it no longer passes policy: after a logout that is one that
   needed the login's attributes, unless device-keyed re-enrichment restored
-  an equivalent attribute.
+  an equivalent attribute. The same sweep runs after a node authentication
+  that replaces a stored actor holding attributes the new one lacks (a
+  session replacement drops the login), and after a renewal that keeps the
+  login but lost an attribute value, such as a claim missing from the renewed
+  token (zl-zipline#265; see "Design decisions").
 - **One commit-time recheck.** Every writer of a node's own actor commits
   under the node commit lock (`PolicyMgr::node_commit_lock`) and calls one
   shared helper, `recheck_before_commit`, just before the write. It checks
@@ -272,10 +276,11 @@ user who was logged in is gone on the visa-service side. Only `open`
 (`resume_node_actor_for_open`) keeps the stored actor, and ph does not use
 it. ph knows this and marks its login `SessionReplaced`, prompting a
 resident `ph-cli auth-agent` for a new login
-([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)). The
-visa service does not re-check live visas on that path, so visas granted on
-the dropped user's attributes live until they expire (*Known gap* in
-[SECURITY_MODEL.md](SECURITY_MODEL.md)). A policy install's
+([zl-zipline#233](https://github.com/org-zpr/zl-zipline/issues/233)). When
+the replacement drops attributes the stored actor held, the visa service
+runs the attribute-change sweep, so visas granted on the dropped user's
+attributes are marked for revocation (see "A lost attribute re-checks the
+live visas (#265)" under Design decisions). A policy install's
 `requestAuthentication` to a logged-in Zode is answered with a `reauthorize`
 renewal, which keeps the user, instead of K2.
 
@@ -428,8 +433,9 @@ non-expiring bootstrap authentication expiry can no longer be the criterion.
 
 Nodes request visas. Before evaluating, the visa service gathers both actors
 and their attributes; a visa is denied outright if an actor is unknown, and
-expired attributes are refreshed from trusted services first. An expired
-authentication token is a denial.
+expired or nearly expired attributes are refreshed from trusted services
+first (see *Attributes are refreshed ahead of expiry (#275)* below). An
+expired authentication token is a denial.
 
 The evaluator receives the current policy, both actors with their attributes,
 and a description of the attempt: source and destination ZPR addresses, ports
@@ -514,16 +520,19 @@ before #271 a Zode kept using expired visas for good, and before #274
 streams bound before the expiry kept forwarding. See ZODE_LINKS.md, "Visa
 expiry on every use (#274)".
 
-*Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
-visa service refreshes an attribute only once it has expired, and denies a
-visa whose lifetime would be under the 30-second minimum. So in the last 30
-seconds of an attribute's lifetime, while it still bounds the visa's
-lifetime, every visa request that needs it is denied, until the attribute
-expires and is refreshed. A refresh of its whole source, for another
-attribute's expiry or a stale source revision, can end the window early. A new flow that a
-held, unexpired visa already covers (a wildcard port, say) does not ask,
-and is unaffected. The deny is counted and listed, with `NoReason`, by
-`GET /admin/visas/denies`; only its cause is logged, at DEBUG.
+A visa whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) is denied.
+To keep trusted-service attributes from causing that deny
+([#275](https://github.com/org-zpr/zl-zipline/issues/275)), the visa service
+re-queries a configured trusted service once one of its attributes is within
+`ATTRIBUTE_REFRESH_AHEAD` (45 s) of expiry, not only once it has expired.
+The deny still happens when nothing the visa service can do extends the
+limit: an actor's authentication about to expire, an OIDC claim (renewed by
+the client's silent re-authentication, not by the visa service), or a
+`zpr-attr/1` `expires_at` that the service keeps vending unchanged. That deny
+is counted and listed, with `NoReason`, by `GET /admin/visas/denies`, and is
+logged at WARN with the requesting node, the 5-tuple, the time left and what
+limited it: the attribute key (an OIDC claim's too), `source_actor_auth` or
+`destination_actor_auth`.
 
 Revocation is different — it is an administrative action or a push from a
 trusted service. Installing a policy can revoke visas by newly disallowing a
@@ -540,6 +549,14 @@ same computation connect uses. So a service hosted by attribute
 (`define ssh as a service with device.tags:'server'.`) follows that attribute:
 an actor that loses it stops providing the service and its visas are revoked,
 and one that gains it provides the service from its next refresh (zipline#181).
+
+The policy pass that reconciles an installed policy recomputes the services of
+every connected node the same way, before it judges the node against that
+policy (zl-zipline#273, from zl-zpr-visaservice#76; see "A policy install
+recalculates a node's services" under Design decisions). Builds before it
+disconnect the Zode instead. Deleting a
+service a Zode hosts therefore removes it from that Zode, frees the service's
+entry and revokes the visas to it, and the Zode stays connected.
 
 For urgent security events the admin API can revoke visas, actors, or trusted
 services without installing a policy. **The effective policy is the installed
@@ -602,7 +619,9 @@ Given source and destination actors plus packet details, `libeval` compares
 them to a compiled policy. A policy holds **communication rules** and **join
 policies** — the latter govern whether an actor may connect and what attributes
 and services it receives on joining. The services are recomputed whenever an
-attribute refresh changes the actor's attributes (`Policy::join_services`).
+attribute refresh changes the actor's attributes (`Policy::join_services`), and,
+for every connected node, by the policy pass that reconciles an installed policy,
+before the node is judged (zl-zipline#273).
 
 ### Order of decision
 
@@ -1011,8 +1030,9 @@ an equivalent attribute), and gaining it can trip a `never allow`. The
 existing attribute-change sweep re-checks every live visa inline, after the
 actor is persisted and the node commit lock released, and an incomplete
 sweep is retried and then handed to the event manager. This costs one full sweep per login or logout; a
-per-actor sweep was not built because logins are rare. An ordinary renewal
-whose claims change still runs no sweep (unchanged behaviour).
+per-actor sweep was not built because logins are rare. A renewal that keeps
+the login sweeps only when it loses an attribute value (#265, below); one
+that only gains claims runs no sweep.
 ([zl-zipline#232](https://github.com/org-zpr/zl-zipline/issues/232))
 
 **A node re-authenticates in place.** It re-runs
@@ -1285,6 +1305,163 @@ The decisions (gates g191, g193, g195):
 ZODE_LINKS.md rule 11b and "Zode departure (#284)" have the detail and the
 tests.
 
+### A lost attribute re-checks the live visas (#265)
+
+From the Zodes epic, pd plan p61,
+[zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265). Before
+it, only a namespace change (a node's login or logout) re-checked live visas.
+A session replacement, which persists a fresh device-only node actor and so
+drops a logged-in user's login, and a renewal that kept the login but carried
+fewer claims, ran no re-check: visas granted on the lost attributes stayed
+valid until they expired. The decisions (gate g221, approach A):
+
+- **One check, at both writers of a node's actor.** `attributes_dropped(old,
+  new)` (`vs/src/connection_control.rs`) is true when an attribute that does
+  not survive a logout lost a value: anything the visa service did not stamp
+  itself, and everything in `user.`, that is missing from the new actor or has
+  a value the new one lacks. The VS-stamped `zpr.*` attributes are ignored,
+  because `zpr.session` changes on every authentication; comparing them would
+  sweep on every reconnect. Gains are ignored. `add_node_serialized` reads the
+  stored actor under the node commit lock and returns the check's result;
+  `reauthorize_actor` sweeps when the namespace changed or the check is true.
+- **It reuses the full attribute-change sweep**
+  (`sweep_visas_after_attribute_change`, with its bounded retry and its
+  fallback to a queued reconcile) rather than a per-actor sweep. It runs only
+  on a real loss, so a reconnect that loses nothing costs nothing.
+- **Where `authenticate` runs it.** After the topology guard and the node
+  commit lock are released, and before the session's later fallible steps
+  (the `ActorJoins` enqueue, the denylist re-check). An undo after a failed
+  step removes the actor, and a later sweep would then skip its visas.
+- **A failed write still sweeps.** `add_node_serialized` sets the flag before
+  any write, because an actor update commits the attributes before its other
+  writes: a reconnect whose write fails part way may already have dropped the
+  login, so `authenticate` sweeps on that error path too.
+- **A started sweep survives a cancelled RPC.** The sweep runs on its own
+  task, which the RPC awaits, so a client that cancels `authenticate` or
+  `reauthorize` mid-sweep cannot drop it half way.
+- **Known ceilings.** Gains are not re-checked (a `never allow` on a newly
+  gained claim waits for the next policy or attribute event). The obligation
+  to sweep is not durable, so it can be lost in a window, as it can for a
+  logout. The window covers a visa-service crash between the actor write and
+  its sweep, and an RPC cancelled after the write but before the sweep starts
+  (in `authenticate`, the docking-hack, router and link-install awaits; in
+  `reauthorize`, the post-write metadata and denylist steps). It also covers a
+  Reset whose replacing write fails after deleting the old actor, because the
+  sweep skips visas whose endpoint no longer resolves while peers may still
+  hold them. A retry compares against the already-reduced actor and sees no
+  loss. The VS-docking hack in `authenticate` (visaservice#195) can also undo
+  the actor before the sweep runs. Durable, retried revocation obligations
+  (covering logout too) are
+  [zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289).
+
+### A policy install recalculates a node's services (#273)
+
+From the Zodes epic, pd plan p60,
+[zl-zipline#273](https://github.com/org-zpr/zl-zipline/issues/273), shipped by
+[zl-zpr-visaservice#76](https://github.com/org-zpr/zl-zpr-visaservice/pull/76);
+visa-service builds before it still disconnect the Zode. A node's
+services (`zpr.services`) are stored when it connects. Before #273 they were
+recomputed only by an attribute refresh that changed the node's attributes,
+so after `DELETE /api/v1/services/<name>` the Zode hosting `<name>` still
+offered it, the new policy no longer granted it, and the policy pass
+disconnected the Zode ("connected node … is no longer approved by policy").
+It rejoined about 9 s later. No order of policy pushes avoids this: the final
+policy no longer grants the service either. The decisions:
+
+- **The policy pass recomputes each connected node's services from the new
+  policy before judging it** (`restamp_node_services` in
+  `vs/src/actor_attributes.rs`, called from `policy_pass_locked` in
+  `vs/src/event_mgr.rs`). It runs under the topology guard and the node commit
+  lock, with the policy the pass judges against, and writes the node back
+  only if its services changed. The write frees the `service:<name>` entries
+  the node stopped providing.
+- **It adds as well as removes.** The pass applies the new policy's join
+  rules for the node's fixed role (`Policy::join_services_for_role`) to its
+  stored claims, as connecting would. A re-authentication that renews the
+  claims (an OIDC token that stops asserting an attribute) can still change
+  the set afterwards.
+- **The disconnect protected nothing.** Every install already obliges every
+  node to re-authenticate (see "Policy-install re-authentication"), which
+  recomputes its services, and the pass's visa sweep revokes the visas to the
+  deleted service. A disconnect only cost the Zode about 9 s plus its DNS.
+- **Every pass also runs the ungated visa sweep.** A visa requested between
+  the install and the pass is judged on the node's previous services but
+  carries the new generation, so the generation-gated policy sweep skips it.
+  The pass therefore also runs the ungated sweep an attribute change uses,
+  every time it applies, not only when it changed a node's services, because
+  a pass that failed after recalculating them leaves nothing changed for its
+  retry to notice. A pass superseded by a newer install defers to that
+  install's pass and runs neither the recalculation nor either sweep. The
+  ungated sweep shares the trusted-service-change reconcile's retry
+  (`attribute_sweep_with_retry` in `vs/src/event_mgr.rs`): if it leaves visas
+  undecided, that reconcile is queued again after `RECONCILE_RETRY`, from its
+  own task, because the pass runs on the event worker and must never wait on
+  the worker's own queue. Both sweeps revoke idempotently and only while the
+  policy they judged against is still current. A revoke from the ungated sweep is final, so a newer policy can
+  no longer cancel it the way it cancels a generation-gated one; that is
+  accepted as fail-closed (the endpoint re-requests its visa).
+- **Residual windows, tracked.** A request that read its actors before the
+  recalculation and commits its visa after the sweep listed the visas still
+  escapes until it expires or a later sweep re-checks it
+  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). A
+  failed pass, or a failed write in its generation-gated sweep, is not
+  retried ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289)).
+- **Fail-closed.** If recomputing a node's services fails, the node is judged
+  on its stored services: at worst it is disconnected, never kept with more
+  than the policy grants. A node whose attribute refresh failed in the same
+  pass is not recomputed either: its claims are indeterminate, and a policy
+  condition a missing key satisfies must not grant it a service. A node no
+  join policy matches still gets no services and is still disconnected.
+
+### Attributes are refreshed ahead of expiry (#275)
+
+From the Zodes epic, pd plan p63,
+[zl-zipline#275](https://github.com/org-zpr/zl-zipline/issues/275). Before
+it, the visa service re-queried a trusted service only once one of its
+attributes had expired. A visa cannot outlive the attributes it is granted
+on, and one that would live under `MIN_VISA_LIFETIME` (30 s) is denied, so
+every visa request that needed an attribute was denied in that attribute's
+last 30 s, with the cause logged only at DEBUG. The decisions (gate g225,
+approach A):
+
+- **Refresh-ahead inside the request-path refresh.** `refresh_expired_attributes`
+  (`vs/src/actor_attributes.rs`) treats a source as due once one of its
+  attributes is expired, or is within `ATTRIBUTE_REFRESH_AHEAD` of expiry
+  (`due_for_refresh`) and the source is a configured trusted service. A
+  background refresher (B) was rejected: it would refresh idle actors, cost
+  grows with the actor count, and it is more code. A refresh-and-retry on the
+  deny (C) was rejected: it acts only at deny time and adds a second path next
+  to the requester-binding checks.
+- **45 s, below `MIN_ATTRIBUTE_TTL`.** `ATTRIBUTE_REFRESH_AHEAD`
+  (`vs/src/config.rs`) is `MIN_VISA_LIFETIME` + 15 s: a visa issued after the
+  refresh gets more than the floor, and the 15 s cover the refresh and the
+  request round trip. It must stay below `MIN_ATTRIBUTE_TTL` (60 s, now one
+  constant in `vs/src/trusted_services/mod.rs`), because a file store reloads
+  its snapshot only once less than that remains; a refresh earlier would get
+  the same expiry back. A compile-time `assert!` enforces it.
+- **Only configured sources are looked up early.** An attribute from `zpr`,
+  or from a service policy no longer declares, has nobody to ask; looking it
+  up would log a warning on every request in the window. The expired path is
+  unchanged for every source.
+- **"Changed" means a real difference.** A source that re-vends exactly what
+  the actor holds (an OIDC store's cached admission, a file snapshot not yet
+  reloaded) causes no actor write, so a repeated early lookup is cheap. The
+  revision is still recorded on the revision path.
+- **Pruning on a TTL refresh.** A near-expiry attribute the source stopped
+  vending is dropped now; one it did return is kept even with a short expiry
+  (a `zpr-attr/1` `expires_at` 40 s away). Visas granted on a dropped
+  attribute already end at its expiry, at most 45 s later.
+- **The deny stays `NoReason` on the wire, but is logged at WARN** with what
+  limited the lifetime (`compute_expiration` returns it). A `DenyCode` for it
+  would be a vsapi change in core, not needed to diagnose it.
+- **Known ceilings.** Authentication expiry and OIDC claims are renewed by the
+  client, not the visa service, so their last 30 s still deny. The WARN names
+  `source_actor_auth` or `destination_actor_auth` for an authentication; for an
+  OIDC claim it names the claim's attribute key, which also wins a tie with the
+  authentication expiry. A source that keeps vending a short expiry (a
+  `zpr-attr/1` `expires_at`) is re-queried on every request in its last 45 s;
+  there is no per-source back-off or coalescing of concurrent lookups.
+
 ### Deferred
 
 No tracker issues are filed for these unless linked. The adapter item at the
@@ -1351,11 +1528,11 @@ no adapter docks on a Zode.
   pool in v1 ([ZODE_LINKS.md](ZODE_LINKS.md), "AAA kept, unused"). The visa
   service has no adapter either: it runs on the relay (see *The visa service
   on the relay, and trusted services*).
-- **Attributes are refreshed only after they expire**, so the visa service
-  denies every visa request that needs an attribute in its last 30 seconds,
-  while that attribute still bounds the visa's lifetime and no refresh of
-  its source intervenes,
-  with `NoReason` and the cause logged only at DEBUG
+- **Authentication and OIDC claims are not refreshed ahead of expiry.** In
+  the last 30 seconds of an actor's authentication, or of an OIDC claim that
+  bounds a visa, visa requests that need it are denied with `NoReason` (logged
+  at WARN, naming the limit) until the client re-authenticates. Trusted-service
+  attributes are refreshed ahead of expiry
   ([#275](https://github.com/org-zpr/zl-zipline/issues/275)).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.

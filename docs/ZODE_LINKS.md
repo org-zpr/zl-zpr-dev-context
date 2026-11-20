@@ -1747,17 +1747,16 @@ triage at J11.
 | Unit tests: `test_an_expired_visa_never_matches_a_new_flow`, `test_matching_an_expired_visa_ejects_it_cleanly`, `test_a_bind_matching_an_expired_visa_asks_for_a_new_visa`, `test_a_stream_request_for_an_expired_visa_is_refused`, `test_a_refused_rebind_with_no_newer_successor_is_a_failure` | `adapter/ph/src/visa_table.rs`, `adapter/ph/src/mgmt/node.rs` |
 | netns: zb - relay - zc with a UDP/53 service on zc that needs zb's `device.hostname`, a file attribute that lives 90 s (fixture `pregen/zodes-rejoin`). After the visas expire, zb restarts (A), then zc (B); zb gets every reply and the other Zode logs the ejection. It fails on core 6e7baba | `integration-test/zode-rejoin-test.sh`, `integration-test/lib/udp_echo.py` |
 
-**Known gap in the visa service**
+**Fixed in the visa service**
 ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). The visa
-service refreshes an attribute only once it has expired, and denies a visa
-whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) with `NoReason`.
-Its cause is logged only at DEBUG; the deny itself is counted and listed by
-`GET /admin/visas/denies`. So in the last 30 s of each attribute lifetime,
-unless a refresh of the attribute's source intervenes, every visa request that needs the attribute is denied: on ZIPLINE, a Zode's
-DNS queries that no held visa covers, in the last 30 s of each 120 s
-`device.hostname`. A query right after a rejoin can land there.
-`zode-rejoin-test.sh` queries only after the visas expire, clear of that
-window.
+service denies a visa whose lifetime would be under `MIN_VISA_LIFETIME`
+(30 s). It used to refresh an attribute only once it had expired, so every
+visa request that needed the attribute was denied in its last 30 s: on
+ZIPLINE, a Zode's DNS queries that no held visa covers. It now refreshes a
+trusted-service attribute within `ATTRIBUTE_REFRESH_AHEAD` (45 s) of expiry,
+and logs a remaining short-lifetime deny at WARN (see VISA_SERVICE.md,
+"Attributes are refreshed ahead of expiry (#275)").
+`zode-rejoin-test.sh` still queries only after the visas expire.
 
 ### Visa expiry on every use (#274)
 
@@ -2024,12 +2023,6 @@ and an occupancy counter are out of scope (gate g214 q6, q7).
 - **#287** (visa service) an observed address is gated on the Zode's VSS
   worker, not its registration, so a VSS-only outage during a policy push
   flaps a healthy direct link (see "Observed substrate addresses (#264)").
-- **#273** deleting a service hosted on a Zode makes the visa service
-  disconnect that Zode ("no longer approved by policy"); it rejoins about
-  9 s later.
-- **#275** (visa service) attributes are refreshed only after they expire,
-  so a visa request that needs one is denied in the attribute's last 30 s
-  (see "Visa expiry at match time (#271)").
 - **#281** every Zode compares a visa's absolute expiry with its own clock,
   so clock skew moves the instant a stream stops; send a TTL or detect
   skew instead (see "Visa expiry on every use (#274)").

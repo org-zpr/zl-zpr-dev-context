@@ -316,13 +316,34 @@ falls back to K2, which drops the user, only when no renewal can be had. When
 nothing renews a login, ph logs the user out itself at the expiry: the visa
 service has no expiry sweep for a node's own actor.
 
-**Known gap: live visas are not re-checked when a session replacement drops
-a login.** A node `authenticate` calls no visa revalidation, so visas granted
-on the user's attributes live until they expire. An explicit logout and the
-expiry logout do re-check them (above); `zode-login-test.sh` sees a logout
-revoke the user flow's visa. Same class as "ordinary renewals with
-changed claims skip visa revalidation". A visa-service follow-up:
-[zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265).
+**Live visas are re-checked when an actor loses attributes.** Every node
+authentication that replaces a stored actor holding attributes the new one
+lacks (so every session replacement of a logged-in Zode), and every renewal
+that keeps the login but lost an attribute value (a claim missing from the
+renewed token, a trusted-service attribute missing at re-enrichment), runs
+the attribute-change sweep over every live visa, as an explicit logout and
+the expiry logout do. So visas granted on the dropped attributes are marked
+for revocation at once instead of living until they expire; the sweep
+records the revocation and VSS housekeeping delivers it to the nodes
+asynchronously, and a sweep that cannot finish hands the decision to a
+queued reconcile. The check ignores the
+attributes the visa service stamps itself (`zpr.*`, which change on every
+authentication) and ignores gains: a renewal that only gained a claim is not
+re-checked, so a `never allow` on a newly gained claim waits for the next
+policy or attribute event. The obligation to sweep is not yet durable: a
+visa-service crash, or an RPC cancelled after the actor write but before the
+sweep starts, can lose it, as for a logout. A Reset whose replacing write
+fails after deleting the old actor can also leave peers holding its visas
+([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289);
+VISA_SERVICE.md, Design decisions, has the detail). Unit tests:
+`test_session_replacement_revokes_user_visas_on_reconnect`, `..._on_reset`,
+`test_renewal_with_fewer_claims_revokes_visas`,
+`test_failed_reconnect_write_still_reports_the_drop`,
+`test_attribute_sweep_survives_cancellation` and the `attributes_dropped`
+tests in zl-zpr-visaservice. End to end, `zode-login-test.sh` scenario 3
+sees a logout revoke the user flow's visa, and scenario 6 runs the session
+replacement path (a visa-service restart)
+([zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265)).
 
 **What this hands to an attacker, and why it is not a new threat.** The
 binding is enforced by the visa service against its own session record, and
@@ -977,8 +998,9 @@ not read the RFCs as a description of current guarantees.
   logout, silent renewal, logout at expiry, the session-replaced prompt and
   the renewal answer to a policy re-authentication, unit-tested against a
   fake visa service, and end to end in netns by `zode-login-test.sh`. The
-  visa service does not re-check live visas when a session replacement drops
-  a login ([zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265)).
+  visa service re-checks live visas when a session replacement drops a login
+  or a renewal loses an attribute value
+  ([zl-zipline#265](https://github.com/org-zpr/zl-zipline/issues/265)).
 
 - **Stream binding restricted to the previous hop (gap 7)**
   ([zipline#253](https://github.com/org-zpr/zl-zipline/issues/253)): a node
@@ -1032,14 +1054,15 @@ not read the RFCs as a description of current guarantees.
   since #282; see *Visa expiry on every use*, above) can still send on an
   ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
-- **Attribute lifetimes near their end.** The visa service refreshes an
-  attribute only after it has expired, and in the attribute's last 30
-  seconds denies every visa request that needs it, unless a refresh of
-  the attribute's source intervenes
-  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)). A flow that a
-  held, unexpired visa already covers is unaffected. This fails closed, but
-  quietly: the deny is counted and listed, with `NoReason`, by
-  `GET /admin/visas/denies`; only its cause is logged, at DEBUG.
+- **Attribute lifetimes near their end.** A visa that would live under 30
+  seconds is denied. The visa service refreshes trusted-service attributes
+  within 45 seconds of expiry, so they no longer cause it
+  ([#275](https://github.com/org-zpr/zl-zipline/issues/275)); it remains for
+  limits the visa service cannot extend: an actor's authentication, an OIDC
+  claim, or a `zpr-attr/1` `expires_at` the service keeps vending unchanged.
+  A flow that a held, unexpired visa already covers is unaffected. This fails
+  closed: the deny is counted and listed, with `NoReason`, by
+  `GET /admin/visas/denies`, and logged at WARN naming what limited it.
 - **A2A confidentiality.** Internal RFC-17 says outright that A2A currently
   protects message integrity only and that encryption could be added later. The
   Case 1 table's payload-encryption row is a design goal, not a current
