@@ -473,7 +473,9 @@ First packet of a new flow (`fastpath.rs::actor_output_post_classify`):
    packet.
 5. Downstream, a `Stream ID Request` naming the `visa_id` walks toward the
    egress; `Bind Egress Stream Request/Response` sets up the egress adapter's
-   DLT entry and returns the Stream ID to use.
+   DLT entry and returns the Stream ID to use. When the binding is removed or
+   replaced, the node unbinds that entry with an `Unbind Egress Stream
+   Indication` (type 13, [#283](https://github.com/org-zpr/zl-zipline/issues/283)).
 
 This is the successor to **Visa Heralding** (6.4 §5.11), where the visa itself
 travelled hop by hop in `Visa Herald Request` messages with a hop count, each
@@ -565,6 +567,22 @@ refuses one that arrives there, which closes the link. It is covered by unit
 tests and core CI, and in netns by `zode-line-test.sh` and
 `zode-reroute-test.sh` ([#254](https://github.com/org-zpr/zl-zipline/issues/254)).
 
+**The DLT is reclaimed**
+([#283](https://github.com/org-zpr/zl-zipline/issues/283), core#144). The
+node sends type 13 to its own adapter over the local actor link, which
+removes the DLT entry. It does so when a binding whose egress is that
+adapter is removed (expiry, revocation, link loss, a match eject, an
+R16/J10 reset) or replaced by a J11 rebind, and when a granted DLT entry
+goes unused (an abandoned next-hop bind, a refused grant, a refused J11
+commit). DLT IDs have no quarantine: a packet that reaches a reused slot is
+refused by `compress::expand` (`BadStructure`), fails the A2A MICV check, or
+fails the new binding's classifier (`ClassifierMismatch`). It is dropped
+unless it is exactly the original packet (for a keyed MICV, the new binding
+has the same A2A peer) and the new binding's classifier admits it, which
+matters for ICMP, whose type and code compression leaves in the body
+(SECURITY_MODEL.md, "Clean-up after a visa is removed"). It is covered by
+unit tests (ZODE_LINKS.md, "DLT reclaimed on visa removal (#283)").
+
 **`Bootstrap Visas` (146) is implemented**
 ([#252](https://github.com/org-zpr/zl-zipline/issues/252)): the codec and the
 joiner's checks in zl-zpr-core#111 (merged), the relay's request and hand-off
@@ -595,7 +613,9 @@ Specified, not implemented:
 - **Visa lifetime expiry, retraction, de-acceptance, and refusal** (§5.15) as a
   cascade. Teardown has three causes only: expiry, a visa-service revocation,
   and a lost link (ZODE_LINKS.md F4). `Stream ID Withdrawal` and `Unbind Egress
-  Stream` exist for a Zode's internal links.
+  Stream` exist for a Zode's internal links: the node sends type 13 to its own
+  adapter when a binding with a local egress is removed or replaced, or a
+  granted DLT entry goes unused (#283).
 - **PEP traffic constraints** — rate limits, QoS, DSCP marking, queue
   assignment. The PEP carries next-hop only.
 

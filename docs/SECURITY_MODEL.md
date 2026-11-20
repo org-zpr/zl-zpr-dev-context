@@ -1013,6 +1013,41 @@ not read the RFCs as a description of current guarantees.
   is not on. `Visa.prevHop` is in the schema
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)) and the
   visa service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)).
+- **Clean-up after a visa is removed.** A freed local stream ID is
+  quarantined for `STREAM_ID_REUSE_GRACE` before reuse on every removal
+  path since core `90d9205`
+  ([#282](https://github.com/org-zpr/zl-zipline/issues/282)). The
+  destination Zode's DLT entry is reclaimed whenever a visa is removed
+  (expiry, revocation, link loss, a match eject, an R16/J10 reset) or a
+  J11 rebind replaces it, and when a grant goes unused
+  ([#283](https://github.com/org-zpr/zl-zipline/issues/283), core#144): the
+  node sends type 13 to its own adapter over the local actor link, never
+  on a Zode link (ZODE_LINKS.md F5). A **DLT ID has no quarantine**
+  (operator, gate g214). A packet can still reach a reused DLT slot: the
+  fast path reads the DLT ID out of the PFT entry, and the slot can be
+  unbound and granted to another binding before the DLT lookup. That packet
+  is expanded with the new binding's classifier and checked with its A2A
+  key. `compress::expand` refuses a body too short for that classifier
+  (counted `BadStructure`). A body it does expand passes the MICV check
+  only if the reconstructed bytes are the ones the MICV was computed over
+  and, for a keyed MICV, the key is the same; the key depends only on the
+  A2A peer, not on the bind. A packet that passes the MICV check is then
+  checked against the new binding's classifier (wildcards allowed) and
+  dropped on a mismatch (counted `ClassifierMismatch`): compression does not
+  rebuild everything a classifier names, and an ICMP or ICMPv6 type and code
+  stay in the body, so a stale ICMP packet for the same A2A peer and
+  addresses expands unchanged and passes the MICV. So a stale packet is
+  dropped unless it is exactly the original packet and the new binding's
+  classifier admits it: the new binding's classifier must reconstruct the
+  same addresses and ports (a wildcard port is taken from the packet
+  itself), a keyed MICV needs the same A2A peer, and the classifier must
+  match the packet, including an ICMP type and code. A binding
+  whose visa supplies no A2A public key is checked with an unkeyed hash,
+  which says nothing about the peer. Since
+  core#144 `expand` returns an error instead of panicking on a truncated
+  header or an IPv4 header length out of range; it is no general
+  validator. That also closes a crash a peer Zode could cause with a short
+  body on a valid stream.
 
 **Not yet, or verify before relying on it:**
 
@@ -1026,11 +1061,6 @@ not read the RFCs as a description of current guarantees.
   since #282; see *Visa expiry on every use*, above) can still send on an
   ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
-- **Clean-up after a visa is removed.** The destination's DLT entry is not
-  reclaimed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)),
-  whether the visa expired, was revoked, or lost its link. (A freed local
-  stream ID is quarantined before reuse on every removal path since core
-  `90d9205`, [#282](https://github.com/org-zpr/zl-zipline/issues/282).)
 - **Attribute lifetimes near their end.** A visa that would live under 30
   seconds is denied. The visa service refreshes trusted-service attributes
   within 45 seconds of expiry, so they no longer cause it
