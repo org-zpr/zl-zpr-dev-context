@@ -207,7 +207,7 @@ request**, including the packet, to its own node side over the internal link.
 
 **6. Visa request.** If the Zode has no matching visa it forwards a visa
 request to the visa service, packet included. The visa service gathers both
-endpoints and their attributes — refreshing expired ones, denying if an
+endpoints and their attributes — refreshing expired or nearly expired ones, denying if an
 endpoint is unknown or its authentication has expired — and hands the policy,
 the endpoints, and a description of the attempt to the evaluator.
 

@@ -433,8 +433,9 @@ non-expiring bootstrap authentication expiry can no longer be the criterion.
 
 Nodes request visas. Before evaluating, the visa service gathers both actors
 and their attributes; a visa is denied outright if an actor is unknown, and
-expired attributes are refreshed from trusted services first. An expired
-authentication token is a denial.
+expired or nearly expired attributes are refreshed from trusted services
+first (see *Attributes are refreshed ahead of expiry (#275)* below). An
+expired authentication token is a denial.
 
 The evaluator receives the current policy, both actors with their attributes,
 and a description of the attempt: source and destination ZPR addresses, ports
@@ -519,16 +520,19 @@ before #271 a Zode kept using expired visas for good, and before #274
 streams bound before the expiry kept forwarding. See ZODE_LINKS.md, "Visa
 expiry on every use (#274)".
 
-*Known gap* ([#275](https://github.com/org-zpr/zl-zipline/issues/275)): the
-visa service refreshes an attribute only once it has expired, and denies a
-visa whose lifetime would be under the 30-second minimum. So in the last 30
-seconds of an attribute's lifetime, while it still bounds the visa's
-lifetime, every visa request that needs it is denied, until the attribute
-expires and is refreshed. A refresh of its whole source, for another
-attribute's expiry or a stale source revision, can end the window early. A new flow that a
-held, unexpired visa already covers (a wildcard port, say) does not ask,
-and is unaffected. The deny is counted and listed, with `NoReason`, by
-`GET /admin/visas/denies`; only its cause is logged, at DEBUG.
+A visa whose lifetime would be under `MIN_VISA_LIFETIME` (30 s) is denied.
+To keep trusted-service attributes from causing that deny
+([#275](https://github.com/org-zpr/zl-zipline/issues/275)), the visa service
+re-queries a configured trusted service once one of its attributes is within
+`ATTRIBUTE_REFRESH_AHEAD` (45 s) of expiry, not only once it has expired.
+The deny still happens when nothing the visa service can do extends the
+limit: an actor's authentication about to expire, an OIDC claim (renewed by
+the client's silent re-authentication, not by the visa service), or a
+`zpr-attr/1` `expires_at` that the service keeps vending unchanged. That deny
+is counted and listed, with `NoReason`, by `GET /admin/visas/denies`, and is
+logged at WARN with the requesting node, the 5-tuple, the time left and what
+limited it: the attribute key, `source_actor_auth` or
+`destination_actor_auth`.
 
 Revocation is different — it is an administrative action or a push from a
 trusted service. Installing a policy can revoke visas by newly disallowing a
@@ -1340,6 +1344,51 @@ valid until they expired. The decisions (gate g221, approach A):
   (covering logout too) are
   [zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289).
 
+### Attributes are refreshed ahead of expiry (#275)
+
+From the Zodes epic, pd plan p63,
+[zl-zipline#275](https://github.com/org-zpr/zl-zipline/issues/275). Before
+it, the visa service re-queried a trusted service only once one of its
+attributes had expired. A visa cannot outlive the attributes it is granted
+on, and one that would live under `MIN_VISA_LIFETIME` (30 s) is denied, so
+every visa request that needed an attribute was denied in that attribute's
+last 30 s, with the cause logged only at DEBUG. The decisions (gate g225,
+approach A):
+
+- **Refresh-ahead inside the request-path refresh.** `refresh_expired_attributes`
+  (`vs/src/actor_attributes.rs`) treats a source as due once one of its
+  attributes is expired, or is within `ATTRIBUTE_REFRESH_AHEAD` of expiry
+  (`due_for_refresh`) and the source is a configured trusted service. A
+  background refresher (B) was rejected: it would refresh idle actors, cost
+  grows with the actor count, and it is more code. A refresh-and-retry on the
+  deny (C) was rejected: it acts only at deny time and adds a second path next
+  to the requester-binding checks.
+- **45 s, below `MIN_ATTRIBUTE_TTL`.** `ATTRIBUTE_REFRESH_AHEAD`
+  (`vs/src/config.rs`) is `MIN_VISA_LIFETIME` + 15 s: a visa issued after the
+  refresh gets more than the floor, and the 15 s cover the refresh and the
+  request round trip. It must stay below `MIN_ATTRIBUTE_TTL` (60 s, now one
+  constant in `vs/src/trusted_services/mod.rs`), because a file store reloads
+  its snapshot only once less than that remains; a refresh earlier would get
+  the same expiry back. A compile-time `assert!` enforces it.
+- **Only configured sources are looked up early.** An attribute from `zpr`,
+  or from a service policy no longer declares, has nobody to ask; looking it
+  up would log a warning on every request in the window. The expired path is
+  unchanged for every source.
+- **"Changed" means a real difference.** A source that re-vends exactly what
+  the actor holds (an OIDC store's cached admission, a file snapshot not yet
+  reloaded) causes no actor write, so a repeated early lookup is cheap. The
+  revision is still recorded on the revision path.
+- **Pruning on a TTL refresh.** A near-expiry attribute the source stopped
+  vending is dropped now; one it did return is kept even with a short expiry
+  (a `zpr-attr/1` `expires_at` 40 s away). Visas granted on a dropped
+  attribute already end at its expiry, at most 45 s later.
+- **The deny stays `NoReason` on the wire, but is logged at WARN** with what
+  limited the lifetime (`compute_expiration` returns it). A `DenyCode` for it
+  would be a vsapi change in core, not needed to diagnose it.
+- **Known ceiling.** Authentication expiry and OIDC claims are renewed by the
+  client, not the visa service, so their last 30 s still deny; the WARN names
+  `source_actor_auth` or `destination_actor_auth`.
+
 ### Deferred
 
 No tracker issues are filed for these unless linked. The adapter item at the
@@ -1406,11 +1455,11 @@ no adapter docks on a Zode.
   pool in v1 ([ZODE_LINKS.md](ZODE_LINKS.md), "AAA kept, unused"). The visa
   service has no adapter either: it runs on the relay (see *The visa service
   on the relay, and trusted services*).
-- **Attributes are refreshed only after they expire**, so the visa service
-  denies every visa request that needs an attribute in its last 30 seconds,
-  while that attribute still bounds the visa's lifetime and no refresh of
-  its source intervenes,
-  with `NoReason` and the cause logged only at DEBUG
+- **Authentication and OIDC claims are not refreshed ahead of expiry.** In
+  the last 30 seconds of an actor's authentication, or of an OIDC claim that
+  bounds a visa, visa requests that need it are denied with `NoReason` (logged
+  at WARN, naming the limit) until the client re-authenticates. Trusted-service
+  attributes are refreshed ahead of expiry
   ([#275](https://github.com/org-zpr/zl-zipline/issues/275)).
 - **Route-aware evaluation is a scaffold.** Stage 2 of `libeval` is defined but
   not implemented.
