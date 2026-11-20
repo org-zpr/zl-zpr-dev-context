@@ -1056,7 +1056,8 @@ new `ping` reused the bound stream). Now:
   send on it. The grace is the clock skew between Zodes it is designed to
   tolerate, not a bound the code enforces: the sweep checks only this
   Zode's clock, so an upstream lagging by more than 60 s could still send
-  on a reused ID (g184 q6). Every hop compares an absolute instant with its own clock, so a
+  on a reused ID (g184 q6). Since #282 (core `90d9205`) the freed ID then
+  waits another 60 s in quarantine, which makes that bound 120 s. Every hop compares an absolute instant with its own clock, so a
   Zode whose clock is off stops a stream early or late; sending a TTL
   instead, or detecting skew, is
   [#281](https://github.com/org-zpr/zl-zipline/issues/281) (g184 q11).

@@ -140,7 +140,7 @@ the one naming the configuration.
 
 | Component | What it does |
 |---|---|
-| **Zode** | The one ZPR component that carries traffic (`ph zode`). It is a node: it forwards packets and enforces policy on every packet passing through. It also carries its own actor: its host's applications reach the ZPRnet through its TUN interface, which converts between IP packets and transit packets. Each Zode is either a **relay**, which never dials, or dials its relay with its initial link. See [ZODE_LINKS.md](ZODE_LINKS.md). |
+| **Zode** | The one ZPR component that carries traffic (`ph zode`). It is a node: it forwards packets, matches each new flow against a visa, and drops packets on unknown or expired streams (SECURITY_MODEL.md, *Implementation status*). It also carries its own actor: its host's applications reach the ZPRnet through its TUN interface, which converts between IP packets and transit packets. Each Zode is either a **relay**, which never dials, or dials its relay with its initial link. See [ZODE_LINKS.md](ZODE_LINKS.md). |
 | **Link** | A connection between two Zodes; physical, or virtual over an IP substrate. Carries attributes that ZPL `over` clauses can constrain. A Zode accepts only Zode links. |
 | **Visa service** | Issues, distributes, and revokes visas; holds policy; admits endpoints. See [VISA_SERVICE.md](VISA_SERVICE.md). |
 | **Admin service** | Generates and distributes configurations, including topology and forwarding rules. |

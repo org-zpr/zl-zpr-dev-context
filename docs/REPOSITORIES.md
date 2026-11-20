@@ -66,7 +66,7 @@ has only `main`):
 
 Keeping `main` pristine is what makes the fork maintainable: syncing upstream is
 always a fast-forward that can never conflict, `git diff main...zipline` is
-exactly the zipline delta, and contributing a change back upstream means
+exactly the zipline delta (for core, see the cherry-pick note below), and contributing a change back upstream means
 branching off `main` and cherry-picking rather than untangling merges.
 
 ### Taking upstream changes into zipline
