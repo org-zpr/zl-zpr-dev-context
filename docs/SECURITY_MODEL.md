@@ -1003,14 +1003,20 @@ not read the RFCs as a description of current guarantees.
   on a Zode link (ZODE_LINKS.md F5). A **DLT ID has no quarantine**
   (operator, gate g214). A packet can still reach a reused DLT slot: the
   fast path reads the DLT ID out of the PFT entry, and the slot can be
-  unbound and granted to another flow before the DLT lookup. That packet is
-  expanded with the other flow's classifier and checked with its key, and
-  is dropped either way: `compress::expand` refuses a body too short for
-  that classifier (counted `BadStructure`), and a body it does expand fails
-  the A2A MICV check, because the MICV covers the original flow's addresses
-  and ports and is keyed with its A2A key. `expand` refuses short or
-  malformed bodies instead of panicking since core#144, which also closes
-  a crash a peer Zode could cause with a short body on a valid stream.
+  unbound and granted to another binding before the DLT lookup. That packet
+  is expanded with the new binding's classifier and checked with its A2A
+  key. `compress::expand` refuses a body too short for that classifier
+  (counted `BadStructure`). A body it does expand passes the MICV check
+  only if the expanded packet is the original one under the same key: the
+  MICV covers the expanded packet's addresses and ports, and the DLT key
+  is derived from this adapter's key pair and the peer's A2A public key,
+  not made fresh per bind. So a packet is never delivered as a different
+  five-tuple or from a different A2A peer; it can be delivered only when
+  the new binding is for the same five-tuple between the same endpoints,
+  as the same packet the old binding would have delivered. `expand`
+  refuses short or malformed bodies instead of panicking since core#144,
+  which also closes a crash a peer Zode could cause with a short body on a
+  valid stream.
 
 **Not yet, or verify before relying on it:**
 

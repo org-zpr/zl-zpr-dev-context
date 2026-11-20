@@ -1947,8 +1947,9 @@ the node binds a stream whose egress is this Zode's own actor
 
 **What changed.** The visa removal path returns both sides of each removed
 binding (`revoke_no_rebuild` returns `StreamBinding`s, not ingress entries).
-The shared tail `Assembly::withdraw_streams` still sends type 5 for each
-ingress, and now also calls `Assembly::unbind_local_egress` on each egress.
+The shared tail `Assembly::withdraw_streams` still sends type 5 for an
+ingress from a local requestor still in the peer table (never on a Zode
+link, F5), and now also calls `Assembly::unbind_local_egress` on each egress.
 If that egress is the local actor link, it sends `Unbind Egress Stream
 Indication` (type 13) over `LOCAL_ACTOR_LINK_ID`; the hairpin hands it to the
 adapter on the dock link, which removes the entry (`adapter::unbind_stream`,
@@ -1957,8 +1958,9 @@ nothing is sent there (F5). The unbind goes out:
 
 - when a binding is removed: expiry sweep, VSS revocation, link loss, the
   #271 match eject, and the VS worker's R16/J10 revocations. A visa held in
-  its expiry grace keeps its binding, so its unbind goes out when the sweep
-  frees it, like its type 5;
+  its expiry grace keeps its binding, so a destination Zode, whose stream
+  enters over a Zode link, sends its unbind when the sweep frees the
+  binding after the grace;
 - when a J11 commit replaces a binding's egress: `commit_supersede` returns
   the replaced egress and `rebind_granted` unbinds it. A rebind starts at
   the stream's ingress Zode, whose egress is never local today, so this only
@@ -1970,10 +1972,11 @@ nothing is sent there (F5). The unbind goes out:
 
 **No DLT ID quarantine** (operator, gate g214). A packet can reach a reused
 slot: the fast path copies the DLT ID out of the PFT entry, and the slot can
-be unbound and granted to another flow before the DLT lookup. It is dropped
-either way: `compress::expand` refuses a body too short for the other flow's
+be unbound and granted to another binding before the DLT lookup.
+`compress::expand` refuses a body too short for the new binding's
 classifier (`BadStructure`), and a body it does expand fails the A2A MICV
-check. `expand` now refuses short or malformed bodies instead of panicking,
+check unless the new binding has the same five-tuple and the same A2A peer,
+when it is the same packet for the same endpoints. `expand` now refuses short or malformed bodies instead of panicking,
 which also closes a crash a peer Zode could cause with a short body on a
 valid stream. See SECURITY_MODEL.md, "Clean-up after a visa is removed".
 
