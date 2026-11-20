@@ -448,12 +448,11 @@ pair inside that process, not a dock between two processes.
   that same actor, and a logout drops them while the machine stays connected.
   That is the "both" case of
   [OIDC.md](OIDC.md#the-three-authentication-cases), reached in two steps.
-- **The precise rule.** A Zode may carry any number of addresses in its
-  config (`zpr_addr`), but at most one actor that logs in. An extra address
-  is set up locally on the TUN and creates no actor of its own: the relay
-  carries two, its own and `vs.zpr`, and `vs.zpr` is usable because the visa
-  service authenticates itself. Hence one
-  logged-in user per Zode ([SECURITY_MODEL.md](SECURITY_MODEL.md),
+- **The precise rule.** A Zode may carry several addresses (`zpr_addr`:
+  its own IPv6 address first; a relay, and only a relay, adds `vs.zpr`), but
+  at most one actor that logs in. An extra address is set up locally on the
+  TUN and creates no actor of its own: `vs.zpr` is usable because the visa
+  service authenticates itself. Hence one logged-in user per Zode ([SECURITY_MODEL.md](SECURITY_MODEL.md),
   "Who may log in or out on a Zode").
 - **Not a dead end.** A separate user actor, or several users on one
   machine, would be an addition: a second actor authorized over the internal
@@ -481,7 +480,10 @@ There is one kind of Zode. Whether it is a relay, whether it forwards, which
 addresses it carries and which initial link it dials are settings
 (`--relay`, `--forwarding`, `--zpr-addr`, `--initial-link`), so nothing in
 `ph` says "relay", "endpoint" or "cloud" beyond those settings, and code and
-docs say neither "server Zode" nor "endpoint mode". Hard-coding a role was an
+docs say neither "server Zode" nor "endpoint mode". Policy still decides
+which Zodes may carry other Zodes' traffic: `--forwarding` only lets a Zode
+accept forward-only visas ([SECURITY_MODEL.md](SECURITY_MODEL.md), *Design
+decisions*, "Non-transit has two halves"). Hard-coding a role was an
 anti-goal of the Zodes epic: the same binary runs as ZIPLINE's relay, its DNS
 Zode and every endpoint
 ([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216);
