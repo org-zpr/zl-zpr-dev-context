@@ -1993,6 +1993,9 @@ wildcards allowed) and dropped on a mismatch, counted `ClassifierMismatch`
 body, so a stale ICMP packet for the same A2A peer and addresses expands
 unchanged and passes the MICV. So a stale packet is dropped unless it is
 exactly the original packet and the new binding's classifier admits it.
+The classifier now refuses an ICMP, ICMPv6 or IPv6 extension header too
+short for what it reads instead of panicking, since an A2A peer can seal
+such a body with a valid MICV (Copilot review).
 `expand` now returns an error on a truncated header or an IPv4 header length
 out of range instead of panicking, which also closes a crash a peer Zode
 could cause with a short body on a valid stream. See SECURITY_MODEL.md,
@@ -2010,9 +2013,9 @@ and an occupancy counter are out of scope (gate g214 q6, q7).
 | `revoke_no_rebuild` and its callers return `StreamBinding`s; `commit_supersede` returns the replaced egress | `visa_table.rs`, `bootstrap_handoff.rs` |
 | J11 and unused grants (`rebind_granted`, `install_tether`, `requested_tether_granted`) | `mgmt/node.rs` |
 | The adapter's handler (`handle_unbind_indication`, `adapter::unbind_stream`) | `mgmt/handlers.rs`, `mgmt/adapter.rs` |
-| `expand` returns an error; `actor_input` drops it as `BadStructure`, and a packet its stream's classifier does not admit as `ClassifierMismatch` (`Ip5TupleTc::classify_packet`) | `compress.rs`, `fastpath.rs`, `tc.rs`, `counters.rs` |
+| `expand` returns an error; `actor_input` drops it as `BadStructure`, and a packet its stream's classifier does not admit as `ClassifierMismatch` (`Ip5TupleTc::classify_packet`); the classifier refuses a truncated ICMP, ICMPv6 or IPv6 extension header instead of panicking | `compress.rs`, `fastpath.rs`, `tc.rs`, `counters.rs`, `classifier.rs` |
 | The retry worker holds no RCU guard while it waits and serves only its own peer (`launch`, `own_peer`; `PeerState::zdpr_retry_timer_reset` is an `Arc<Notify>`) | `zdpr_worker.rs`, `peer_table.rs` |
-| Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure`, `test_actor_input_drops_a_packet_on_a_reused_dlt_id_as_micv_failure`, `test_actor_input_drops_an_icmp_packet_the_reused_dlt_id_does_not_admit`, `test_an_idle_worker_does_not_pin_the_rcu_epoch`, `test_a_worker_serves_only_its_own_peer` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs`, `zdpr_worker.rs` |
+| Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure`, `test_actor_input_drops_a_packet_on_a_reused_dlt_id_as_micv_failure`, `test_actor_input_drops_an_icmp_packet_the_reused_dlt_id_does_not_admit`, `test_actor_input_drops_a_truncated_icmp_body_with_a_valid_micv`, `test_truncated_l4_and_extension_headers_are_refused`, `test_an_idle_worker_does_not_pin_the_rcu_epoch`, `test_a_worker_serves_only_its_own_peer` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs`, `zdpr_worker.rs` |
 
 ### What waits for which issue
 
