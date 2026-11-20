@@ -1975,10 +1975,11 @@ slot: the fast path copies the DLT ID out of the PFT entry, and the slot can
 be unbound and granted to another binding before the DLT lookup.
 `compress::expand` refuses a body too short for the new binding's
 classifier (`BadStructure`), and a body it does expand fails the A2A MICV
-check unless the new binding has the same five-tuple and the same A2A peer,
-when it is the same packet for the same endpoints. `expand` now refuses short or malformed bodies instead of panicking,
-which also closes a crash a peer Zode could cause with a short body on a
-valid stream. See SECURITY_MODEL.md, "Clean-up after a visa is removed".
+check unless the new binding has the same five-tuple (and, for a keyed
+MICV, the same A2A peer), when it is the same packet for the same
+endpoints. `expand` now returns an error on a truncated header or an IPv4
+header length out of range instead of panicking, which also closes a
+crash a peer Zode could cause with a short body on a valid stream. See SECURITY_MODEL.md, "Clean-up after a visa is removed".
 
 **Removed:** `DockLookupTable::clear` and `EndpointLookupTable::clear`, dead
 since #234 dropped their only caller, and the "remote dock" wording on
