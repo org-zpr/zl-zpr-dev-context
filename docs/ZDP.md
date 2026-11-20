@@ -575,9 +575,12 @@ adapter is removed (expiry, revocation, link loss, a match eject, an
 R16/J10 reset) or replaced by a J11 rebind, and when a granted DLT entry
 goes unused (an abandoned next-hop bind, a refused grant, a refused J11
 commit). DLT IDs have no quarantine: a packet that reaches a reused slot is
-refused by `compress::expand` (`BadStructure`) or fails the A2A MICV check,
-unless it reconstructs exactly the original packet (and, for a keyed MICV,
-the new binding has the same A2A peer) (SECURITY_MODEL.md, "Clean-up after a visa is removed"). It is covered by
+refused by `compress::expand` (`BadStructure`), fails the A2A MICV check, or
+fails the new binding's classifier (`ClassifierMismatch`). It is dropped
+unless it is exactly the original packet (for a keyed MICV, the new binding
+has the same A2A peer) and the new binding's classifier admits it, which
+matters for ICMP, whose type and code compression leaves in the body
+(SECURITY_MODEL.md, "Clean-up after a visa is removed"). It is covered by
 unit tests (ZODE_LINKS.md, "DLT reclaimed on visa removal (#283)").
 
 **`Bootstrap Visas` (146) is implemented**

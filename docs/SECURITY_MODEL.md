@@ -1031,10 +1031,17 @@ not read the RFCs as a description of current guarantees.
   (counted `BadStructure`). A body it does expand passes the MICV check
   only if the reconstructed bytes are the ones the MICV was computed over
   and, for a keyed MICV, the key is the same; the key depends only on the
-  A2A peer, not on the bind. So a stale packet is delivered only as
-  exactly the original packet: the new binding's classifier must
-  reconstruct the same addresses and ports (a wildcard port is taken from
-  the packet itself), and a keyed MICV needs the same A2A peer. A binding
+  A2A peer, not on the bind. A packet that passes the MICV check is then
+  checked against the new binding's classifier (wildcards allowed) and
+  dropped on a mismatch (counted `ClassifierMismatch`): compression does not
+  rebuild everything a classifier names, and an ICMP or ICMPv6 type and code
+  stay in the body, so a stale ICMP packet for the same A2A peer and
+  addresses expands unchanged and passes the MICV. So a stale packet is
+  dropped unless it is exactly the original packet and the new binding's
+  classifier admits it: the new binding's classifier must reconstruct the
+  same addresses and ports (a wildcard port is taken from the packet
+  itself), a keyed MICV needs the same A2A peer, and the classifier must
+  match the packet, including an ICMP type and code. A binding
   whose visa supplies no A2A public key is checked with an unkeyed hash,
   which says nothing about the peer. Since
   core#144 `expand` returns an error instead of panicking on a truncated
