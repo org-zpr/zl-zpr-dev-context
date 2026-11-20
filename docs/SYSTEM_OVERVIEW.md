@@ -460,9 +460,9 @@ pair inside that process, not a dock between two processes.
   (ZODE_LINKS.md, *Design decisions*, "Deferred").
 - **Rejected: two actors per endpoint**, machine and user, as the brainstorm
   doc (org-zpr/zipline `docs/plans/2026-10-06-arch-v1-ph-rework.md`)
-  assumed. It needs a second address per endpoint, makes every application
-  pick a source address, and lets the machine's permissions exceed the
-  user's.
+  assumed. It needs a second address per endpoint, and an application that
+  does not bind its source gets whichever address the OS selects, so it can
+  act with the machine actor's permissions, which may exceed the user's.
 - **Rejected: Supervisor, Adapter and Node as separate processes** with the
   Adapter docked to its Node over loopback (that doc's option A). Every packet
   would be encrypted twice, two TUNs on one host both want the ZPRnet prefix,
