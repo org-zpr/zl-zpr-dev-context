@@ -395,7 +395,9 @@ F5. **No Zode-to-Zode teardown messages.** On Zode links, `Stream ID Withdrawal`
     nor accepted. Zodes don't use them with each other: the existing NodeToNode
     handlers and the `node::unbind_stream` send path are **removed**, not fixed.
     The message types stay for a Zode's internal links to its own adapter
-    and local actor.
+    and local actor: since #283 the node sends type 13 to its own adapter
+    over the local actor link (`Assembly::unbind_local_egress`) to reclaim a
+    DLT entry. See "DLT reclaimed on visa removal (#283)".
 F6. **Recovery is lazy.** After a revoke, the next packet at the ingress Zode
     finds no visa and sends a `visaRequest`. The visa service plans a route that
     avoids the dead link, usually through the relay. No other recovery signal
@@ -1399,7 +1401,8 @@ Decided while building it:
   transaction ID (core#110 review).
 - Gate g88: **q2** a type 5 or 13 on a Zode link is refused through the strict
   handler-error path, which closes the link. **q3** a type 13 from a node's own
-  adapter or local actor is refused too. **q4** a held visa ID is an idempotent
+  adapter or local actor is refused too: type 13 runs only from the node to
+  its own adapter, over the local actor link (#283). **q4** a held visa ID is an idempotent
   no-op with no content comparison (the tenet above).
 
 ### Relay join (#252)
@@ -1816,14 +1819,14 @@ entry has already expired.
 | Unit tests: `test_a_packet_on_an_expired_stream_is_dropped_and_counted`, `test_a_packet_on_a_live_stream_is_forwarded`, `test_rebind_moves_the_expiry_with_the_target`, `test_a_racing_reader_reads_the_expiry_and_next_hop_of_one_binding`, `test_bind_refuses_an_expired_visa`, `test_commit_supersede_refuses_an_expired_successor`, `test_commit_supersede_moves_the_expiry`, `test_the_sweep_ejects_an_expired_ingress_visa_at_once`, `test_the_sweep_keeps_an_expired_transit_visa_until_the_grace_passes`, `test_the_sweep_ejects_a_superseded_visa_with_no_binding_at_expiry`, `test_a_stream_id_grant_for_an_expired_visa_is_rejected`, `test_the_expiry_sweep_withdraws_local_streams`, `test_the_expiry_sweep_runs_at_most_once_an_interval` | `adapter/ph/src/fastpath.rs`, `forwarding_tables.rs`, `visa_table.rs`, `mgmt/node.rs` |
 | netns: `zode-oidc-test.sh` leg 2 binds the user flow before the login expires, then, once zb has logged the user out, checks that the flow gets no reply (dropped per packet, or already withdrawn by the sweep), reports zb's `Visa Expired` count (not asserted, for that reason), and waits up to 30 s for a ping that makes zb's `Visa Requested` count rise (the sweep's withdrawal; that ping's reply is not checked); a further ping then gets no reply. It does not observe the visa service's denial itself. The exact per-packet cutoff is covered by the unit tests. It fails on core 13d27db (every ping answered after the expiry). `zode-rejoin-test.sh` takes its ejection baselines before the expiry wait, since the sweep now ejects during it | `integration-test/zode-oidc-test.sh`, `integration-test/zode-rejoin-test.sh` |
 
-**Known gap, outside #274.** It is in the visa removal path
+**Gaps found here, both closed.** They were in the visa removal path
 (`revoke_no_rebuild`) that expiry shares with revocation, link loss and the
-#271 match eject: the destination's DLT entry is not reclaimed when a visa
-is removed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)). The
-other gap found here, a freed local stream ID reused before the actor had
-processed its withdrawal, is closed since core `90d9205`
-([#282](https://github.com/org-zpr/zl-zipline/issues/282)): every removal
+#271 match eject. A freed local stream ID was reused before the actor had
+processed its withdrawal: since core `90d9205`
+([#282](https://github.com/org-zpr/zl-zipline/issues/282)) every removal
 path quarantines the stream ID for `STREAM_ID_REUSE_GRACE` before reuse.
+The destination's DLT entry was never reclaimed: see "DLT reclaimed on
+visa removal (#283)".
 
 ### Zode departure (#284)
 
@@ -1932,6 +1935,63 @@ The zl-zpr-demo `dns-demo` docker tier, run at the PR heads, passes
 `test-dns.sh` section 3 unchanged: NXDOMAIN 25 s after `demo-stop-ph web`,
 inside its 60 s deadline.
 
+### DLT reclaimed on visa removal (#283)
+
+Built in org-zpr/zl-zpr-core#144, pd plan p59, gate g214. Since #234 the
+in-process adapter half of a Zode still uses its Dock Lookup Table (DLT) on
+every packet delivered to the local actor: `actor_input` takes the
+decompression classifier and the A2A key from it. An entry is inserted when
+the node binds a stream whose egress is this Zode's own actor
+(`adapter::bind_egress_stream`), but nothing removed one, so the table
+(1M fixed slots) only grew and kept stale mappings.
+
+**What changed.** The visa removal path returns both sides of each removed
+binding (`revoke_no_rebuild` returns `StreamBinding`s, not ingress entries).
+The shared tail `Assembly::withdraw_streams` still sends type 5 for each
+ingress, and now also calls `Assembly::unbind_local_egress` on each egress.
+If that egress is the local actor link, it sends `Unbind Egress Stream
+Indication` (type 13) over `LOCAL_ACTOR_LINK_ID`; the hairpin hands it to the
+adapter on the dock link, which removes the entry (`adapter::unbind_stream`,
+which ignores an ID it does not hold). Any other egress is a Zode link, and
+nothing is sent there (F5). The unbind goes out:
+
+- when a binding is removed: expiry sweep, VSS revocation, link loss, the
+  #271 match eject, and the VS worker's R16/J10 revocations. A visa held in
+  its expiry grace keeps its binding, so its unbind goes out when the sweep
+  frees it, like its type 5;
+- when a J11 commit replaces a binding's egress: `commit_supersede` returns
+  the replaced egress and `rebind_granted` unbinds it. A rebind starts at
+  the stream's ingress Zode, whose egress is never local today, so this only
+  guards that invariant;
+- when a grant goes unused (gate g214 q4): `install_tether` unbinds the
+  granted ID after an abandoned next-hop bind, a grant
+  `requested_tether_granted` cannot bind (the requestor is gone, the bind
+  is refused), and a refused J11 commit.
+
+**No DLT ID quarantine** (operator, gate g214). A packet can reach a reused
+slot: the fast path copies the DLT ID out of the PFT entry, and the slot can
+be unbound and granted to another flow before the DLT lookup. It is dropped
+either way: `compress::expand` refuses a body too short for the other flow's
+classifier (`BadStructure`), and a body it does expand fails the A2A MICV
+check. `expand` now refuses short or malformed bodies instead of panicking,
+which also closes a crash a peer Zode could cause with a short body on a
+valid stream. See SECURITY_MODEL.md, "Clean-up after a visa is removed".
+
+**Removed:** `DockLookupTable::clear` and `EndpointLookupTable::clear`, dead
+since #234 dropped their only caller, and the "remote dock" wording on
+`bind_egress_stream`. Graceful Zode shutdown (process exit frees the table)
+and an occupancy counter are out of scope (gate g214 q6, q7).
+
+| Concern | Location (`zl-zpr-core/adapter/ph/src/`) |
+|---|---|
+| `withdraw_streams`, `unbind_local_egress`, `update_visa_table_and_withdraw` | `assembly.rs` |
+| `send_unbind_egress_stream_indication` | `mgmt/requests.rs` |
+| `revoke_no_rebuild` and its callers return `StreamBinding`s; `commit_supersede` returns the replaced egress | `visa_table.rs`, `bootstrap_handoff.rs` |
+| J11 and unused grants (`rebind_granted`, `install_tether`, `requested_tether_granted`) | `mgmt/node.rs` |
+| The adapter's handler (`handle_unbind_indication`, `adapter::unbind_stream`) | `mgmt/handlers.rs`, `mgmt/adapter.rs` |
+| `expand` returns an error; `actor_input` drops it as `BadStructure` | `compress.rs`, `fastpath.rs` |
+| Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs` |
+
 ### What waits for which issue
 
 - **#257** a visa granted for a next hop whose link is already down: its
@@ -1958,8 +2018,6 @@ inside its 60 s deadline.
 - **#281** every Zode compares a visa's absolute expiry with its own clock,
   so clock skew moves the instant a stream stops; send a TTL or detect
   skew instead (see "Visa expiry on every use (#274)").
-- **#283** reclaim the destination's DLT entry when a visa is removed
-  (expiry, revocation, link loss).
 - **org-zpr/zipline#278** the generated policy allows DNS on UDP 53 only, so
   a resolver's TCP fallback is denied.
 - **v2**: dialing a Zode that can't be reached (ZBOLT, rendezvous), unbounded

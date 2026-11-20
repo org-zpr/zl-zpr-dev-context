@@ -991,6 +991,26 @@ not read the RFCs as a description of current guarantees.
   is not on. `Visa.prevHop` is in the schema
   ([zipline#243](https://github.com/org-zpr/zl-zipline/issues/243)) and the
   visa service sets it ([zipline#245](https://github.com/org-zpr/zl-zipline/issues/245)).
+- **Clean-up after a visa is removed.** A freed local stream ID is
+  quarantined for `STREAM_ID_REUSE_GRACE` before reuse on every removal
+  path since core `90d9205`
+  ([#282](https://github.com/org-zpr/zl-zipline/issues/282)). The
+  destination Zode's DLT entry is reclaimed whenever a visa is removed
+  (expiry, revocation, link loss, a match eject, an R16/J10 reset) or a
+  J11 rebind replaces it, and when a grant goes unused
+  ([#283](https://github.com/org-zpr/zl-zipline/issues/283), core#144): the
+  node sends type 13 to its own adapter over the local actor link, never
+  on a Zode link (ZODE_LINKS.md F5). A **DLT ID has no quarantine**
+  (operator, gate g214). A packet can still reach a reused DLT slot: the
+  fast path reads the DLT ID out of the PFT entry, and the slot can be
+  unbound and granted to another flow before the DLT lookup. That packet is
+  expanded with the other flow's classifier and checked with its key, and
+  is dropped either way: `compress::expand` refuses a body too short for
+  that classifier (counted `BadStructure`), and a body it does expand fails
+  the A2A MICV check, because the MICV covers the original flow's addresses
+  and ports and is keyed with its A2A key. `expand` refuses short or
+  malformed bodies instead of panicking since core#144, which also closes
+  a crash a peer Zode could cause with a short body on a valid stream.
 
 **Not yet, or verify before relying on it:**
 
@@ -1004,11 +1024,6 @@ not read the RFCs as a description of current guarantees.
   since #282; see *Visa expiry on every use*, above) can still send on an
   ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
-- **Clean-up after a visa is removed.** The destination's DLT entry is not
-  reclaimed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)),
-  whether the visa expired, was revoked, or lost its link. (A freed local
-  stream ID is quarantined before reuse on every removal path since core
-  `90d9205`, [#282](https://github.com/org-zpr/zl-zipline/issues/282).)
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
   seconds denies every visa request that needs it, unless a refresh of
