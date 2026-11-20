@@ -1240,7 +1240,9 @@ ph and `ph-cli` do the node side ([zl-zipline#233](https://github.com/org-zpr/zl
   reconnect, a visa-service restart, a rejoin, a K2 re-authentication) ph
   marks the login `SessionReplaced`, because the visa service built a new,
   device-only actor; a resident `auth-agent` is asked for a new interactive
-  login with a new nonce. A login still in flight when the session is
+  login with a new nonce. The visa service re-checks the live visas when the
+  replacement drops the login, so a visa that needed the login is revoked
+  (zl-zipline#265). A login still in flight when the session is
   replaced fails with `SessionReplaced`, and ph logs out to be sure, since
   the replacement may have come before or after its `reauthorize`.
 - **Policy re-authentication.** A `requestAuthentication` for the node's own
