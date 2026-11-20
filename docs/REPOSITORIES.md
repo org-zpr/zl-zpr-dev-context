@@ -66,13 +66,24 @@ has only `main`):
 
 Keeping `main` pristine is what makes the fork maintainable: syncing upstream is
 always a fast-forward that can never conflict, `git diff main...zipline` is
-exactly the zipline delta, and contributing a change back upstream means
+exactly the zipline delta (for core, see the cherry-pick note below), and contributing a change back upstream means
 branching off `main` and cherry-picking rather than untangling merges.
 
 ### Taking upstream changes into zipline
 
 Two steps. A checkout made by `zpr-dev` has only one remote — `origin`, the fork
 — and no `upstream` remote, so step 1 is done on GitHub rather than locally.
+
+**`zl-zpr-core`: cherry-pick, do not merge.** zl-zipline#234 removed adapter
+mode from the fork, so upstream changes to adapter code would conflict on
+every merge of `origin/main`. Upstream fixes are taken into core one at a
+time by cherry-pick instead of step 2. This applies once
+[zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merges
+`feature/zodes` into core's `zipline`; until then `zipline` still has adapter
+mode. The other forks are unchanged and merge as below. Cherry-picks do not
+move the merge base, so for core `git diff main...zipline` then also lists
+the upstream fixes already picked.
+(`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11 in org-zpr/zipline)
 
 **1. Fast-forward the fork's `main` from upstream.** No local checkout needed:
 

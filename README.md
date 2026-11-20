@@ -51,6 +51,10 @@ command):
 
 **Routine, whenever you want upstream changes:**
 
+**Except `zl-zpr-core`, once zl-zipline#237 lands:** it takes upstream fixes
+by cherry-pick instead of step 2 (`docs/REPOSITORIES.md`, "Taking upstream
+changes into zipline").
+
 ```bash
 # 1. fast-forward the fork's main from upstream (--branch main is required:
 #    the repository default is now zipline)

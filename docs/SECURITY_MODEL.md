@@ -542,6 +542,11 @@ the above.
 
 ## Design decisions
 
+The Zodes entries below carry the decisions of a master plan retired once
+shipped: `git show 0686fd8:docs/plans/2026-11-11-zodes.md` in
+org-zpr/zipline, umbrella
+[zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216).
+
 **Non-transit has two halves, and the node's half is defence in depth.** A
 machine whose owner is not trusted with other people's traffic must not relay
 it: payloads are protected only link by link today (A2A confidentiality is not
@@ -623,7 +628,7 @@ g113 q3, q6 and q7; the 2026-11-13 entries in zipline's
 `docs/decisions/adapters.md`)
 
 **On ZIPLINE an endpoint is a node, and the node role gives it nothing an
-adapter didn't have** (Zodes plan §7 check 4). Every ZIPLINE machine
+adapter didn't have** (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §7 check 4). Every ZIPLINE machine
 authenticates as a node, so it matches its own node join policy. An adapter
 matches every join policy except the ones flagged node.
 `Policy::join_services_for_role` gives a node all of them, and only while it
@@ -842,8 +847,12 @@ not read the RFCs as a description of current guarantees.
   encryption through a codec.
 - **Link key management** — Noise `Noise_XX_25519_ChaChaPoly_BLAKE2s` (the
   `snow` crate), with X.509 and Ed25519 certificate exchange.
-- **Enforcement at the dock** — the dock verifies each packet against the visa
-  authorizing the flow, and drops and counts mismatches.
+- **Enforcement at the ingress Zode** — the Zode where a flow enters ZPR
+  matches it against a visa when the flow binds, and every Zode on the path
+  drops and counts a packet whose stream it does not know or whose visa has
+  expired. The visa's other constraints are not rechecked per packet
+  (`fastpath.rs::forward` still has a `TODO: policy enforcement`;
+  [ZDP.md](ZDP.md#forwarding)). There are no docks since zl-zipline#234.
 - **Bootstrap authentication** — CN-to-RSA-public-key mapping with challenge
   signing, for the components that must connect before trusted services exist.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
@@ -866,9 +875,11 @@ not read the RFCs as a description of current guarantees.
   60 s later (`STREAM_ID_REUSE_GRACE`), so its stream ID is not reused
   while an upstream Zode may still send on it. That grace is the clock
   skew between Zodes it is designed to tolerate, not a bound the code
-  enforces: an upstream lagging by more than 60 s could still send on a
-  reused ID. Expiry is an absolute instant compared with
-  each Zode's clock, so a skewed clock stops a stream early or late
+  enforces. Since #282 (core `90d9205`) the freed ID then spends another
+  60 s in quarantine before reuse, so an upstream lagging by more than
+  120 s could still send on a reused ID. On a core with #274 but not #282,
+  such as the `d0f6121` that ZIPLINE 2.0.9 pins, it is 60 s. Expiry is an
+  absolute instant compared with each Zode's clock, so a skewed clock stops a stream early or late
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
   [#271](https://github.com/org-zpr/zl-zipline/issues/271),
   [#274](https://github.com/org-zpr/zl-zipline/issues/274), and
@@ -988,15 +999,16 @@ not read the RFCs as a description of current guarantees.
   nothing once an entry has expired, so if the clock steps back before
   the sweep frees the visa, its streams forward again until the clock
   passes the expiry once more. Skew between Zodes moves the cutoff, and an
-  upstream lagging by more than the 60 s stream-ID grace can still send
-  on an ID the downstream Zode has freed and reused
+  upstream lagging by more than the stream-ID grace (at a hop the stream
+  entered over a Zode link, 60 s after the expiry, plus 60 s of quarantine
+  since #282; see *Visa expiry on every use*, above) can still send on an
+  ID the downstream Zode has freed and reused
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)).
-- **Clean-up after a visa is removed.** A freed local stream ID is not
-  quarantined before reuse
-  ([#282](https://github.com/org-zpr/zl-zipline/issues/282)), and the
-  destination's DLT entry is not reclaimed
-  ([#283](https://github.com/org-zpr/zl-zipline/issues/283)), whether the
-  visa expired, was revoked, or lost its link.
+- **Clean-up after a visa is removed.** The destination's DLT entry is not
+  reclaimed ([#283](https://github.com/org-zpr/zl-zipline/issues/283)),
+  whether the visa expired, was revoked, or lost its link. (A freed local
+  stream ID is quarantined before reuse on every removal path since core
+  `90d9205`, [#282](https://github.com/org-zpr/zl-zipline/issues/282).)
 - **Attribute lifetimes near their end.** The visa service refreshes an
   attribute only after it has expired, and in the attribute's last 30
   seconds denies every visa request that needs it, unless a refresh of
@@ -1056,9 +1068,9 @@ not read the RFCs as a description of current guarantees.
   *Design decisions*, above). `zipline register` writes the Zode's link key,
   its certificate, the CA certificate, its ZPR address and the relay's CN and
   substrate address, and `zipline service-run` starts `ph zode` with them.
-  Since [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256),
-  ZIPLINE package 2.0.6 pins core `13d27db` (the zl-zipline#234 merge,
-  `ph zode` only) and runs `ph zode` on Linux and
+  Since package 2.0.6
+  ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)),
+  ZIPLINE runs `ph zode` on Linux and
   Windows Zodes and in its relay and DNS containers. The real-machine runs
   are in ZODE_LINKS.md, "On real machines".
   The network's generated policy lists every registered Zode in the relay's

@@ -739,8 +739,8 @@ authentication revocation. Actor endpoints are keyed by **ZPR address**, not
 CN: `GET /admin/actors` returns `{zpr_addr, cn}` entries where `cn` is a
 display label that may be null (an OIDC-only connect has no CN), and the
 per-actor paths take the address (`/admin/actors/{zpr_addr}`; a malformed
-address is a 400). Some — the authrevoke endpoints, `DELETE` visas, and
-`DELETE` actors — still return placeholder data; `admin-http-api.txt` marks
+address is a 400). Some — `DELETE` visas and `DELETE` actors — still return
+placeholder data; `admin-http-api.txt` marks
 each one and is the endpoint reference. `DELETE /admin/actors/{zpr_addr}`,
 when implemented, kicks the actor's live session; credential revocation is
 `/admin/authrevoke`.
@@ -779,6 +779,8 @@ shipped. Full plan text is in git history:
   umbrella [zipline#106](https://github.com/org-zpr/zl-zipline/issues/106)
 - `git show 43d56bd:docs/plans/2026-09-28-reauth-on-policy-install-plan.md` —
   umbrella [zipline#118](https://github.com/org-zpr/zl-zipline/issues/118)
+- `git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline —
+  umbrella [zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216)
 
 ### Trusted-service interplay (an `oidc` authenticator plus a `file` overlay)
 
@@ -1169,8 +1171,6 @@ anywhere. Before #234 a node that was not a relay could still dock the visa
 service's adapter (the `one-node-*` netns tests); that layout and those
 tests are gone.
 
-**Follow-up, [zl-zipline#266](https://github.com/org-zpr/zl-zipline/issues/266):** the visa service should exit when a listener
-cannot bind `vs_addr`, instead of running without VS-API.
 ([zl-zipline#229](https://github.com/org-zpr/zl-zipline/issues/229))
 
 ### A policy pass never waits on a node's VSS
@@ -1287,19 +1287,15 @@ tests.
 
 ### Deferred
 
-No tracker issues are filed for these unless linked. The three adapter items
-at the end are visa-service code that no Zode reaches since zl-zipline#234,
-because no adapter docks on a Zode.
+No tracker issues are filed for these unless linked. The adapter item at the
+end is visa-service code that no Zode reaches since zl-zipline#234, because
+no adapter docks on a Zode.
 
 - **Multi-valued `user.zpr.authority`.** More faithful, but it touches
   evaluation semantics and every consumer of the key. Revisit only if a
   deployment needs two concurrent user authorities.
 - **Compile-time pool check.** Once the pool ranges are stable enough to share
   through `zl-zpr-common`.
-- **Bootstrap key revocation independent of a policy install.** Policy-install
-  re-authentication covers removal from policy; a dedicated administrative
-  revocation of an authentication root is future work.
-  [zipline#136](https://github.com/org-zpr/zl-zipline/issues/136)
 - **A visa granted from a pre-logout actor copy.** A visa request holds the
   endpoint actors across awaits; if it inserts its visa after a logout's sweep
   has taken its snapshot, that visa escapes the logout's revocation and lives
@@ -1315,14 +1311,6 @@ because no adapter docks on a Zode.
   before a concurrent renewal. The fix is a shared per-actor lock or a
   revision-checked update.
   ([#63 review](https://github.com/org-zpr/zl-zpr-visaservice/pull/63))
-- **VS-side clock-skew check on `ssb.timestamp` on the adapter connect path.**
-  Signed but unchecked there; the reauthorize SS arm and node authentication
-  both check it. Independent hardening.
-  [zipline#137](https://github.com/org-zpr/zl-zipline/issues/137)
-- **`ctype=Reset` orphans adapter actor records.** `actor_mgr` removes the
-  node record directly instead of tearing down its docked adapters like a
-  disconnect. Pre-existing bug found while planning zipline#118.
-  [zipline#138](https://github.com/org-zpr/zl-zipline/issues/138)
 
 ---
 

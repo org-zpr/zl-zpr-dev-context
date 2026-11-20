@@ -787,7 +787,7 @@ Routing destinations are ZPR addresses, and where each kind comes from matters:
 |---|---|
 | **Node ZPR address** | `zpr_address` in `.zplc`, and the same value in the node's own config. Not allocated. |
 | **Adapter/actor address** | Visa-service paths unused in v1: an adapter got a pool address, or one granted by a trusted service and requested with the `zpr.addr` claim. Since zl-zipline#234 no adapter docks on a Zode, so every actor is a Zode's own actor at its node address, except the visa service itself: `vs.zpr` is a separate, self-authorized actor at `fd5a:5052::1`, on the relay's TUN beside the relay's node address. |
-| **AAA address** | Was used only while an adapter authenticated over its dock. The ZPRnet AAA network is `fd5a:5052:0:aaa::/64`; each node gets a **/88** carved out using the low 24 bits of its node address, pushed to the node as the `AAA_PREFIX` configuration parameter and used to seed its local `AddressPool`. The visa service still pushes it and a Zode still fills its pool, but since zl-zipline#234 nothing allocates from it: the AAA code is kept, unused (Zodes master plan §5.4). |
+| **AAA address** | Was used only while an adapter authenticated over its dock. The ZPRnet AAA network is `fd5a:5052:0:aaa::/64`; each node gets a **/88** carved out using the low 24 bits of its node address, pushed to the node as the `AAA_PREFIX` configuration parameter and used to seed its local `AddressPool`. The visa service still pushes it and a Zode still fills its pool, but since zl-zipline#234 nothing allocates from it: the AAA code is kept, unused (ZODE_LINKS.md, *Design decisions*, "AAA kept, unused"). |
 | **Static service address** | A service needing a fixed address runs behind its own Zode, whose node address is pinned by its `[nodes]` entry (as for DNS on ZIPLINE, DNS.md). The adapter form, `zpr_addr` in the adapter config plus a `device.zpr_addr` grant keyed on the adapter CN, has no adapter to serve since zl-zipline#234; the visa service still checks a grant keyed on a Zode's CN when that Zode joins, so a leftover grant that disagrees with the pin makes the join fail. An authored `["zpr.addr", ...]` provider attribute in `.zplc` is a compile error (zipline#109). |
 
 ZRFC 6.4 §4.1 has node addresses as prefixes from which dock and tether
@@ -820,6 +820,12 @@ comes from a table lookup rather than from prefix containment.
 ---
 
 ## Design decisions
+
+The Zodes entries below (link-state reports, transit, bootstrap visas,
+observed substrate addresses) carry the decisions of a master plan retired
+once shipped: `git show 0686fd8:docs/plans/2026-11-11-zodes.md` in
+org-zpr/zipline, umbrella
+[zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216).
 
 **An unset `Peering` substrate address means "the relay observes it".**
 Policy cannot carry the substrate address of an endpoint that changes
@@ -1119,7 +1125,7 @@ Specified or designed, not working:
   restarts to bring it back: a policy install keeps the failed mark. A short
   blip heals by itself, with no install or restart. Flows that moved to
   the relay stay there until their visas expire, because only new visas
-  take the direct link (Zodes plan §5.8). ZRFC 6.4 §5.12
+  take the direct link ("Link down revokes; link up does not", above). ZRFC 6.4 §5.12
   sends these reports to the admin service and §5.11 re-heralds a visa onto a
   new path; the implementation folds the first into the visa service and
   replaces the second with revoke-and-re-request.

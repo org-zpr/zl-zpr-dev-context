@@ -140,7 +140,7 @@ the one naming the configuration.
 
 | Component | What it does |
 |---|---|
-| **Zode** | The one ZPR component that carries traffic (`ph zode`). It is a node: it forwards packets and enforces policy on every packet passing through. It also carries its own actor: its host's applications reach the ZPRnet through its TUN interface, which converts between IP packets and transit packets. Each Zode is either a **relay**, which never dials, or dials its relay with its initial link. See [ZODE_LINKS.md](ZODE_LINKS.md). |
+| **Zode** | The one ZPR component that carries traffic (`ph zode`). It is a node: it forwards packets, matches each new flow against a visa, and drops packets on unknown or expired streams (SECURITY_MODEL.md, *Implementation status*). It also carries its own actor: its host's applications reach the ZPRnet through its TUN interface, which converts between IP packets and transit packets. Each Zode is either a **relay**, which never dials, or dials its relay with its initial link. See [ZODE_LINKS.md](ZODE_LINKS.md). |
 | **Link** | A connection between two Zodes; physical, or virtual over an IP substrate. Carries attributes that ZPL `over` clauses can constrain. A Zode accepts only Zode links. |
 | **Visa service** | Issues, distributes, and revokes visas; holds policy; admits endpoints. See [VISA_SERVICE.md](VISA_SERVICE.md). |
 | **Admin service** | Generates and distributes configurations, including topology and forwarding rules. |
@@ -351,6 +351,8 @@ plan text is in git history:
   [zipline#126](https://github.com/org-zpr/zl-zipline/issues/126)
 - `git show cc02abd:docs/plans/2026-10-01-win-node.md` — umbrella
   [zipline#149](https://github.com/org-zpr/zl-zipline/issues/149)
+- `git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline —
+  umbrella [zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216)
 
 The Windows and macOS entries below were decided for `ph adapter` and
 `ph node`, before zl-zipline#234 made `ph zode` the only mode. Where a
@@ -361,8 +363,8 @@ it was about the adapter or node role, the entry says what replaced it.
 ### One mode: `ph zode`
 
 `ph zode` is the only `ph` subcommand
-([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234), plan p51,
-Zodes master plan §5.11).
+([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234), plan p51;
+`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §5.11).
 
 - **What was removed.** `ph node`, `ph adapter` and `enum PhMode`; the adapter
   side of a dock (`AdapterToNode`: the tether, actor activation, the RSA
@@ -408,7 +410,12 @@ Zodes master plan §5.11).
   actor is authorized over a link). **Upgrade `ph` and `ph-cli` together:**
   `adapter/admin-api/cli.capnp` changed the `CmdLineInter` interface ID and
   renumbered its methods, so an older `ph-cli` cannot call a new `ph`, not
-  even for `counters` or `tun`.
+  even for `counters` or `tun`. Command-line options override the config
+  file since core `c7aef44`
+  ([zl-zipline#278](https://github.com/org-zpr/zl-zipline/issues/278));
+  before it, most `[global]` file values won and `--zpr-addr` was prepended
+  to the file's list. ZIPLINE 2.0.9 pins core `d0f6121`, which predates the
+  fix, but passes everything on the command line.
 - **The Zode's own login renews with a fixed 300 s lead**
   (`zode_login::AUTH_RENEWAL_LEAD`). The removed
   `auth_renewal_lead_seconds` had configured both the node-side renewal of
@@ -425,8 +432,62 @@ Zodes master plan §5.11).
   reached `vs.zpr` and resolved names with no /128 route: its address had
   PrefixLength 32 and the on-link `fd5a:5052::/32` route (2026-11-19 run;
   [ZODE_LINKS.md](ZODE_LINKS.md), "On real machines").
-- **AAA is kept, unused** (Zodes master plan §5.4): see
-  [ZODE_LINKS.md](ZODE_LINKS.md), *Design decisions*.
+- **AAA is kept, unused**: see [ZODE_LINKS.md](ZODE_LINKS.md), *Design
+  decisions*, "AAA kept, unused".
+
+### One process, one actor: the Adapter/Node boundary is logical
+
+A Zode is one `ph zode` process. Its node side and its actor side are the
+RFC's Node and Adapter, but the boundary between them is the internal link
+pair inside that process, not a dock between two processes.
+
+- **An endpoint's node address is its actor address.** A Zode has one actor
+  that logs in, the machine, and the visa service keys that actor, its
+  route-graph vertex and its VSS connection by the one address. The machine
+  authenticates with its bootstrap key; a user login adds user attributes to
+  that same actor, and a logout drops them while the machine stays connected.
+  That is the "both" case of
+  [OIDC.md](OIDC.md#the-three-authentication-cases), reached in two steps.
+- **The precise rule.** A Zode may carry several addresses (`zpr_addr`:
+  its own IPv6 address first; a relay, and only a relay, adds `vs.zpr`), but
+  at most one actor that logs in. An extra address is set up locally on the
+  TUN and creates no actor of its own: `vs.zpr` is usable because the visa
+  service authenticates itself. Hence one logged-in user per Zode ([SECURITY_MODEL.md](SECURITY_MODEL.md),
+  "Who may log in or out on a Zode").
+- **Not a dead end.** A separate user actor, or several users on one
+  machine, would be an addition: a second actor authorized over the internal
+  link pair, with its own address. The machine's address stays where it is
+  (ZODE_LINKS.md, *Design decisions*, "Deferred").
+- **Rejected: two actors per endpoint**, machine and user, as the brainstorm
+  doc (org-zpr/zipline `docs/plans/2026-10-06-arch-v1-ph-rework.md`)
+  assumed. It needs a second address per endpoint, and an application that
+  does not bind its source gets whichever address the OS selects, so it can
+  act with the machine actor's permissions, which may exceed the user's.
+- **Rejected: Supervisor, Adapter and Node as separate processes** with the
+  Adapter docked to its Node over loopback (that doc's option A). Every packet
+  would be encrypted twice, two TUNs on one host both want the ZPRnet prefix,
+  and mobile platforms allow one tunnel per app.
+- **Rejected: upstream zpr-core#1410 (actor authorization over a link) as a
+  prerequisite.** It ran only on an adapter's link to its node, and once
+  every machine is a Zode there is no such link.
+
+([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216);
+`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.2 in org-zpr/zipline)
+
+### Roles are run-time configuration
+
+There is one kind of Zode. Whether it is a relay, whether it forwards, which
+addresses it carries and which initial link it dials are settings
+(`--relay`, `--forwarding`, `--zpr-addr`, `--initial-link`), so nothing in
+`ph` says "relay", "endpoint" or "cloud" beyond those settings, and code and
+docs say neither "server Zode" nor "endpoint mode". Policy still decides
+which Zodes may carry other Zodes' traffic: `--forwarding` only lets a Zode
+accept forward-only visas ([SECURITY_MODEL.md](SECURITY_MODEL.md), *Design
+decisions*, "Non-transit has two halves"). Hard-coding a role was an
+anti-goal of the Zodes epic: the same binary runs as ZIPLINE's relay, its DNS
+Zode and every endpoint
+([zl-zipline#216](https://github.com/org-zpr/zl-zipline/issues/216);
+`git show 0686fd8:docs/plans/2026-11-11-zodes.md` in org-zpr/zipline, §5.7).
 
 ### Windows support (decided for `ph adapter`)
 
@@ -869,8 +930,6 @@ restart the affected Zodes: the
 Out-of-scope items from the Windows and macOS adapter and node plans, and
 from zl-zipline#234, each with an open issue unless noted:
 
-- Windows service and installer —
-  [zipline#147](https://github.com/org-zpr/zl-zipline/issues/147)
 - Packet capture to a file via `DuplicateHandle` —
   [zipline#148](https://github.com/org-zpr/zl-zipline/issues/148)
 - Npcap SDK for `ph-cli` filter compilation —
@@ -881,16 +940,6 @@ from zl-zipline#234, each with an open issue unless noted:
   [zipline#153](https://github.com/org-zpr/zl-zipline/issues/153)
 - Per-instance control path (two Zodes for one user on one host) —
   [zipline#169](https://github.com/org-zpr/zl-zipline/issues/169)
-- Two-interface pktinfo verification on a real host (the remote-node test
-  env it named is gone) —
-  [zipline#172](https://github.com/org-zpr/zl-zipline/issues/172)
-- `ph zode` command-line options do not override the config file for most
-  `[global]` keys, although `--help` says they do: `set_from_common` (the
-  CLI) runs before `set_from_globals` (the file), and `--zpr-addr` is
-  prepended to the file's list instead of replacing it —
-  [zl-zipline#278](https://github.com/org-zpr/zl-zipline/issues/278)
-  (`zl-zpr-core/docs/SETUP.md` describes the real behaviour; ZIPLINE passes
-  everything on the command line)
 - launchd service / installer for macOS — no issue filed; file if asked
 - An automated macOS integration test tier — no issue filed; same shape as
   [zipline#152](https://github.com/org-zpr/zl-zipline/issues/152)
@@ -904,8 +953,8 @@ full suite of end-to-end security features is not yet implemented. Read the
 RFCs as design intent, not as a description of current behavior.
 
 Working today: Zodes (`ph zode`, the only mode since zl-zipline#234; ZIPLINE
-package 2.0.6 pins core `13d27db` and runs it on Linux and Windows and in its
-relay and DNS containers, [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) over
+runs it on Linux and Windows and in its relay and DNS containers since package
+2.0.6, [org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256)) over
 Noise-secured Zode links, end-to-end (A2A) integrity, bootstrap authentication, visa issuance and distribution with route
 selection, revocation and reconciliation on policy change, the ZPL compiler,
 and file-backed attribute sources.
