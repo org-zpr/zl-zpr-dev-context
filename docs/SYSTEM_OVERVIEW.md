@@ -448,9 +448,11 @@ pair inside that process, not a dock between two processes.
   that same actor, and a logout drops them while the machine stays connected.
   That is the "both" case of
   [OIDC.md](OIDC.md#the-three-authentication-cases), reached in two steps.
-- **The precise rule.** A Zode may carry any number of configured addresses
-  (`zpr_addr`, trusted from its config without a login; the relay has two,
-  its own and `vs.zpr`), but at most one actor that logs in. Hence one
+- **The precise rule.** A Zode may carry any number of addresses in its
+  config (`zpr_addr`), but at most one actor that logs in. An extra address
+  is set up locally on the TUN and creates no actor of its own: the relay
+  carries two, its own and `vs.zpr`, and `vs.zpr` is usable because the visa
+  service authenticates itself. Hence one
   logged-in user per Zode ([SECURITY_MODEL.md](SECURITY_MODEL.md),
   "Who may log in or out on a Zode").
 - **Not a dead end.** A separate user actor, or several users on one

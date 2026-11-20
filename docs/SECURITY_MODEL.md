@@ -874,9 +874,9 @@ not read the RFCs as a description of current guarantees.
   skew between Zodes it is designed to tolerate, not a bound the code
   enforces. Since #282 (core `90d9205`) the freed ID then spends another
   60 s in quarantine before reuse, so an upstream lagging by more than
-  120 s could still send on a reused ID; on an older core, such as the
-  `d0f6121` that ZIPLINE 2.0.9 pins, the bound is 60 s. Expiry is an absolute instant compared with
-  each Zode's clock, so a skewed clock stops a stream early or late
+  120 s could still send on a reused ID. On a core with #274 but not #282,
+  such as the `d0f6121` that ZIPLINE 2.0.9 pins, it is 60 s. Expiry is an
+  absolute instant compared with each Zode's clock, so a skewed clock stops a stream early or late
   ([#281](https://github.com/org-zpr/zl-zipline/issues/281)). See
   [#271](https://github.com/org-zpr/zl-zipline/issues/271),
   [#274](https://github.com/org-zpr/zl-zipline/issues/274), and
