@@ -98,6 +98,15 @@ Merging `origin/main` directly means local `main` never has to be checked out or
 updated. If you want it current anyway — for a local `git diff main...zipline` —
 add `git checkout main && git merge --ff-only origin/main` before the merge.
 
+**`zl-zpr-core`: cherry-pick, do not merge.** zl-zipline#234 removed adapter
+mode from the fork, so upstream changes to adapter code would conflict on
+every merge of `origin/main`. Upstream fixes are taken into core one at a
+time by cherry-pick instead of step 2. This applies once
+[zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merges
+`feature/zodes` into core's `zipline`; until then `zipline` still has adapter
+mode. The other forks are unchanged and merge as above.
+(`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11 in org-zpr/zipline)
+
 **Merge, never rebase.** `zipline` is long-lived and published, so rebasing it
 rewrites history other checkouts already have. Merge commits on `zipline` are
 expected and fine.
