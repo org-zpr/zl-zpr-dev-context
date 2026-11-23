@@ -2039,7 +2039,7 @@ and an occupancy counter are out of scope (gate g214 q6, q7).
 
 ### VS-API liveness (#292)
 
-zl-zpr-core#TBD. The link keep-alive constants (`DEFAULT_KEEP_ALIVE_PERIOD`,
+zl-zpr-core#148. The link keep-alive constants (`DEFAULT_KEEP_ALIVE_PERIOD`,
 `DEFAULT_KEEP_ALIVE_TIMEOUT`, `KEEP_ALIVE_MAX_MISSES`) live in
 `zl-zpr-core/libnode2/src/keepalive.rs`; `ph`'s `config.rs` re-exports them.
 `libnode2/src/vsconn.rs` derives `VSAPI_PING_TIMEOUT` (3 s) and
