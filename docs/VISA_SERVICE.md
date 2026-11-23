@@ -1436,7 +1436,9 @@ decisions (gate g234):
   (`vs/src/db/revocation.rs`), field = sequence number, value =
   `{kind: policy | attributes, actors: [...], vinst}`, where `vinst`, the
   vinst the install assigned, is present exactly on a policy record (#290;
-  a record that breaks that is dropped as unparseable). Records are
+  a record that breaks that is dropped as unparseable, with no migration: a
+  policy record a #289 build left pending is dropped on upgrade, so let a
+  pending policy pass finish before upgrading). Records are
   immutable, so the reconciler deletes exactly the fields it read.
 - **One reconciler, no new timer.** `VsEvent::Reconcile` replaces
   `PolicyUpdated` and `TrustedServiceChange`. A writer kicks it after its
@@ -1502,7 +1504,8 @@ nothing left to run its pass. The decisions (gate g240, all defaults):
   finds the actor gone. It kicks the reconciler once the teardown is done.
   The inline revoke stays as the fast path; the reconciler's vanished-actor
   step makes a failed one durable, keeping the obligation until every revoke
-  is persisted. No caller holds a guard of its own when it disconnects. A
+  is persisted. That needs the actor record to be gone: if its removal
+  failed too (logged), the pass finds the actor and sweeps its visas instead. No caller holds a guard of its own when it disconnects. A
   failed record is logged and the teardown goes ahead; the actor's visas
   then wait for their expiry.
 - **Bootstrap visas are not the vanished actor's.** A departed node can
@@ -1516,7 +1519,10 @@ nothing left to run its pass. The decisions (gate g240, all defaults):
   vinst above the published one is a write that landed unpublished, and it
   is published there, through the install's own commit tail; otherwise the
   write never landed, and the obligations above the published vinst are
-  dropped without a policy pass, so no re-authentication deadline moves. A
+  dropped without a policy pass, so no re-authentication deadline moves. The
+  policy pass then runs once, against the current policy, for every landed
+  obligation it listed: an install superseded before its pass is covered by
+  the later one's. A
   read or build error keeps every listed obligation pending. Startup needs
   nothing new: it publishes the stored policy, and the same rule runs the
   pass or drops the obligation. A failed install kicks the reconciler too,

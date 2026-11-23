@@ -341,9 +341,10 @@ actor, so a disconnect's revocations survive a failed write and a restart
 [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290);
 VISA_SERVICE.md, "Revocation obligations are durable (#289)" and "A
 disconnect's revocation is durable; a policy obligation waits for its policy
-(#290)"). A policy install's pass always runs against the policy it
-installed: its obligation names its vinst, and a write that landed without
-being published is published before the pass. A grant that
+(#290)"). A policy install's pass never runs against a policy older than the
+one it installed: its obligation names its vinst, and a write that landed
+without being published is published before the pass, which then runs
+against the current policy (one pass can cover several installs). A grant that
 read state before the write and commits after the sweep listed the visas
 can still escape until it expires
 ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). Unit
@@ -861,21 +862,24 @@ no static grant). A graceful stop deregisters through the caller-scoped
 Removal also releases a managed address, which may be handed to another
 actor; DNS answers for the old holder end within the cache TTL (DNS.md).
 
-**A revocation the visa service owes is never only in memory.** Every write
+**A revocation the visa service owes is not kept only in memory.** Every write
 that can make live visas unacceptable, a disconnect included, records a
 revocation obligation in the state store before it writes, and the reconciler
-deletes it only once a pass has completed and every revoke is persisted; a
-failed revoke write or a restart leaves it pending
+deletes it only once a pass has completed and every revoke of a visa whose
+endpoint is gone is persisted; a failed revoke write or a restart leaves it
+pending
 ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
 [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290)). A policy
 obligation names the vinst it installs and completes only once that vinst is
 published, so a policy whose write landed with its reply lost is published and
-its pass run, never skipped. A disconnect whose obligation cannot be recorded
+a pass run against it (or a later policy), never skipped. A disconnect whose obligation cannot be recorded
 still tears the actor down (fail closed on the node; its visas wait for their
 expiry). The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
 revocation is durable; a policy obligation waits for its policy (#290)": a
-grant in flight across the write (#248), and an address held again before the
-next pass.
+grant in flight across the write (#248); an address held again before the
+next pass; a failed revoke of a visa that only transited the departed node
+(logged, not retried); and a disconnect whose actor-record removal itself
+failed (the actor is still found, so its visas are swept, not revoked).
 
 ## Implementation status
 
