@@ -237,9 +237,11 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     *Built (#292):* the Zode probes the session's liveness with VS-API pings on
     the link keep-alive's budget, no tighter: each ping gets the echo timeout
     (3 s), the next goes out as soon as one misses, and the session is lost
-    after the keep-alive's miss count (3), about 9 s. A link that keep-alive
-    still finds alive therefore does not lose its VS-API session to one slow
-    TCP segment. See "VS-API liveness (#292)" under *Implementation status*.
+    after the keep-alive's miss count (3), about 9 s from the first unanswered
+    ping (which goes out up to 5 s after the last answered one). One slow TCP
+    segment therefore no longer costs a Zode its VS-API session; a TCP stall
+    that outlasts all three pings still does, even if the link's echoes get
+    through. See "VS-API liveness (#292)" under *Implementation status*.
 
 ## Walkthroughs
 
@@ -1144,7 +1146,9 @@ any host and port. Now:
   longer can. Mitigation 1, the dialer's CN check, already existed.
 
 **VS-API liveness is no stricter than the link keep-alive** (zl-zipline#292,
-gate g248). The VS-API session is TCP carried over a ZDP link, so a lost
+gate g248). A joining Zode's VS-API session is TCP carried over its initial
+ZDP link (the relay that hosts the visa service reaches it locally, with the
+same budget), so a lost
 segment waits for a TCP retransmit timeout, a second or more on a loaded link,
 while the link's own echoes, which ZDP answers directly, keep arriving. The
 old ping budget (1 s, then 2 s, two misses) turned one such retransmit into a
@@ -2056,9 +2060,11 @@ between answered pings.
 - **A new handle starts liveness afresh.** When `connect`, `open` or a
   re-authentication installs a new VS handle, the probe on the old one is
   aborted, so its misses cannot end the new session.
-- **Known limit.** A command in progress holds the run loop. The probe keeps
-  pinging meanwhile, but a probe that failed is acted on only when that
-  command returns. Each RPC of the command has its own timeout (10 s; 30 s for
+- **Known limit.** A command in progress holds the run loop. A probe already
+  running keeps pinging meanwhile, but a probe that failed is acted on only
+  when that command returns, and a probe that falls due during the command
+  starts only then. Each RPC of the command has its own timeout (10 s by
+  default; 5 s for `requestBootstrapVisas`; 30 s for
   the calls of `connect`, `open` and a re-authentication), so a command that
   makes several calls in sequence can hold the loop for longer: `connect` and
   a re-authentication, three 30 s calls, up to about 90 s.
