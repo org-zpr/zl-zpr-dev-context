@@ -1446,8 +1446,9 @@ decisions (gate g234):
   sweeper's loop kicks it every `MIN_VISA_LIFETIME` (30 s), and startup kicks
   it, so obligations a crash left behind run then, including a policy pass a
   crash cut short. `reconcile_obligations` (`vs/src/event_mgr.rs`) lists the
-  pending obligations, then: (0) the policy catch-up (#290, below); (1) if
-  any is a policy install, the policy pass against the current policy; (2) the attribute refresh of the actors behind
+  pending obligations, then: (0) the policy catch-up (#290, below), which
+  drops a policy obligation whose write never landed; (1) if any remaining
+  one is a policy install, the policy pass against the current policy; (2) the attribute refresh of the actors behind
   live visas and the sweep of every live visa; (3) the revocation of every
   visa of an actor an obligation names that no longer exists (the sweep skips
   unresolved actors). A failed refresh, re-check or revoke write, a revoke
@@ -1505,10 +1506,13 @@ nothing left to run its pass. The decisions (gate g240, all defaults):
   The inline revoke stays as the fast path; the reconciler's vanished-actor
   step makes a failed one durable, keeping the obligation until every revoke
   is persisted. That needs the actor record to be gone: if its removal
-  failed too (logged), the pass finds the actor and sweeps its visas instead. No caller holds a guard of its own when it disconnects. A
-  failed record is logged and the teardown goes ahead; the actor's visas
-  then wait for their expiry.
-- **Bootstrap visas are not the vanished actor's.** A departed node can
+  failed too (logged), the pass finds the actor and sweeps its visas
+  instead. No caller holds a guard of its own when it disconnects. A failed
+  record is logged and the teardown goes ahead with its inline revoke; a
+  revoke that then fails too is retried only from the in-memory quarantine,
+  and past a restart waits for the visa's expiry.
+- **Bootstrap visas are not the vanished actor's** (so "every visa of a
+  vanished actor" above excludes them). A departed node can
   rejoin before the pass runs, and its bootstrap visas are minted from the
   relay's peering before it has an actor. The vanished-actor step leaves
   them alone; the sweep re-checks them against the peering.
