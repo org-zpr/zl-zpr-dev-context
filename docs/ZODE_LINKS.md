@@ -2058,12 +2058,16 @@ between answered pings.
   aborted, so its misses cannot end the new session.
 - **Known limit.** A command in progress holds the run loop. The probe keeps
   pinging meanwhile, but a probe that failed is acted on only when that
-  command returns, which its own RPC timeout bounds (10 s; 30 s for
-  `connect`).
+  command returns. Each RPC of the command has its own timeout (10 s; 30 s for
+  the calls of `connect`, `open` and a re-authentication), so a command that
+  makes several calls in sequence can hold the loop for longer: `connect` and
+  a re-authentication, three 30 s calls, up to about 90 s.
 - **Not changed: the visa service's VSS ping.** `zl-zpr-visaservice`
-  `vs/src/vss_worker.rs` still pings each Zode's VSS with 1 s plus 1 s per
-  earlier failure, 1 s apart, three failures (`VSS_MAX_PING_FAILURES`), and
-  awaits the ping in its command loop. It showed the same `ping to VSS ...
+  `vs/src/vss_worker.rs` still pings each Zode's VSS every 7 s
+  (`VSS_PING_INTERVAL`) with a timeout of 1 s plus 1 s per earlier failure;
+  after a failure it retries 1 s later, and the third consecutive failure
+  (`VSS_MAX_PING_FAILURES`) ends the VSS worker. It awaits the ping in its
+  command loop. It showed the same `ping to VSS ...
   timed out` warnings in the #292 run.
 - **Tests.** `libnode2/src/vsconn.rs` unit tests against the fake visa
   service: a ping answered after 1.5 s is not a miss; an unanswering visa
