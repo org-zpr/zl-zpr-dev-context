@@ -336,7 +336,8 @@ re-checked, so a `never allow` on a newly gained claim waits for the next
 policy or attribute event. When a write leaves no actor behind (a Reset
 whose replacing write fails after deleting the old one, an `authenticate`
 undo, any disconnect), the reconciler revokes every visa of the vanished
-actor, so a disconnect's revocations survive a failed write and a restart
+actor (except a rejoining node's bootstrap visas, which the sweep re-checks
+against the relay's peering), so a disconnect's revocations survive a failed write and a restart
 ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
 [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290);
 VISA_SERVICE.md, "Revocation obligations are durable (#289)" and "A
@@ -873,8 +874,9 @@ pending
 obligation names the vinst it installs and completes only once that vinst is
 published, so a policy whose write landed with its reply lost is published and
 a pass run against it (or a later policy), never skipped. A disconnect whose obligation cannot be recorded
-still tears the actor down (fail closed on the node; its visas wait for their
-expiry). The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
+still tears the actor down (fail closed on the node); its inline revoke still
+runs, and only a revoke that then fails is left to the in-memory retry and, past
+a restart, to the visa's expiry. The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
 revocation is durable; a policy obligation waits for its policy (#290)": a
 grant in flight across the write (#248); an address held again before the
 next pass; a failed revoke of a visa that only transited the departed node
@@ -916,8 +918,9 @@ not read the RFCs as a description of current guarantees.
   completes it
   ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
   [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290)). A
-  policy obligation completes only once the policy it installed is
-  published. See [VISA_SERVICE.md](VISA_SERVICE.md).
+  policy obligation whose policy was stored completes only once that policy
+  (or a later one) is published and its pass has run; one whose write never
+  landed is dropped with no pass. See [VISA_SERVICE.md](VISA_SERVICE.md).
 - **Visa expiry on every use of a visa** — every Zode on a stream's path
   drops its packets from the visa's expiry on, by its own clock: each
   forwarding entry carries a copy of the bound visa's expiry, checked on
