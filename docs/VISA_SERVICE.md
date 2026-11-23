@@ -80,7 +80,7 @@ background work.
 | `connection_control` | New connections to the ZPRnet, node and adapter: authenticate, then authorize against policy. |
 | `login_nonce` | Visa-service-minted OIDC login nonces for a Zode's own login (`getLoginNonce`): bound to actor and VS-API session, single-use, short-lived. In memory. |
 | `event_mgr` | High-level events with system-wide consequences, such as actor joins and leaves. Fire-and-forget: it cannot report success back to a caller. Runs the revocation reconciler (`reconcile_obligations`) on its worker. |
-| `revocation` | Durable revocation obligations (`RevocationLedger`, store in `db/revocation.rs`), the barrier that orders their writers against the reconciler, and the revocation generation (zl-zipline#289). |
+| `revocation` | Durable revocation obligations (`RevocationLedger`, store in `db/revocation.rs`), the barrier that orders their writers against the reconciler, and the revocation generation (zl-zipline#289); a disconnect records one, and a policy obligation names its vinst (zl-zipline#290). |
 | `visa_reconciler` | Re-evaluates live visas against a policy snapshot and queues revocations for those that no longer hold. |
 | `visareq_worker` | "The beating heart" — one worker per visa request. |
 | `vsapi_worker` / `vss_worker` | The node-facing APIs; one VSS worker per node. |
@@ -1285,7 +1285,8 @@ The decisions (gates g191, g193, g195):
   with `DisconnectReason::Timeout`. It removes the actor record (and so its
   services), trusted-service revisions, the router node, the VSS worker, the
   visas of the node and its actor, and the managed address. No removal code
-  is new, and like any disconnect it takes the node commit lock.
+  is new, and like any disconnect it takes the node commit lock and records
+  a revocation obligation for the node (#290).
 - **A graceful stop deregisters at once.** ph sends `notify_disconnect` with
   reason `NodeShutdown` before it tears its links down. It waits at most 2 s,
   and failure is ignored. There is one deregistration path.
@@ -1425,23 +1426,26 @@ decisions (gate g234):
   the stored actor first, so a failed one leaves the node's visas with no actor
   to judge them by; this costs a Reset of a known node one sweep),
   `reauthorize_actor` on a login, logout or lossy renewal, both
-  trusted-service admin endpoints (the flush and the `changed` notify), and
-  an `authenticate` undo that removes a node it had committed. A failed
-  record fails the write (fail closed): nothing would revoke what it
-  invalidates. The undo is the exception: it logs and removes the node
-  anyway, because keeping a half-authenticated node is worse.
+  trusted-service admin endpoints (the flush and the `changed` notify),
+  an `authenticate` undo that removes a node it had committed, and every
+  disconnect (#290, below). A failed record fails the write (fail closed):
+  nothing would revoke what it invalidates. The undo and the disconnect are
+  the exceptions: they log and remove the actor anyway, because keeping a
+  half-authenticated or rejected actor is worse.
 - **The store.** Valkey counter `revoke:seq` and hash `revoke:pending`
   (`vs/src/db/revocation.rs`), field = sequence number, value =
-  `{kind: policy | attributes, actors: [...]}`. Records are immutable, so the
-  reconciler deletes exactly the fields it read.
+  `{kind: policy | attributes, actors: [...], vinst}`, where `vinst`, the
+  vinst the install assigned, is present exactly on a policy record (#290;
+  a record that breaks that is dropped as unparseable). Records are
+  immutable, so the reconciler deletes exactly the fields it read.
 - **One reconciler, no new timer.** `VsEvent::Reconcile` replaces
   `PolicyUpdated` and `TrustedServiceChange`. A writer kicks it after its
   write (a non-blocking `try_send`; a full queue is harmless), the auth-expiry
   sweeper's loop kicks it every `MIN_VISA_LIFETIME` (30 s), and startup kicks
   it, so obligations a crash left behind run then, including a policy pass a
   crash cut short. `reconcile_obligations` (`vs/src/event_mgr.rs`) lists the
-  pending obligations, then: (1) if any is a policy install, the policy pass
-  against the current policy; (2) the attribute refresh of the actors behind
+  pending obligations, then: (0) the policy catch-up (#290, below); (1) if
+  any is a policy install, the policy pass against the current policy; (2) the attribute refresh of the actors behind
   live visas and the sweep of every live visa; (3) the revocation of every
   visa of an actor an obligation names that no longer exists (the sweep skips
   unresolved actors). A failed refresh, re-check or revoke write, a revoke
@@ -1474,6 +1478,64 @@ decisions (gate g234):
   (a `ponytail:` note marks it). A grant that read state before a write and
   commits after the pass listed the visas still escapes (#248). The link-down
   quarantine stays in memory; a restart re-derives link state.
+
+### A disconnect's revocation is durable; a policy obligation waits for its policy (#290)
+
+From the Zodes epic, pd plan p68,
+[zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290), shipped by
+[zl-zpr-visaservice#80](https://github.com/org-zpr/zl-zpr-visaservice/pull/80).
+Two holes in #289's invariant, both older than it. A disconnect revoked the
+departed actor's visas inline, and a revoke whose write failed was only
+quarantined in memory: a restart lost it, and no sweep could judge the visas
+of an actor that was gone. And a policy install whose write landed in the
+store but never returned (a lost reply, a cancelled admin request) never
+published the policy, so the next pass ran the policy step under the old one
+and deleted the obligation; a restart then loaded the new policy with
+nothing left to run its pass. The decisions (gate g240, all defaults):
+
+- **Every disconnect records an obligation.** `teardown_actor`, which every
+  disconnect path goes through (the admin endpoint, the denylist and
+  re-authentication sweeps, the `reauthorize` undo, the policy pass, the
+  Zode departure check), records an attribute obligation naming the actor
+  under the node commit lock, before it removes the actor record, and holds
+  the guard across that removal only, so a pass that lists the obligation
+  finds the actor gone. It kicks the reconciler once the teardown is done.
+  The inline revoke stays as the fast path; the reconciler's vanished-actor
+  step makes a failed one durable, keeping the obligation until every revoke
+  is persisted. No caller holds a guard of its own when it disconnects. A
+  failed record is logged and the teardown goes ahead; the actor's visas
+  then wait for their expiry.
+- **Bootstrap visas are not the vanished actor's.** A departed node can
+  rejoin before the pass runs, and its bootstrap visas are minted from the
+  relay's peering before it has an actor. The vanished-actor step leaves
+  them alone; the sweep re-checks them against the peering.
+- **A policy obligation completes only once its vinst is published.** The
+  reconciler first compares the highest vinst a listed policy obligation
+  names with the published one. If the published one is below it, it
+  re-reads the store under the install lock (`catch_up_with_store`): a stored
+  vinst above the published one is a write that landed unpublished, and it
+  is published there, through the install's own commit tail; otherwise the
+  write never landed, and the obligations above the published vinst are
+  dropped without a policy pass, so no re-authentication deadline moves. A
+  read or build error keeps every listed obligation pending. Startup needs
+  nothing new: it publishes the stored policy, and the same rule runs the
+  pass or drops the obligation. A failed install kicks the reconciler too,
+  so a lost reply converges at once; a cancelled request converges at the
+  next sweeper tick.
+- **The policy write is one transaction.** "Stored vinst below the
+  obligation's" means "never landed" only if the container, `phash` and
+  `vinst` land together. The redis backend's `atomic_pipeline` now sends its
+  ops as one MULTI/EXEC transaction; before, it sent plain pipelined
+  commands, although every caller assumed atomicity.
+- **Not done** (gate q6). A failed revoke of a visa that only passed through
+  the departed node is logged, as the link-down quarantine is. The node
+  teardown's revocation of adapters docked through the node is not made
+  durable: since #234 no adapter docks on a Zode. If an actor holds the
+  departed actor's address again before the next pass (a new actor from the
+  pool, or the same node at its pinned address), the pass sweeps the old
+  visas against it instead of revoking them all; a `ponytail:` note at the
+  address release names the upgrade (the departed session's visa IDs in the
+  obligation).
 
 ### Attributes are refreshed ahead of expiry (#275)
 

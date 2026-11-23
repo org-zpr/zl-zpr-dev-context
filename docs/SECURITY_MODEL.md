@@ -335,9 +335,15 @@ authentication) and ignores gains: a renewal that only gained a claim is not
 re-checked, so a `never allow` on a newly gained claim waits for the next
 policy or attribute event. When a write leaves no actor behind (a Reset
 whose replacing write fails after deleting the old one, an `authenticate`
-undo), the reconciler revokes every visa of the vanished actor
-([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289);
-VISA_SERVICE.md, "Revocation obligations are durable (#289)"). A grant that
+undo, any disconnect), the reconciler revokes every visa of the vanished
+actor, so a disconnect's revocations survive a failed write and a restart
+([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
+[zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290);
+VISA_SERVICE.md, "Revocation obligations are durable (#289)" and "A
+disconnect's revocation is durable; a policy obligation waits for its policy
+(#290)"). A policy install's pass always runs against the policy it
+installed: its obligation names its vinst, and a write that landed without
+being published is published before the pass. A grant that
 read state before the write and commits after the sweep listed the visas
 can still escape until it expires
 ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). Unit
@@ -855,6 +861,22 @@ no static grant). A graceful stop deregisters through the caller-scoped
 Removal also releases a managed address, which may be handed to another
 actor; DNS answers for the old holder end within the cache TTL (DNS.md).
 
+**A revocation the visa service owes is never only in memory.** Every write
+that can make live visas unacceptable, a disconnect included, records a
+revocation obligation in the state store before it writes, and the reconciler
+deletes it only once a pass has completed and every revoke is persisted; a
+failed revoke write or a restart leaves it pending
+([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
+[zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290)). A policy
+obligation names the vinst it installs and completes only once that vinst is
+published, so a policy whose write landed with its reply lost is published and
+its pass run, never skipped. A disconnect whose obligation cannot be recorded
+still tears the actor down (fail closed on the node; its visas wait for their
+expiry). The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
+revocation is durable; a policy obligation waits for its policy (#290)": a
+grant in flight across the write (#248), and an address held again before the
+next pass.
+
 ## Implementation status
 
 What the code does today, checked against the RFCs while writing this.
@@ -885,10 +907,13 @@ not read the RFCs as a description of current guarantees.
 - **Revocation** — visa revocation over the VSS-API, plus administrative
   revocation of visas, endpoints, and trusted services without a policy
   install. The revocation a state change owes (a policy install, an actor
-  losing attributes, a trusted-service change) is a durable obligation,
-  recorded before the write and retried until a reconciler pass completes it
-  ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289)). See
-  [VISA_SERVICE.md](VISA_SERVICE.md).
+  losing attributes, a trusted-service change, a disconnect) is a durable
+  obligation, recorded before the write and retried until a reconciler pass
+  completes it
+  ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
+  [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290)). A
+  policy obligation completes only once the policy it installed is
+  published. See [VISA_SERVICE.md](VISA_SERVICE.md).
 - **Visa expiry on every use of a visa** — every Zode on a stream's path
   drops its packets from the visa's expiry on, by its own clock: each
   forwarding entry carries a copy of the bound visa's expiry, checked on
