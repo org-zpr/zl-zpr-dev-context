@@ -1612,7 +1612,8 @@ core change. The decisions (gate g235, all defaults):
   grant), like a quarantined one, but stays visible to revocation passes. A
   refused visa is revoked and stays pending, so it is withheld even while its
   revoke write fails and it is only quarantined in memory; a visa that cannot
-  be marked committed is refused the same way. Because the mark is persisted,
+  be marked committed is refused the same way (one double fault is not
+  covered; see "Not done" below). Because the mark is persisted,
   a crash between the store and the check leaves the visa pending: at startup,
   before the workers and the VS-API listener start, the visa service revokes
   every visa still pending (`VisaMgr::revoke_uncommitted_visas`; operator
@@ -1631,8 +1632,13 @@ core change. The decisions (gate g235, all defaults):
 - **The grant horizon** (q2, q3). Every delivery path builds a node's copy in
   `actualize_visa_for_target_node`, which records, in memory, until when that
   copy may still land: now plus `GRANT_HORIZON` (30 s, `vs/src/config.rs`).
+  The fetch by ID decides whether a copy goes out before it builds it, so it
+  records the horizon of a copy staged on the node before that check too: a
+  revoke acked in between still finds it. The grant builds its copies before
+  its swap.
   `revoke_acked` checks it against when the revoke was sent (taken before the
-  RPC, however late its ack is processed): the ack of a revoke sent after the
+  RPC, so a slow ack cannot release it; but see "Not done" for a slow batch):
+  the ack of a revoke sent after the
   horizon tears the copy down as before; one sent inside it keeps the copy
   `PendingRevoke`, held back from the
   node's revokes until the horizon has passed, and the heartbeat after that
@@ -1683,10 +1689,25 @@ core change. The decisions (gate g235, all defaults):
   `test_late_ack_of_a_revoke_sent_inside_the_horizon_survives_a_prune`,
   `test_horizon_pruning_is_throttled`,
   `test_a_copy_refused_after_the_pending_snapshot_is_not_handed_out` and
-  `test_revoke_sent_inside_the_horizon_is_held_however_late_its_ack`.
+  `test_revoke_sent_inside_the_horizon_is_held_however_late_its_ack`;
+  `test_a_revoke_acked_while_a_fetched_copy_is_built_is_held` (hosted
+  review).
 - **Not done.** No Zode-side record of revoked IDs and no protocol change
   (q2). The horizon is in memory, with the startup floor in place of
-  persistence (q3).
+  persistence (q3). Two limits found by the local review are left open
+  (operator decision):
+  - *A slow batch of revoke acks.* The VSS worker judges each acked ID of a
+    batch against the horizons only when its turn comes, after the earlier
+    IDs' teardown writes. If those writes take longer than the extra
+    `GRANT_HORIZON` a horizon is kept after it passes (30 s), a later ID's
+    horizon may already be pruned and its second revoke lost. The fix is to
+    judge the whole batch under one horizons lock before any teardown write.
+  - *A lost reply on the commit write with a failed refusal revoke* (two store
+    faults). If the store applies `Committed` but its reply is lost, the
+    request is refused; if the refusal's revoke write also fails, the visa is
+    pending and quarantined in memory but committed and `PendingInstall` in
+    the store, so after a restart it is deliverable. The fix is to delete the
+    record when the commit write fails (the visa was never delivered).
 
 ### Attributes are refreshed ahead of expiry (#275)
 

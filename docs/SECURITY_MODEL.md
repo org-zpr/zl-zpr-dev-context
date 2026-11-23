@@ -902,7 +902,11 @@ visa is stored marked uncommitted and withheld until the check passes, and the
 mark is persisted, so startup revokes a visa whose check a crash cut short);
 and the ack
 of a revoke sent within `GRANT_HORIZON` (30 s) of the copy's delivery, or of a
-restart, is held and the revoke sent once more after it.
+restart, is held and the revoke sent once more after it. Two limits stay
+open: a refused visa whose commit write applied with its reply lost, and
+whose refusal revoke also failed, is deliverable after a restart; and a batch
+of revoke acks whose teardown writes take more than 30 s can lose a later
+ID's second revoke (VISA_SERVICE.md, the #248 decision's "Not done").
 The last step rests on a **node contract**: a node discards a VS-API reply that
 arrives after its RPC timeout, and that timeout stays under `GRANT_HORIZON`
 (core's `DEFAULT_RPC_TIMEOUT` is 10 s; the bootstrap request's 5 s). A node
