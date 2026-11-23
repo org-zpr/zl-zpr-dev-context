@@ -336,8 +336,8 @@ re-checked, so a `never allow` on a newly gained claim waits for the next
 policy or attribute event. When a write leaves no actor behind (a Reset
 whose replacing write fails after deleting the old one, an `authenticate`
 undo, any disconnect), the reconciler revokes every visa of the vanished
-actor (except a rejoining node's bootstrap visas, which the sweep re-checks
-against the relay's peering), so a disconnect's revocations survive a failed write and a restart
+actor (except its bootstrap visas, old or new, which the sweep re-checks
+against the relay's peering and which expire quickly), so a disconnect's revocations survive a failed write and a restart
 ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
 [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290);
 VISA_SERVICE.md, "Revocation obligations are durable (#289)" and "A
@@ -867,16 +867,18 @@ actor; DNS answers for the old holder end within the cache TTL (DNS.md).
 that can make live visas unacceptable, a disconnect included, records a
 revocation obligation in the state store before it writes, and the reconciler
 deletes it only once a pass has completed and every revoke of a visa whose
-endpoint is gone is persisted; a failed revoke write or a restart leaves it
+endpoint is gone is persisted (or replaces it with a smaller obligation for
+the work left, recorded before the original is deleted); a failed revoke write or a restart leaves it
 pending
 ([zl-zipline#289](https://github.com/org-zpr/zl-zipline/issues/289),
 [zl-zipline#290](https://github.com/org-zpr/zl-zipline/issues/290)). A policy
 obligation names the vinst it installs and completes only once that vinst is
 published, so a policy whose write landed with its reply lost is published and
 a pass run against it (or a later policy), never skipped. A disconnect whose obligation cannot be recorded
-still tears the actor down (fail closed on the node); its inline revoke still
-runs, and only a revoke that then fails is left to the in-memory retry and, past
-a restart, to the visa's expiry. The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
+still tears the actor down (fail closed on the node); its inline revoke is best
+effort (it does not run at all if the node-record removal fails first), so a
+revoke that does not land is left to the in-memory retry, if any, and past a
+restart to the visa's expiry. The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
 revocation is durable; a policy obligation waits for its policy (#290)": a
 grant in flight across the write (#248); an address held again before the
 next pass; a failed revoke of a visa that only transited the departed node

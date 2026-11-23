@@ -1508,11 +1508,12 @@ nothing left to run its pass. The decisions (gate g240, all defaults):
   is persisted. That needs the actor record to be gone: if its removal
   failed too (logged), the pass finds the actor and sweeps its visas
   instead. No caller holds a guard of its own when it disconnects. A failed
-  record is logged and the teardown goes ahead with its inline revoke; a
-  revoke that then fails too is retried only from the in-memory quarantine,
-  and past a restart waits for the visa's expiry.
+  record is logged and the teardown goes ahead with its inline revoke, best
+  effort (a failed node-record removal returns before it runs); a revoke
+  that does not land is retried only from the in-memory quarantine, if at
+  all, and past a restart waits for the visa's expiry.
 - **Bootstrap visas are not the vanished actor's** (so "every visa of a
-  vanished actor" above excludes them). A departed node can
+  vanished actor" above excludes them, old or new). A departed node can
   rejoin before the pass runs, and its bootstrap visas are minted from the
   relay's peering before it has an actor. The vanished-actor step leaves
   them alone; the sweep re-checks them against the peering.
