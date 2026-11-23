@@ -346,8 +346,9 @@ disconnect's revocation is durable; a policy obligation waits for its policy
 one it installed: its obligation names its vinst, and a write that landed
 without being published is published before the pass, which then runs
 against the current policy (one pass can cover several installs). A grant that
-read state before the write and commits after the sweep listed the visas
-can still escape until it expires
+read state before the write and stores its visa after the sweep listed the
+visas is caught by its commit check, which revokes the visa and refuses the
+request whenever a revocation pass overlapped it (the node re-requests)
 ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). Unit
 tests: `test_session_replacement_revokes_user_visas_on_reconnect`,
 `..._on_reset`, `test_renewal_with_fewer_claims_revokes_visas`,
@@ -879,11 +880,39 @@ still tears the actor down (fail closed on the node); its inline revoke is best
 effort (it does not run at all if the node-record removal fails first), so a
 revoke that does not land is left to the in-memory retry, if any, and past a
 restart to the visa's expiry. The remaining gaps are named in VISA_SERVICE.md, "A disconnect's
-revocation is durable; a policy obligation waits for its policy (#290)": a
-grant in flight across the write (#248); an address held again before the
+revocation is durable; a policy obligation waits for its policy (#290)": an address held again before the
 next pass; a failed revoke of a visa that only transited the departed node
 (logged, not retried); and a disconnect whose actor-record removal itself
 failed (the actor is still found, so its visas are swept, not revoked).
+
+**A visa the visa service revoked is never left in force by a race; the
+visa service keeps the revoke record, the Zode keeps nothing.** A grant could
+escape a revocation three ways: a revoke landing between the last check and
+the reply; a request that judged state from before a revoking write and stored
+its visa after that write's sweep listed the visas; and a VSS revoke reaching
+the node before its grant, which the node acks as done because it does not hold
+the visa. Each is closed in the visa service, with no protocol change
+([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248), gate
+g235): the copy is granted by one compare-and-swap before the reply is built
+(a lost swap replies with an internal error and the node re-requests); a
+request reads the revocation generation before it reads any state and, if a
+revocation pass overlapped it, revokes its stored visa and refuses the request
+rather than re-check it against state that may not show the change yet (the
+visa is stored marked uncommitted and withheld until the check passes, and the
+mark is persisted, so startup revokes a visa whose check a crash cut short);
+and the ack
+of a revoke sent within `GRANT_HORIZON` (30 s) of the copy's delivery, or of a
+restart, is held and the revoke sent once more after it. Two limits stay
+open: a refused visa whose commit write applied with its reply lost, and
+whose refusal revoke also failed, is deliverable after a restart; and a batch
+of revoke acks whose teardown writes take more than 30 s can lose a later
+ID's second revoke (VISA_SERVICE.md, the #248 decision's "Not done").
+The last step rests on a **node contract**: a node discards a VS-API reply that
+arrives after its RPC timeout, and that timeout stays under `GRANT_HORIZON`
+(core's `DEFAULT_RPC_TIMEOUT` is 10 s; the bootstrap request's 5 s). A node
+that kept waiting longer could install a grant after the visa service gave up
+on revoking it. See VISA_SERVICE.md, "A grant is atomic against revocation;
+the visa service keeps the revoke record (#248)".
 
 ## Implementation status
 
@@ -978,6 +1007,13 @@ not read the RFCs as a description of current guarantees.
 - **Non-transit, node half** — a node with `forwarding` off refuses
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
+- **Grants are atomic against revocation** — the VS-API grant is a
+  compare-and-swap before the reply, a visa request is refused when a
+  revocation pass overlapped it, and a revoke sent within `GRANT_HORIZON` of
+  the copy's delivery (or of a restart) is sent once more after it
+  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). The
+  horizon is in memory only, and relies on the node contract above. See
+  *Design decisions* above.
 - **Non-transit, visa-service half** — path computation passes only through
   nodes listed in `Policy.transitNodes`, and an unset or empty list means none
   ([zipline#255](https://github.com/org-zpr/zl-zipline/issues/255)). A policy

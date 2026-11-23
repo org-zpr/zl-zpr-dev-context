@@ -80,7 +80,7 @@ background work.
 | `connection_control` | New connections to the ZPRnet, node and adapter: authenticate, then authorize against policy. |
 | `login_nonce` | Visa-service-minted OIDC login nonces for a Zode's own login (`getLoginNonce`): bound to actor and VS-API session, single-use, short-lived. In memory. |
 | `event_mgr` | High-level events with system-wide consequences, such as actor joins and leaves. Fire-and-forget: it cannot report success back to a caller. Runs the revocation reconciler (`reconcile_obligations`) on its worker. |
-| `revocation` | Durable revocation obligations (`RevocationLedger`, store in `db/revocation.rs`), the barrier that orders their writers against the reconciler, and the revocation generation (zl-zipline#289); a disconnect records one, and a policy obligation names its vinst (zl-zipline#290). |
+| `revocation` | Durable revocation obligations (`RevocationLedger`, store in `db/revocation.rs`), the barrier that orders their writers against the reconciler, and the revocation generation (zl-zipline#289), which a visa request's commit check reads (zl-zipline#248); a disconnect records one, and a policy obligation names its vinst (zl-zipline#290). |
 | `visa_reconciler` | Re-evaluates live visas against a policy snapshot and queues revocations for those that no longer hold. |
 | `visareq_worker` | "The beating heart" — one worker per visa request. |
 | `vsapi_worker` / `vss_worker` | The node-facing APIs; one VSS worker per node. |
@@ -1389,11 +1389,11 @@ policy no longer grants the service either. The decisions:
   cancel it; that is accepted as fail-closed (the endpoint re-requests its
   visa). The generation-gated policy sweep and its per-visa verdicts
   (`checked_vinst`, `revoke_vinst`) were removed by #289.
-- **Residual window, tracked.** A request that read its actors before the
-  recalculation and commits its visa after the sweep listed the visas still
-  escapes until it expires or a later sweep re-checks it
-  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). A
-  failed pass is retried (#289, below).
+- **No residual window.** A request that read its actors before the
+  recalculation and stores its visa after the sweep listed the visas is caught
+  by the request's commit check
+  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248), below).
+  A failed pass is retried (#289, below).
 - **Fail-closed.** If recomputing a node's services fails, the node is judged
   on its stored services: at worst it is disconnected, never kept with more
   than the policy grants. A node whose attribute refresh failed in the same
@@ -1469,18 +1469,20 @@ decisions (gate g234):
   the node commit lock, with no other lock, bounded-queue await or second
   guard while it is held (tokio's `RwLock` is fair, so that would deadlock
   with a waiting pass).
-- **The generation, for #248.** `RevocationLedger::generation()` is a SeqCst
-  `u64` bumped under the write side at the start of every pass that lists at
-  least one obligation: after every write recorded before it has committed,
-  and before the pass reads any visa. A visa request that reads it before it
-  reads its actors and policy and again after it stores its visa knows, if it
-  moved, that a revocation may have missed the visa
-  ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248) builds
-  on this; nothing reads it yet).
+- **The generation.** `RevocationLedger::generation()` is a SeqCst
+  `u64` sequence lock over passes. A pass that lists at least one obligation
+  bumps it to odd under the write side at its start -- after every write
+  recorded before it has committed, and before the pass reads any state --
+  and back to even when it ends (its `Pass` guard drops, on every exit path).
+  A visa request that reads it before it reads its actors and policy, and
+  finds it even then and unchanged after it stores its visa
+  (`RevocationLedger::no_pass_overlapped`), knows no pass overlapped it. The
+  commit check of
+  [zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248) reads it
+  (below).
 - **Not done.** The sweep is still a full sweep of every live visa per pass
-  (a `ponytail:` note marks it). A grant that read state before a write and
-  commits after the pass listed the visas still escapes (#248). The link-down
-  quarantine stays in memory; a restart re-derives link state.
+  (a `ponytail:` note marks it). The link-down quarantine stays in memory; a
+  restart re-derives link state.
 
 ### A disconnect's revocation is durable; a policy obligation waits for its policy (#290)
 
@@ -1548,6 +1550,165 @@ nothing left to run its pass. The decisions (gate g240, all defaults):
   address release names the upgrade (the departed session's visa IDs in the
   obligation).
 
+### A grant is atomic against revocation; the visa service keeps the revoke record (#248)
+
+From the Zodes epic, pd plan p67,
+[zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248). A visa
+could be granted after it, or the state behind it, was revoked, and then stayed
+in force until it expired. There were three windows: the VS-API handlers
+checked a visa, wrote it into the reply and only then marked it installed, so a
+revoke landing in between was ignored; a request that read its actors and
+policy before a logout, an attribute drop or a policy install, and stored its
+visa after that write's sweep listed the visas, was never swept; and a revoke
+sent over VSS could reach the node before the grant (in a VS-API reply or a
+VSS push from its own task), the node treats a revoke of a visa it does not
+hold as done, the visa service tore its record down on the ack, and the late
+grant installed with nothing left to revoke it. Following the operator's
+comment on the issue, the visa service keeps the record and the Zode keeps
+nothing: "the visa service should not send visas it does not intend -- and if
+it happens (with an ordering hiccup) the VS should realize it and immediately
+send a revoke." The fix is in zl-zpr-visaservice only, with no protocol and no
+core change. The decisions (gate g235, all defaults):
+
+- **The atomic grant.** One store step decides whether a copy is handed out:
+  `VisaMgr::grant_copy`, the `PendingInstall -> Installed` compare-and-swap,
+  run before the reply is built. A copy already `Installed` (a VSS push
+  delivered it first) is granted too. The `visaRequest` handler hands the visa
+  out only if it is granted; if not (the copy was revoked, or the visa is
+  withheld) the reply is the internal error a visa revoked at commit gets,
+  and the node re-requests (q5). `registerVss` grants every prepared visa
+  under the topology lock the same way, and fails the call with an internal
+  error if one is refused, so the node calls it again and gets a new VSS visa
+  (J5b) rather than a reply with no VSS visa. `visaRequestById` stays
+  read-only (gate g121 q3). The hold is checked again after the swap: a
+  revocation whose write failed while the grant waited for the store
+  quarantines the visa but leaves the copy `PendingInstall`, so the swap still
+  applies; the copy is then not handed out, and the quarantine retry revokes
+  it. A revoke after the swap moves the copy to `PendingRevoke` and goes out
+  over VSS; the grant horizon covers its overtaking the reply.
+- **The commit check.** A request reads the revocation generation (#289,
+  above) before it reads its actors, and once its visa is stored and the
+  route check passed, `create_visa` compares it
+  (`VisaMgr::check_commit_generation`). If a pass overlapped the request (the
+  generation was odd when it was read, or has moved since), the pass may have
+  read the state or listed the visas before this one was stored, so the visa
+  is revoked and the request refused, through the same revoke-or-quarantine
+  step the route check uses (`refuse_at_commit`); the node re-requests. It is
+  refused whatever the state now says: the plan re-checked it with
+  `recheck_visa_allowed`, but the state the visa service holds may not show
+  the change yet -- a pass refreshes trusted-service attributes only for
+  actors behind live visas, so a re-check would read the requester's stale
+  ones -- and refusing fails closed (operator decision on the local review,
+  "refuse on overlap"). The cost is one re-request per request that overlaps
+  a pass. It holds because a pass bumps the generation after the write behind
+  each obligation it lists has committed and before it reads any state, and
+  again when it ends: a request that judged pre-write state either stored its
+  visa before any pass for that write started (the pass lists it) or sees a
+  pass overlapped it. The store says whether a visa is committed: a visa a
+  request commit-checks is stored with its commit state `Pending`
+  (`db::CommitState`, persisted in the visa record), and only once both
+  commit checks have passed is it marked `Committed`. A pending visa is
+  withheld from every delivery path (the VSS push, the fetch by ID, the
+  grant), like a quarantined one, but stays visible to revocation passes. A
+  refused visa is revoked and stays pending, so it is withheld even while its
+  revoke write fails and it is only quarantined in memory; a visa that cannot
+  be marked committed is refused the same way (one double fault is not
+  covered; see "Not done" below). Because the mark is persisted,
+  a crash between the store and the check leaves the visa pending: at startup,
+  before the workers and the VS-API listener start, the visa service revokes
+  every visa still pending (`VisaMgr::revoke_uncommitted_visas`; operator
+  decision on the local review, "persist the hold"). That needs no
+  re-evaluation, so it covers a visa whose actor is already gone, which no
+  sweep would find. A pending visa whose revoke fails at startup stays pending
+  and withheld, and the next start revokes it again. Bootstrap visas are
+  stored committed. The record carries the commit state with no fallback: a
+  record without it is undecodable and deleted at load. AAA visas take the
+  same check. Core visas and
+  the VSS visa are issued through the same request path, so they are covered.
+  Bootstrap visas are not policy-evaluated: `requestBootstrapVisas` holds the
+  topology lock from the peering check through the mint, and policy installs
+  commit under that lock. A link-down is caught by the existing commit-time
+  route check (#224).
+- **The grant horizon** (q2, q3). Every delivery path builds a node's copy in
+  `actualize_visa_for_target_node`, which records, in memory, until when that
+  copy may still land: now plus `GRANT_HORIZON` (30 s, `vs/src/config.rs`).
+  The fetch by ID decides whether a copy goes out before it builds it, so it
+  records the horizon of a copy staged on the node before that check too: a
+  revoke acked in between still finds it. The grant builds its copies before
+  its swap.
+  `revoke_acked` checks it against when the revoke was sent (taken before the
+  RPC, so a slow ack cannot release it; but see "Not done" for a slow batch):
+  the ack of a revoke sent after the
+  horizon tears the copy down as before; one sent inside it keeps the copy
+  `PendingRevoke`, held back from the
+  node's revokes until the horizon has passed, and the heartbeat after that
+  sends the revoke once more, whose ack tears it down. For `GRANT_HORIZON`
+  after start every copy counts as inside its horizon (a reply sent just
+  before a restart can still arrive); the record is not persisted.
+  Housekeeping (`purge_expired_visas`) prunes a copy's horizon one more
+  `GRANT_HORIZON` after it has passed, since the ack of a revoke sent inside
+  it may be processed after it, and scans at most once per
+  `PURGE_MIN_INTERVAL` (800 ms) however many nodes' heartbeats call it, like
+  the visa store's own purge. The cost is one
+  extra revoke per copy revoked within 30 s of its delivery. A VSS push
+  queued as a command (`distribute_visa_on_path`) may wait behind other RPCs,
+  so the VSS worker drops any copy no longer grantable when it dispatches the
+  command; the same worker task sends the node's revokes, so a revoke marked
+  after that check goes out after the push.
+- **The node contract** (q4). The horizon is sound only while a node discards
+  a VS-API reply that arrives after its RPC timeout and that timeout stays
+  under `GRANT_HORIZON`. Core wraps every grant-carrying call in
+  `rpc_with_timeout` (`libnode2/src/vsconn.rs`): `visa_request`,
+  `register_vss` and `visa_request_by_id` at `DEFAULT_RPC_TIMEOUT`, 10 s, and
+  the bootstrap request at 5 s; a late reply is dropped with its future. The
+  visa service records the horizon after it received the request, so after
+  the node sent it. A VSS push is ordered with the revokes on its connection
+  once sent, and is sent right after its copy is built. A joiner's bootstrap
+  copies travel in ZDP message 146, and it can only receive VSS revokes after
+  it used them to register. **Raising a node's RPC timeout to `GRANT_HORIZON`
+  or more breaks the guarantee; raise `GRANT_HORIZON` with it.**
+- **Tests** (q6). The issue asked for a node test showing a late grant is
+  refused; with the record in the visa service, the visa service's fake-node
+  tests replace it: `visa_request_revoked_before_the_grant_carries_no_visa`,
+  `register_vss_revoked_before_the_grant_carries_no_visa`,
+  `test_revocation_racing_a_visa_request_is_never_missed` (a logout, a
+  disconnect and a policy install, each parked after the actor refresh, after
+  the evaluation and after the store, through the named points of
+  `visareq_worker::race_gate`),
+  `test_revoke_overtaking_a_{reply,pushed}_grant_is_resent_after_the_horizon`,
+  `test_revoke_acked_after_the_horizon_is_torn_down_at_once`,
+  `test_startup_floor_holds_back_an_early_ack` and
+  `bootstrap_mint_waits_for_the_topology_lock`,
+  `test_a_visa_is_withheld_from_delivery_until_its_commit_check`,
+  `test_queued_push_of_a_revoked_copy_is_not_sent`, `test_grant_copy`,
+  `test_a_copy_quarantined_while_the_grant_waits_is_not_handed_out`,
+  `test_a_pass_overlapping_a_request_refuses_it`,
+  `test_a_request_starting_during_a_pass_is_refused`,
+  `test_uncommitted_visa_of_a_vanished_actor_is_not_delivered_after_a_restart`,
+  `test_refused_visa_whose_revoke_failed_is_not_delivered_after_a_restart`,
+  `test_late_ack_of_a_revoke_sent_inside_the_horizon_survives_a_prune`,
+  `test_horizon_pruning_is_throttled`,
+  `test_a_copy_refused_after_the_pending_snapshot_is_not_handed_out` and
+  `test_revoke_sent_inside_the_horizon_is_held_however_late_its_ack`;
+  `test_a_revoke_acked_while_a_fetched_copy_is_built_is_held` (hosted
+  review).
+- **Not done.** No Zode-side record of revoked IDs and no protocol change
+  (q2). The horizon is in memory, with the startup floor in place of
+  persistence (q3). Two limits found by the local review are left open
+  (operator decision):
+  - *A slow batch of revoke acks.* The VSS worker judges each acked ID of a
+    batch against the horizons only when its turn comes, after the earlier
+    IDs' teardown writes. If those writes take longer than the extra
+    `GRANT_HORIZON` a horizon is kept after it passes (30 s), a later ID's
+    horizon may already be pruned and its second revoke lost. The fix is to
+    judge the whole batch under one horizons lock before any teardown write.
+  - *A lost reply on the commit write with a failed refusal revoke* (two store
+    faults). If the store applies `Committed` but its reply is lost, the
+    request is refused; if the refusal's revoke write also fails, the visa is
+    pending and quarantined in memory but committed and `PendingInstall` in
+    the store, so after a restart it is deliverable. The fix is to delete the
+    record when the commit write fails (the visa was never delivered).
+
 ### Attributes are refreshed ahead of expiry (#275)
 
 From the Zodes epic, pd plan p63,
@@ -1608,12 +1769,6 @@ no adapter docks on a Zode.
   deployment needs two concurrent user authorities.
 - **Compile-time pool check.** Once the pool ranges are stable enough to share
   through `zl-zpr-common`.
-- **A visa granted from a pre-logout actor copy.** A visa request holds the
-  endpoint actors across awaits; if it inserts its visa after a logout's sweep
-  has taken its snapshot, that visa escapes the logout's revocation and lives
-  until it expires or the next sweep re-checks it. Closing this needs the
-  grant checked atomically against concurrent revocation.
-  ([org-zpr/zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248))
 - **Refresh vs reauthorize for adapters.** For a node, an attribute refresh
   fetches outside `PolicyMgr::node_commit_lock` and takes it only to commit,
   discarding its write if the node was re-authorized since its copy was
@@ -1716,6 +1871,7 @@ no adapter docks on a Zode.
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
+| The atomic grant, the commit check and the grant horizon (zl-zipline#248) | `vs/src/visa_mgr.rs` (`grant_copy`, `create_visa`, `check_commit_generation`, `revoke_uncommitted_visas`, `GrantHorizons`, `revoke_acked`), `revocation.rs` (`Pass`, `no_pass_overlapped`), `db/visa.rs` (`CommitState`), `main.rs` (`revoke_uncommitted_visas` at startup), `vsapi_worker.rs` (`visa_request`, `register_vss`), `vss_worker.rs` (`push_queued_visas`, `send_pending_revokes`), `config.rs` (`GRANT_HORIZON`) |
 | Removing a departed Zode (`schedule_departure_check`, `remove_if_departed`; the pending checks in `LinkStateTable`) | `vs/src/vsapi_worker.rs`, `link_state.rs`, `topology_mgr.rs` |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
