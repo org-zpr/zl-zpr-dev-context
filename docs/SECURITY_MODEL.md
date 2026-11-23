@@ -347,8 +347,8 @@ one it installed: its obligation names its vinst, and a write that landed
 without being published is published before the pass, which then runs
 against the current policy (one pass can cover several installs). A grant that
 read state before the write and stores its visa after the sweep listed the
-visas is caught by its commit check, which re-checks the visa whenever a pass
-ran since the request began
+visas is caught by its commit check, which revokes the visa and refuses the
+request whenever a revocation pass overlapped it (the node re-requests)
 ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). Unit
 tests: `test_session_replacement_revokes_user_visas_on_reconnect`,
 `..._on_reset`, `test_renewal_with_fewer_claims_revokes_visas`,
@@ -895,10 +895,12 @@ the visa. Each is closed in the visa service, with no protocol change
 ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248), gate
 g235): the copy is granted by one compare-and-swap before the reply is built
 (a lost swap replies with an internal error and the node re-requests); a
-request reads the revocation generation before it reads any state and
-re-checks its stored visa against the current state if a revocation pass ran
-meanwhile; and an ack that arrives within `GRANT_HORIZON` (30 s) of the copy's
-delivery, or of a restart, is held and the revoke sent once more after it.
+request reads the revocation generation before it reads any state and, if a
+revocation pass overlapped it, revokes its stored visa and refuses the request
+rather than re-check it against state that may not show the change yet (a
+startup sweep of every live visa covers a check lost to a crash); and the ack
+of a revoke sent within `GRANT_HORIZON` (30 s) of the copy's delivery, or of a
+restart, is held and the revoke sent once more after it.
 The last step rests on a **node contract**: a node discards a VS-API reply that
 arrives after its RPC timeout, and that timeout stays under `GRANT_HORIZON`
 (core's `DEFAULT_RPC_TIMEOUT` is 10 s; the bootstrap request's 5 s). A node
@@ -1000,8 +1002,8 @@ not read the RFCs as a description of current guarantees.
   `forwardOnly` visas: a pushed one is dropped, logged and acknowledged, and a
   bind that needs one is refused ([zipline#219](https://github.com/org-zpr/zl-zipline/issues/219)). See *Design decisions* above.
 - **Grants are atomic against revocation** — the VS-API grant is a
-  compare-and-swap before the reply, a visa request re-checks its visa when a
-  revocation pass ran during it, and a revoke acked within `GRANT_HORIZON` of
+  compare-and-swap before the reply, a visa request is refused when a
+  revocation pass overlapped it, and a revoke sent within `GRANT_HORIZON` of
   the copy's delivery (or of a restart) is sent once more after it
   ([zl-zipline#248](https://github.com/org-zpr/zl-zipline/issues/248)). The
   horizon is in memory only, and relies on the node contract above. See
