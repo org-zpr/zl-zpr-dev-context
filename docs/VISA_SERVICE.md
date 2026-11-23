@@ -1580,9 +1580,12 @@ core change. The decisions (gate g235, all defaults):
   under the topology lock the same way, and fails the call with an internal
   error if one is refused, so the node calls it again and gets a new VSS visa
   (J5b) rather than a reply with no VSS visa. `visaRequestById` stays
-  read-only (gate g121 q3). A revoke after the swap moves the copy to
-  `PendingRevoke` and goes out over VSS; the grant horizon covers its
-  overtaking the reply.
+  read-only (gate g121 q3). The hold is checked again after the swap: a
+  revocation whose write failed while the grant waited for the store
+  quarantines the visa but leaves the copy `PendingInstall`, so the swap still
+  applies; the copy is then not handed out, and the quarantine retry revokes
+  it. A revoke after the swap moves the copy to `PendingRevoke` and goes out
+  over VSS; the grant horizon covers its overtaking the reply.
 - **The commit check.** A request reads the revocation generation (#289,
   above) before it reads its actors, and once its visa is stored and the
   route check passed, `create_visa` compares it
@@ -1672,6 +1675,7 @@ core change. The decisions (gate g235, all defaults):
   `bootstrap_mint_waits_for_the_topology_lock`,
   `test_a_visa_is_withheld_from_delivery_until_its_commit_check`,
   `test_queued_push_of_a_revoked_copy_is_not_sent`, `test_grant_copy`,
+  `test_a_copy_quarantined_while_the_grant_waits_is_not_handed_out`,
   `test_a_pass_overlapping_a_request_refuses_it`,
   `test_a_request_starting_during_a_pass_is_refused`,
   `test_uncommitted_visa_of_a_vanished_actor_is_not_delivered_after_a_restart`,
