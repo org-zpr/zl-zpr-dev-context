@@ -1569,9 +1569,10 @@ core change. The decisions (gate g235, all defaults):
 
 - **The atomic grant.** One store step decides whether a copy is handed out:
   `VisaMgr::grant_copy`, the `PendingInstall -> Installed` compare-and-swap,
-  run before the reply is built. The `visaRequest` handler hands the visa out
-  only if it wins; if it loses (the copy was revoked, or the visa is
-  quarantined) the reply is the internal error a visa revoked at commit gets,
+  run before the reply is built. A copy already `Installed` (a VSS push
+  delivered it first) is granted too. The `visaRequest` handler hands the visa
+  out only if it is granted; if not (the copy was revoked, or the visa is
+  withheld) the reply is the internal error a visa revoked at commit gets,
   and the node re-requests (q5). `registerVss` grants every prepared visa
   under the topology lock the same way, and fails the call with an internal
   error if one is refused, so the node calls it again and gets a new VSS visa
@@ -1581,7 +1582,8 @@ core change. The decisions (gate g235, all defaults):
   overtaking the reply.
 - **The commit check.** A request reads the revocation generation (#289,
   above) before it reads its actors, and once its visa is stored and the
-  route check passed, `VisaMgr::check_commit_generation` compares it. If it
+  route check passed, `create_visa` compares it
+  (`VisaMgr::check_commit_generation`). If it
   moved, a pass may have listed the visas before this one was stored, so the
   visa is re-checked against the current state with `recheck_visa_allowed`,
   as the pass would have: anything but still allowed on the same route (a
@@ -1591,7 +1593,11 @@ core change. The decisions (gate g235, all defaults):
   generation after the write behind each obligation it lists has committed
   and before it lists the visas: a request that judged pre-write state
   either stored its visa before that listing (the sweep sees it) or reads the
-  moved generation after its store (the check sees the write). Core visas and
+  moved generation after its store (the check sees the write). Until both
+  commit checks have passed, the stored visa is withheld from every delivery
+  path (the VSS push, the fetch by ID, the grant), like a quarantined one, but
+  stays visible to revocation passes. AAA visas skip the check, as passes skip
+  them (the fabricated actor does not resolve). Core visas and
   the VSS visa are issued through the same request path, so they are covered.
   Bootstrap visas are not policy-evaluated: `requestBootstrapVisas` holds the
   topology lock from the peering check through the mint, and policy installs
@@ -1607,7 +1613,11 @@ core change. The decisions (gate g235, all defaults):
   after start every copy counts as inside its horizon (a reply sent just
   before a restart can still arrive); the record is not persisted. Past
   entries are pruned by housekeeping (`purge_expired_visas`). The cost is one
-  extra revoke per copy revoked within 30 s of its delivery.
+  extra revoke per copy revoked within 30 s of its delivery. A VSS push
+  queued as a command (`distribute_visa_on_path`) may wait behind other RPCs,
+  so the VSS worker drops any copy no longer grantable when it dispatches the
+  command; the same worker task sends the node's revokes, so a revoke marked
+  after that check goes out after the push.
 - **The node contract** (q4). The horizon is sound only while a node discards
   a VS-API reply that arrives after its RPC timeout and that timeout stays
   under `GRANT_HORIZON`. Core wraps every grant-carrying call in
@@ -1631,7 +1641,9 @@ core change. The decisions (gate g235, all defaults):
   `test_revoke_overtaking_a_{reply,pushed}_grant_is_resent_after_the_horizon`,
   `test_revoke_acked_after_the_horizon_is_torn_down_at_once`,
   `test_startup_floor_holds_back_an_early_ack` and
-  `bootstrap_mint_waits_for_the_topology_lock`.
+  `bootstrap_mint_waits_for_the_topology_lock`,
+  `test_a_visa_is_withheld_from_delivery_until_its_commit_check`,
+  `test_queued_push_of_a_revoked_copy_is_not_sent` and `test_grant_copy`.
 - **Not done.** No Zode-side record of revoked IDs and no protocol change
   (q2). The horizon is in memory, with the startup floor in place of
   persistence (q3).
@@ -1798,7 +1810,7 @@ no adapter docks on a Zode.
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
-| The atomic grant, the commit check and the grant horizon (zl-zipline#248) | `vs/src/visa_mgr.rs` (`grant_copy`, `check_commit_generation`, `GrantHorizons`, `revoke_acked`), `vsapi_worker.rs` (`visa_request`, `register_vss`), `config.rs` (`GRANT_HORIZON`) |
+| The atomic grant, the commit check and the grant horizon (zl-zipline#248) | `vs/src/visa_mgr.rs` (`grant_copy`, `create_visa`, `check_commit_generation`, `GrantHorizons`, `revoke_acked`), `vsapi_worker.rs` (`visa_request`, `register_vss`), `vss_worker.rs` (`push_queued_visas`), `config.rs` (`GRANT_HORIZON`) |
 | Removing a departed Zode (`schedule_departure_check`, `remove_if_departed`; the pending checks in `LinkStateTable`) | `vs/src/vsapi_worker.rs`, `link_state.rs`, `topology_mgr.rs` |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
