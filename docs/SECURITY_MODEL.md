@@ -897,8 +897,10 @@ g235): the copy is granted by one compare-and-swap before the reply is built
 (a lost swap replies with an internal error and the node re-requests); a
 request reads the revocation generation before it reads any state and, if a
 revocation pass overlapped it, revokes its stored visa and refuses the request
-rather than re-check it against state that may not show the change yet (a
-startup sweep of every live visa covers a check lost to a crash); and the ack
+rather than re-check it against state that may not show the change yet (the
+visa is stored marked uncommitted and withheld until the check passes, and the
+mark is persisted, so startup revokes a visa whose check a crash cut short);
+and the ack
 of a revoke sent within `GRANT_HORIZON` (30 s) of the copy's delivery, or of a
 restart, is held and the revoke sent once more after it.
 The last step rests on a **node contract**: a node discards a VS-API reply that

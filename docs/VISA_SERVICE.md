@@ -1601,18 +1601,24 @@ core change. The decisions (gate g235, all defaults):
   each obligation it lists has committed and before it reads any state, and
   again when it ends: a request that judged pre-write state either stored its
   visa before any pass for that write started (the pass lists it) or sees a
-  pass overlapped it. Until both commit checks have passed, the stored visa
-  is withheld from every delivery path (the VSS push, the fetch by ID, the
-  grant), like a quarantined one, but stays visible to revocation passes; a
-  delivery path checks that hold before it reads the copy's state, since a
-  refusing check writes the revoke before it clears the hold. The hold is in
-  memory: a crash between the store and the check restores the visa
-  `PendingInstall` with none. So startup records one attribute obligation
-  naming no actor -- a sweep of every live visa -- before the VS-API listener
-  serves, and kicks the reconciler (`event_mgr::record_startup_sweep`;
-  operator decision, "startup full sweep"); startup fails if it cannot record
-  it. The residual gap: a node that reconnects before that first pass ends
-  can be pushed such a visa, which the pass then revokes. AAA visas take the
+  pass overlapped it. The store says whether a visa is committed: a visa a
+  request commit-checks is stored with its commit state `Pending`
+  (`db::CommitState`, persisted in the visa record), and only once both
+  commit checks have passed is it marked `Committed`. A pending visa is
+  withheld from every delivery path (the VSS push, the fetch by ID, the
+  grant), like a quarantined one, but stays visible to revocation passes. A
+  refused visa is revoked and stays pending, so it is withheld even while its
+  revoke write fails and it is only quarantined in memory; a visa that cannot
+  be marked committed is refused the same way. Because the mark is persisted,
+  a crash between the store and the check leaves the visa pending: at startup,
+  before the workers and the VS-API listener start, the visa service revokes
+  every visa still pending (`VisaMgr::revoke_uncommitted_visas`; operator
+  decision on the local review, "persist the hold"). That needs no
+  re-evaluation, so it covers a visa whose actor is already gone, which no
+  sweep would find. A pending visa whose revoke fails at startup stays pending
+  and withheld, and the next start revokes it again. Bootstrap visas are
+  stored committed. The record carries the commit state with no fallback: a
+  record without it is undecodable and deleted at load. AAA visas take the
   same check. Core visas and
   the VSS visa are issued through the same request path, so they are covered.
   Bootstrap visas are not policy-evaluated: `requestBootstrapVisas` holds the
@@ -1629,8 +1635,12 @@ core change. The decisions (gate g235, all defaults):
   node's revokes until the horizon has passed, and the heartbeat after that
   sends the revoke once more, whose ack tears it down. For `GRANT_HORIZON`
   after start every copy counts as inside its horizon (a reply sent just
-  before a restart can still arrive); the record is not persisted. Past
-  entries are pruned by housekeeping (`purge_expired_visas`). The cost is one
+  before a restart can still arrive); the record is not persisted.
+  Housekeeping (`purge_expired_visas`) prunes a copy's horizon one more
+  `GRANT_HORIZON` after it has passed, since the ack of a revoke sent inside
+  it may be processed after it, and scans at most once per
+  `PURGE_MIN_INTERVAL` (800 ms) however many nodes' heartbeats call it, like
+  the visa store's own purge. The cost is one
   extra revoke per copy revoked within 30 s of its delivery. A VSS push
   queued as a command (`distribute_visa_on_path`) may wait behind other RPCs,
   so the VSS worker drops any copy no longer grantable when it dispatches the
@@ -1664,7 +1674,10 @@ core change. The decisions (gate g235, all defaults):
   `test_queued_push_of_a_revoked_copy_is_not_sent`, `test_grant_copy`,
   `test_a_pass_overlapping_a_request_refuses_it`,
   `test_a_request_starting_during_a_pass_is_refused`,
-  `test_startup_sweep_revokes_a_visa_the_state_no_longer_allows`,
+  `test_uncommitted_visa_of_a_vanished_actor_is_not_delivered_after_a_restart`,
+  `test_refused_visa_whose_revoke_failed_is_not_delivered_after_a_restart`,
+  `test_late_ack_of_a_revoke_sent_inside_the_horizon_survives_a_prune`,
+  `test_horizon_pruning_is_throttled`,
   `test_a_copy_refused_after_the_pending_snapshot_is_not_handed_out` and
   `test_revoke_sent_inside_the_horizon_is_held_however_late_its_ack`.
 - **Not done.** No Zode-side record of revoked IDs and no protocol change
@@ -1833,7 +1846,7 @@ no adapter docks on a Zode.
 | Which links a node is offered (`proposed_links`, `known_substrate_addr`) | `vs/src/vss_worker.rs` |
 | Bootstrap visas (`requestBootstrapVisas`, the rejoin teardown, the sweep recheck) | `vs/src/visa_bootstrap.rs`, `vsapi_worker.rs`, `visa_mgr.rs` (`mint_bootstrap_visa`) |
 | A node's core visas (J5a, J5b, J9), ingress-last delivery, the by-ID fetch | `vs/src/core_visas.rs`, `visa_mgr.rs` (`deliverable_visas_for_node`, `visas_for_node_by_ids`) |
-| The atomic grant, the commit check and the grant horizon (zl-zipline#248) | `vs/src/visa_mgr.rs` (`grant_copy`, `create_visa`, `check_commit_generation`, `GrantHorizons`, `revoke_acked`), `revocation.rs` (`Pass`, `no_pass_overlapped`), `event_mgr.rs` (`record_startup_sweep`), `vsapi_worker.rs` (`visa_request`, `register_vss`), `vss_worker.rs` (`push_queued_visas`, `send_pending_revokes`), `config.rs` (`GRANT_HORIZON`) |
+| The atomic grant, the commit check and the grant horizon (zl-zipline#248) | `vs/src/visa_mgr.rs` (`grant_copy`, `create_visa`, `check_commit_generation`, `revoke_uncommitted_visas`, `GrantHorizons`, `revoke_acked`), `revocation.rs` (`Pass`, `no_pass_overlapped`), `db/visa.rs` (`CommitState`), `main.rs` (`revoke_uncommitted_visas` at startup), `vsapi_worker.rs` (`visa_request`, `register_vss`), `vss_worker.rs` (`push_queued_visas`, `send_pending_revokes`), `config.rs` (`GRANT_HORIZON`) |
 | Removing a departed Zode (`schedule_departure_check`, `remove_if_departed`; the pending checks in `LinkStateTable`) | `vs/src/vsapi_worker.rs`, `link_state.rs`, `topology_mgr.rs` |
 | Policy-pass pushes to nodes | `vs/src/event_mgr.rs` (`push_policy_to_nodes`, `nodes_cut_off`) |
 | Attribute sources | `vs/src/trusted_services/` |
