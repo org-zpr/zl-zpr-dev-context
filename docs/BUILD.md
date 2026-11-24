@@ -775,8 +775,8 @@ each at its real container address (zl-zpr-demo#11).
 
 Last recorded full run: `build-sets/2026-11-24.yaml` (zl-zipline#237's
 release merge set S1, 2026-11-24, `--test unit,netns,docker`). It pins the
-set's PR heads: core `442203a`, the visa service `fe653fa` (= `v0.22.0`), the
-compiler `d4f0905`, the demo `eab0f29` and CoreDNS `39d49be`, all on
+set's PR heads: core `01d0cfe` (which also merges core's `zipline`, for
+core#147), the visa service `fe653fa` (= `v0.22.0`), the compiler `d4f0905`, the demo `eab0f29` and CoreDNS `39d49be`, all on
 zl-zpr-common `zl-v0.32.0` (`bf335f7`). Every tier passed: `unit` in the four
 built repositories; `netns` on the host route (`privilege: userns`), all
 fourteen scripts the core carries, with the seven adapter-era scripts skipped

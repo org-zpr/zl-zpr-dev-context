@@ -2,12 +2,12 @@ version: 1
 name: 2026-11-24
 repositories:
   zl-zpr-compiler: d4f0905ecd46ee7b5b382517045a06e9dabfa540
-  zl-zpr-core: 442203a933f4a528b7f56cb940fe4ec6e3d03116
+  zl-zpr-core: 01d0cfe9c332727408b395d718e84a833152d837
   zl-zpr-coredns: 39d49be4c019bbfd9bf535af171dbab0b3aa3d45
   zl-zpr-demo: eab0f29290d27fc77377f476d5a347742f7c1a0f
   zl-zpr-visaservice: fe653fa86ca043e7386a8d344922ca0c57a92004
 resolved:
-  built_at: 2026-11-24T16:38:15Z
+  built_at: 2026-11-24T17:48:22Z
   built_from:
     manifest: .worktrees/dc-237-docs/build-sets/2026-11-24.yaml
     context: 6db4e34
@@ -78,31 +78,31 @@ resolved:
     bytes: 1476336
     from: zl-zpr-compiler
   - name: ph
-    sha256: 247e8ea84199a0de09e2c336fcc11f57e74c6c2cc003863d11180b311bcd47ca
-    bytes: 11267968
+    sha256: 98913cf623e7192d4f067d6f183070a5f9226c3033dd5b25e0b5272b9980cf57
+    bytes: 11267384
     from: zl-zpr-core
   - name: ph-cli
-    sha256: f523772bb600036852c5ca935f50e0173dcca2afbdea363a81f77e7288ad97ea
-    bytes: 9663888
+    sha256: e0628f066b28edcfc56d85722bd00583d3b49bd92c0a77a25ccac6cc4fb89a6d
+    bytes: 9663848
     from: zl-zpr-core
   - name: coredns
-    sha256: 8320ee2e86679d9be9aaef3eed8b65b0c98d377225647c73255c61fe56333771
-    bytes: 108573882
+    sha256: f97fde7bb2a8308c628f594ac4a1f5f035b58595a7455dfcad01b7480626c8fc
+    bytes: 108574466
     from: zl-zpr-coredns
   - name: vs
-    sha256: 75da93bb096c329fd6511ceebbf9f2dcf00b36f8027e979889a998f2f5637683
-    bytes: 23320704
+    sha256: 04fcd65cbfbc05f19e849c1c4bbd204ddc85dd1dc587756f9ee1e7ddcbbb7667
+    bytes: 23320720
     from: zl-zpr-visaservice
   - name: vs-admin
-    sha256: 479b1c7f4fe28a435cf1d2942eff2786663ac0ad3d37f8af438ffb740e2bc618
-    bytes: 10296608
+    sha256: 75a31c839c1a7287cd0e92d096ee43d4b63beeaeb0578a679e62495acc5ff65b
+    bytes: 10296616
     from: zl-zpr-visaservice
   - name: vsapikey
     sha256: e6e15ed466715dd1cba6f62c9ffe579067e654040c8dd6de7b7fd56d6048de74
     bytes: 1870512
     from: zl-zpr-visaservice
   - name: zpt
-    sha256: 26d6e4ae19059aeac290302a95d5e63c1b8093864206bf591a813b014d31e1c8
+    sha256: 667f4f34de8a4e65d77fac15c1281459596dac403acab16e4c0c2b0867e8f9f3
     bytes: 2641816
     from: zl-zpr-visaservice
   - name: zpr-dashboard
@@ -116,11 +116,11 @@ resolved:
   tests_requested: unit,netns,docker
   notes:
   - zl-zpr-common bf335f75a1e5c33691a465d8ecdfc51856e43c18 = zl-v0.32.0 (common#18 head; the tag core, visa service and compiler all pin); zl-zpr-vsapi 0f1ffa5bd59174325941325547d2bc6ff4e6cc42 and zl-zpr-policy 8f2810e505e15dd86a062919e218086197aa2b50 (feature/zodes tips; common submodules at that tag)
-  - 'zipline feature/zodes-237-release a1ee357b312a384a2c3c5d4c19a51c3ca2fd40fe (zipline#302, package 2.0.11): pins core 442203a, visa service fe653fa, compiler d4f0905 and coredns 39d49be'
+  - 'zipline feature/zodes-237-release 019b3fd676b03dcd70951593a742b7457a78b35e (zipline#302, package 2.0.11): pins core 01d0cfe, visa service fe653fa, compiler d4f0905 and coredns 39d49be'
   - visa service fe653fa (visaservice#82 head) = release v0.22.0, which core#146 CI netns tier runs
-  - core 442203a = core#146 head (merges core#148 9530f7c and core#149 c39014c, the zl-zipline#292 fixes); compiler d4f0905 = compiler#29 head (common pin zl-v0.32.0); demo eab0f29 = zl-zpr-demo feature/zodes tip
+  - 'core 01d0cfe = core#146 head: 442203a (feature/zodes with core#148 and #149, the zl-zipline#292 fixes) merged with core zipline 3784f77 (core#147, zl-zipline#294: RCU table writers hold their lock through publication); compiler d4f0905 = compiler#29 head (common pin zl-v0.32.0); demo eab0f29 = zl-zpr-demo feature/zodes tip'
   - zl-zpr-dev-context 6db4e34 (feature/zodes) supplied zpr-dev
-  - zl-zipline#237 S1 merge-set re-run (pd p62 t361); supersedes 2026-11-23, which pinned core a93592a
+  - zl-zipline#237 S1 merge-set run (pd p62), re-run after core#146 merged core zipline (core#147); supersedes 2026-11-23 (core a93592a) and an unmerged earlier 2026-11-24 record (core 442203a)
   tiers:
     docker:
       status: passed
