@@ -393,8 +393,9 @@ risk. Everything is a release build. The table is in claim order:
   otherwise the tier records it as `skipped: not in this zl-zpr-core
   revision`. Every other listed script must exist. The optional scripts
   are the two sides of the Zodes epic (zl-zipline#216); since zl-zipline#237
-  merged `feature/zodes` into `zipline`, every core at a branch tip carries
-  only the second, and removing the first is a follow-up (gate g223 q12):
+  merged `feature/zodes` into `zipline`, the fork's `zipline` and
+  `feature/zodes` tips carry only the second (the upstream mirror `main`
+  still has the first), and removing the first is a follow-up (gate g223 q12):
   - only in a core from before zl-zipline#234, the adapter-docked scripts
     that #234 deleted: `one-node-test.sh`, `one-node-v6-test.sh`,
     `one-node-oidc-test.sh`, `one-node-oidc-renewal-test.sh`,
@@ -751,8 +752,8 @@ their Zode ports. So both sets sit in `NETNS_SCRIPTS_IF_PRESENT` and each
 core runs what it carries; a unit test pins the optional list to exactly
 the scripts one branch has and the other lacks, so a script deleted on one
 branch cannot fail that branch's tier as missing. Since #237 merged
-`feature/zodes` into `zipline`, no branch tip has the adapter-docked
-scripts; removing them and the split is a follow-up (gate g223 q12), kept
+`feature/zodes` into `zipline`, neither the `zipline` nor the
+`feature/zodes` tip has the adapter-docked scripts; removing them and the split is a follow-up (gate g223 q12), kept
 out of #237 because #237 changes no code.
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
 

@@ -757,7 +757,7 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen in a core with `ph zode`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen in a core with `ph zode`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; with a Zodes core also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
@@ -788,8 +788,8 @@ that pins the same set. It is the newest file in `build-sets/`, so a bare
 (`<workspace>/zl-zpr-dev-context` unless `--context` says otherwise; not the
 current directory) contains it; otherwise pass `--context <worktree>` or
 `--manifest <worktree>/build-sets/2026-11-24.yaml`. Either way, run a
-`zpr-dev` built from a revision that has this file: an older one's netns
-drift guard rejects the Zode scripts it does not list. The run before it, `build-sets/2026-11-19T2133.yaml`
+Zode-aware `zpr-dev`, such as the one the run used (dev-context `6db4e34`):
+an older one's netns drift guard rejects the Zode scripts it does not list. The run before it, `build-sets/2026-11-19T2133.yaml`
 (zl-zipline#264's merge set), was green the same way.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
