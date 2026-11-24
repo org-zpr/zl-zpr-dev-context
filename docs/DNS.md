@@ -331,7 +331,9 @@ hops, machine names and aliases, and the collision / precedence / invalid-name
 controls. It is `zpr-dev build`'s `docker` tier: all eight `test-dns.sh`
 sections passed in build set `build-sets/2026-11-24.yaml`. Reproduce it through
 that set: `zpr-dev build --manifest <zl-zpr-dev-context>/build-sets/2026-11-24.yaml
---test docker` (add `--force` to replace an earlier build of the set). The
+--test docker` (add `--force` to replace an earlier build of the set), with a
+Zode-aware `zpr-dev` such as dev-context `6db4e34` (`BUILD.md`, "Last recorded
+full run"). The
 demo's own `make` builds whatever the source checkouts hold, and needs a
 `ph zode` core (zl-zipline#234).
 
