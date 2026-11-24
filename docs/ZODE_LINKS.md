@@ -234,6 +234,14 @@ no `peer` logs it and skips it, and applies the rest (rule 13b).
     the Zode resets every link except the one carrying the VS-API session it is
     resetting, then revokes every visa except those for its own VS-API flows. On
     a relay, each joiner on the other links redials and gets a new hand-off.
+    *Built (#292):* the Zode probes the session's liveness with VS-API pings on
+    the link keep-alive's budget, no tighter: each ping gets the echo timeout
+    (3 s), the next goes out as soon as one misses, and the session is lost
+    after the keep-alive's miss count (3), about 9 s from the first unanswered
+    ping (which goes out up to 5 s after the last answered one). One slow TCP
+    segment therefore no longer costs a Zode its VS-API session; a TCP stall
+    that outlasts all three pings still does, even if the link's echoes get
+    through. See "VS-API liveness (#292)" under *Implementation status*.
 
 ## Walkthroughs
 
@@ -1137,6 +1145,22 @@ any host and port. Now:
   re-reports), which defend against a Zode choosing its address, which it no
   longer can. Mitigation 1, the dialer's CN check, already existed.
 
+**VS-API liveness is no stricter than the link keep-alive** (zl-zipline#292,
+gate g248). A joining Zode's VS-API session is TCP carried over its initial
+ZDP link (the relay that hosts the visa service reaches it locally, with the
+same budget), so a lost
+segment waits for a TCP retransmit timeout, a second or more on a loaded link,
+while the link's own echoes, which ZDP answers directly, keep arriving. The
+old ping budget (1 s, then 2 s, two misses) turned one such retransmit into a
+miss and two into a rejoin: a Windows Zode serving a large download rejoined
+about once a minute, and every rejoin also broke its direct links. Whether
+the link is alive is keep-alive's call (rule 9); the VS-API probe only has to
+notice a visa service that stopped answering, and the keep-alive's budget,
+3 misses of 3 s, is soon enough for that. The values derive from the
+keep-alive constants, so the two cannot drift apart. Carrying the host's own
+control flows ahead of bulk traffic in the Windows fast path was the larger
+alternative, and was not taken (g248 q3).
+
 ### Deferred
 
 Out of scope for the Zodes epic. No issue is filed for any of these; file
@@ -2016,6 +2040,47 @@ and an occupancy counter are out of scope (gate g214 q6, q7).
 | `expand` returns an error; `actor_input` drops it as `BadStructure`, and a packet its stream's classifier does not admit as `ClassifierMismatch` (`Ip5TupleTc::classify_packet`); the classifier refuses a truncated ICMP, ICMPv6 or IPv6 extension header instead of panicking | `compress.rs`, `fastpath.rs`, `tc.rs`, `counters.rs`, `classifier.rs` |
 | The retry worker holds no RCU guard while it waits and serves only its own peer (`launch`, `own_peer`; `PeerState::zdpr_retry_timer_reset` is an `Arc<Notify>`) | `zdpr_worker.rs`, `peer_table.rs` |
 | Unit tests: `test_revoke_returns_the_removed_bindings_egress`, `test_revocation_unbinds_the_local_egress`, `test_revocation_removes_the_dlt_entry`, `test_expiry_sweep_unbinds_the_local_egress_after_the_grace`, `test_link_loss_unbinds_the_local_egress`, `test_match_eject_unbinds_the_local_egress`, `test_reset_unbinds_the_local_egress`, `test_a_zode_link_egress_is_not_unbound`, `test_a_rebind_unbinds_the_replaced_local_egress`, `test_a_refused_rebind_unbinds_its_grant`, `test_an_abandoned_grant_is_unbound`, `test_a_grant_for_a_refused_bind_is_unbound`, `test_a_used_grant_is_not_unbound`, `test_expand_rejects_truncated_headers`, `test_expand_rejects_a_bad_ipv4_header_length`, `test_actor_input_drops_a_short_body_as_bad_structure`, `test_actor_input_drops_a_packet_on_a_reused_dlt_id_as_micv_failure`, `test_actor_input_drops_an_icmp_packet_the_reused_dlt_id_does_not_admit`, `test_actor_input_drops_a_truncated_icmp_body_with_a_valid_micv`, `test_truncated_l4_and_extension_headers_are_refused`, `test_an_idle_worker_does_not_pin_the_rcu_epoch`, `test_a_worker_serves_only_its_own_peer` | `visa_table.rs`, `assembly.rs`, `mgmt/node.rs`, `compress.rs`, `fastpath.rs`, `zdpr_worker.rs` |
+
+### VS-API liveness (#292)
+
+zl-zpr-core#148. The link keep-alive constants (`DEFAULT_KEEP_ALIVE_PERIOD`,
+`DEFAULT_KEEP_ALIVE_TIMEOUT`, `KEEP_ALIVE_MAX_MISSES`) live in
+`zl-zpr-core/libnode2/src/keepalive.rs`; `ph`'s `config.rs` re-exports them.
+`libnode2/src/vsconn.rs` derives `VSAPI_PING_TIMEOUT` (3 s) and
+`VSAPI_MAX_PING_MISSES` (3) from them; `VSAPI_PING_INTERVAL` stays 5 s
+between answered pings.
+
+- **One probe at a time, as its own task** (`VSConn::probe_liveness`). It
+  sends up to three pings and ends on the first answer, or with an error once
+  all three missed; the run loop then ends the session (`RunLoopExits`), which
+  is J10's trigger. A command queued while a ping is out goes out at once: it
+  used to wait for the ping's answer or timeout.
+- **Every miss takes the full 3 s**, so a ping the visa service refuses at
+  once (`authRequired`) uses up the budget no faster than silence.
+- **A new handle starts liveness afresh.** When `connect`, `open` or a
+  re-authentication installs a new VS handle, the probe on the old one is
+  aborted, so its misses cannot end the new session.
+- **Known limit.** A command in progress holds the run loop. A probe already
+  running keeps pinging meanwhile, but a probe that failed is acted on only
+  when that command returns, and a probe that falls due during the command
+  starts only then. Each RPC of the command has its own timeout (10 s by
+  default; 5 s for `requestBootstrapVisas`; 30 s for
+  the calls of `connect`, `open` and a re-authentication), so a command that
+  makes several calls in sequence can hold the loop for longer: `connect` and
+  a re-authentication, three 30 s calls, up to about 90 s.
+- **Not changed: the visa service's VSS ping.** `zl-zpr-visaservice`
+  `vs/src/vss_worker.rs` still pings each Zode's VSS every 7 s
+  (`VSS_PING_INTERVAL`) with a timeout of 1 s plus 1 s per earlier failure;
+  after a failure it retries 1 s later, and the third consecutive failure
+  (`VSS_MAX_PING_FAILURES`) ends the VSS worker. It awaits the ping in its
+  command loop. It showed the same `ping to VSS ...
+  timed out` warnings in the #292 run.
+- **Tests.** `libnode2/src/vsconn.rs` unit tests against the fake visa
+  service: a ping answered after 1.5 s is not a miss; an unanswering visa
+  service, and one that refuses every ping, each end the session after the
+  9 s budget and not before; a command is not held by an in-flight ping; a
+  re-authentication during the third miss keeps the session up and pings the
+  new handle.
 
 ### What waits for which issue
 
