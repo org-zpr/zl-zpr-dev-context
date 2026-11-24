@@ -23,7 +23,7 @@ service's admin API, and short TTLs are what make the answer track reality.
 ```
  ┌──────────┐  DNS UDP/53         ┌────────────────────────┐  HTTPS TCP/8182   ┌──────────────┐
  │ client   │  visa: client →     │  CoreDNS + zpr plugin  │  visa: zpr-dns →  │  admin API   │
- │ (adapter)│  zpr-dns service    │  granted ZPR address   │  vs-admin service │ fd5a:5052::1 │
+ │ (Zode)   │  zpr-dns service    │  granted ZPR address   │  vs-admin service │ fd5a:5052::1 │
  └──────────┘ ───────────────────▶└────────────────────────┘ ─────────────────▶└──────────────┘
    dig AAAA web.demo                GET /admin/services/web        200 { zpr_addr }
                                     then /admin/hosts/web on 404
@@ -79,20 +79,26 @@ a service, and allow both hops. The resolver appears as the *subject* of an
 `Allow` — this is a supported ZPL shape:
 
 ```
-Define zpr-dns as a service.        # UDP/53, provider address granted by a trusted service
-Define vs-admin as a service.       # TCP/8182, provided by the VS adapter itself
+Define zpr-dns as a service.        # UDP/53, at the resolver Zode's node address
+Define vs-admin as a service.       # TCP/8182, provided by the VS's own actor (vs.zpr)
 Allow access:all users to access zpr-dns.
 Allow zpr-dns to access vs-admin.
 ```
 
-In the `.zplc`, the resolver gets its static address from a trusted service
-that vends `device.zpr_addr` keyed on the resolver's adapter CN (an authored
-`["zpr.addr", ...]` provider pin is a compile error since zipline#109 — in
-dns-demo the existing `machines` store carries the grant), so clients can be
-pointed at a fixed address. `vs-admin` is provided by the visa service's own
-adapter CN (`vs.zpr`), which is what puts `fd5a:5052::1` behind the name:
+In the `.zplc`, the resolver is a Zode, and its static address is its
+`[nodes]` entry's `zpr_address`, pinned to its CN (an authored
+`["zpr.addr", ...]` provider pin is a compile error since zipline#109), so
+clients can be pointed at a fixed address. `vs-admin` is provided by the visa
+service's own actor, CN `vs.zpr`, which is what puts `fd5a:5052::1` behind the
+name: the visa service runs on the relay Zode's TUN, with that address as the
+relay's second ZPR address. This is the `dns-demo` layout (its relay node, links
+and the other Zodes are left out):
 
 ```toml
+[nodes."dns.demo"]
+provider = [["device.zpr.adapter.cn", "dns.demo"]]
+zpr_address = "fd5a:5052:8888::53"
+
 [protocols.dns]
 l4protocol = "UDP"
 port = 53
@@ -103,24 +109,18 @@ port = 8182
 
 [trusted_services.machines]
 api = "file"
-returns_attributes = ["hostnames -> device.hostname{}", "zpr_addr -> device.zpr_addr"]
+returns_attributes = ["hostnames -> device.hostname{}"]
 expiration_seconds = 3600
 
 [services.zpr-dns]
 protocol = "dns"
 port = 53
-provider = [["device.zpr.adapter.cn", "dns.demo"]]   # static addr granted by `machines` (device.zpr_addr)
+provider = [["device.zpr.adapter.cn", "dns.demo"]]   # at its node's zpr_address
 
 [services.vs-admin]
 protocol = "vs-admin"
 port = 8182
 provider = [["device.zpr.adapter.cn", "vs.zpr"]]
-```
-
-with the resolver's address in the store file (`machines.json`):
-
-```json
-{ "device.zpr.adapter.cn": { "dns.demo": { "zpr_addr": ["fd5a:5052:8888::53"] } } }
 ```
 
 The resolver's CN also needs a `[bootstrap]` key entry. Keep service names
@@ -129,11 +129,8 @@ lookup is exact-match.
 
 **2. The naming authority**, if machine names are wanted, is a trusted service
 returning `hostnames -> device.hostname{}`. In the configuration above this is
-the same `[trusted_services.machines]` block declared in step 1 — one store
-vends both the hostname claims and the resolver's static-address grant, so the
-table is declared once (TOML rejects a table defined twice). A deployment that
-does not need static-address grants can drop the `zpr_addr` mapping and keep
-only the `hostnames` one.
+the `[trusted_services.machines]` block declared in step 1, over
+`machines.json`.
 
 Note on pruning: the compiler drops a trusted service that no ZPL rule
 references — but `device.hostname` is visa-service-interpreted, so a store
@@ -197,6 +194,23 @@ NXDOMAIN within roughly `ttl + negative_ttl`; a service that moves resolves to
 its new address on the same scale. Keep TTLs short — ZPR addresses are
 recycled across reconnects.
 
+"Goes away" means the visa service removed the provider's actor, and with it
+the services the actor provides. The plugin learns this only by asking again
+on a cache miss; the visa service pushes nothing to CoreDNS. For a Zode
+([zl-zipline#284](https://github.com/org-zpr/zl-zipline/issues/284)):
+
+- **A graceful stop** (SIGINT, SIGTERM, a Windows console event) deregisters
+  the Zode before its links go down, so the name stops resolving within one
+  cache period.
+- **A crash or a lost Zode** is removed once every link of it has been down for
+  `ZODE_DEPARTURE_GRACE` (10 s), so detection (9-12 s), the grace and one cache
+  period add up. That is about 52 s with the demo's `ttl 30`.
+- `ph` treats SIGHUP as a crash. zl-zpr-demo's `demo-stop-ph` kills ph's tmux
+  session, so `test-dns.sh` section 3 exercises the crash path. It saw
+  NXDOMAIN 25 s after the stop, against its 60 s deadline.
+- **Not removed:** a Zode that left while the visa service was down. A restart
+  schedules no departure checks (ZODE_LINKS.md, "Zode departure (#284)").
+
 ## Security properties worth preserving
 
 - **The `resolve` key asks about one name and gets one address.** It reaches
@@ -238,7 +252,7 @@ permission. Neither touched `policy.capnp`, the compiler or `zpr-common`.
 
 **The resolver is an ordinary policy subject, and the VS an ordinary
 provider.** `Allow zpr-dns to access vs-admin` (a service as the subject)
-and `vs-admin` provided by the VS's own adapter were the design's one real
+and `vs-admin` provided by the VS's own actor were the design's one real
 unknown; both compile and load, so no device-class stand-in for the resolver
 was needed. [zipline#35](https://github.com/org-zpr/zl-zipline/issues/35)
 
@@ -307,10 +321,28 @@ another provider's live `service:<name>` entry.
 ## Implementation status
 
 Service names and machine names are fully implemented and merged. The end-to-end proof is
-`zl-zpr-demo/dns-demo`: `make && local-compute/deploy-docker.sh &&
-local-compute/test-dns.sh` stands up node + VS + web + client + resolver and
-exercises resolution, liveness, both policy hops, machine names and aliases,
-and the collision / precedence / invalid-name controls.
+`zl-zpr-demo/dns-demo`
+([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
+[zl-zipline#235](https://github.com/org-zpr/zl-zipline/issues/235)). Its
+`local-compute/deploy-docker.sh` stands up a relay Zode that hosts the visa
+service on its own TUN, plus web, client and resolver endpoint Zodes linked to
+it, and `local-compute/test-dns.sh` exercises resolution, liveness, both policy
+hops, machine names and aliases, and the collision / precedence / invalid-name
+controls. It is `zpr-dev build`'s `docker` tier: all eight `test-dns.sh`
+sections passed in build set `build-sets/2026-11-24.yaml`. Reproduce it through
+that set: `zpr-dev build --manifest <zl-zpr-dev-context>/build-sets/2026-11-24.yaml
+--test docker` (add `--force` to replace an earlier build of the set), with a
+Zode-aware `zpr-dev` such as dev-context `6db4e34` (`BUILD.md`, "Last recorded
+full run"). The
+demo's own `make` builds whatever the source checkouts hold, and needs a
+`ph zode` core (zl-zipline#234).
+
+On ZIPLINE the resolver runs behind a Zode named `dns.zpr` ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
+a Zode with an initial link to the relay, a server-generated link
+certificate and RSA key, and its address `fd5a:5052:90de::2` pinned by its
+`[nodes]` entry in policy. It links to the relay only, and endpoint queries
+reach it through the relay. The `addresses` file trusted service that used to
+grant that address is gone.
 
 Not built, in rough order of likely demand:
 
@@ -321,6 +353,8 @@ Not built, in rough order of likely demand:
 - **SRV records** from `service_endpoints` — cheap, no consumer yet.
 - **Push invalidation** on actor departure, and any bulk/zone-transfer mode.
   Short TTLs are the deliberate ceiling; revisit if 30 s staleness bites.
+  Departure itself is built: a departed Zode's actor is removed (#284; see
+  "Query semantics").
 - **Multi-node placement** of the resolver — blocked on the data plane.
 - **Pushing rejected claims to the naming authority.** Today conflicts are
   only visible to a poller via `hostname_conflicts`.

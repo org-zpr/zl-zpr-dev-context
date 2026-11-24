@@ -1,0 +1,22 @@
+#!/bin/sh
+# A fake `ph` for zpr-dev's dist/ guard tests (src/build/tiers.rs,
+# `write_fake_ph`). The tests symlink `dist/ph` here and write its
+# behaviour into data files beside the symlink, so no test ever executes a
+# file it has just written: a concurrent test's fork can briefly hold a
+# freshly written file open for writing, and exec then fails with ETXTBSY.
+#
+#   ph --help        prints top-help and exits with top-exit;
+#   ph <sub> --help  prints sub-help and exits with sub-exit, where <sub>
+#                    is the content of `sub`;
+#   anything else    is refused with exit 2, as clap does.
+dir=$(dirname "$0")
+if [ "$1" = "--help" ]; then
+    cat "$dir/top-help"
+    exit "$(cat "$dir/top-exit")"
+fi
+if [ "$1" = "$(cat "$dir/sub")" ]; then
+    cat "$dir/sub-help"
+    exit "$(cat "$dir/sub-exit")"
+fi
+echo "error: unrecognized subcommand '$1'" >&2
+exit 2

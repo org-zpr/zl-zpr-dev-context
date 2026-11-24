@@ -13,7 +13,7 @@ metadata:
 
 Load this whenever the task touches ZPR: any `zl-zpr-*` repo in the `org-zpr`
 organization,
-the visa service, the ZPL compiler or ZPL policy, the adapter / packet handler,
+the visa service, the ZPL compiler or ZPL policy, the packet handler `ph` (the Zode),
 the `policy.capnp` / `vs.capnp` schemas, or the ZPR RFCs.
 
 ZPR = Zero-trust Packet Routing.
@@ -961,7 +961,7 @@ A task is done only when ALL of these hold for the PR:
      reported beside it. Run the gate from the repository's `Makefile`.
    **Gate escalation:** if the change touches connection authorization or addressing
    semantics — `libeval`'s `approve_connection`, `vs`'s `authorize_connection` /
-   `connection_control`, or the adapter's dock/address paths — the unit gate is NOT
+   `connection_control`, or `ph`'s link, actor-authentication or address paths — the unit gate is NOT
    sufficient: the netns integration tier is part of THIS condition. The routine
    tier run is **`zpr-dev build --test netns`** with a manifest pinning the branch
    under test (`--jobs N` to widen, default 4; the scripts need no sudo, and on
@@ -1072,7 +1072,8 @@ not run `gh pr merge`.
   (second source, private).
 - Start reading: RFC 12 (ZPR overview), RFC 4 (terminology), RFC 15 (ZPL), RFC 16 (identity).
   Full index, including which RFCs are public: `references/rfc-index.md`.
-- Packet path walkthrough: `zl-zpr-core/packet_walk.md`.
+- Packet path: the PlantUML diagrams in `zl-zpr-core/diagrams/` (`fastpath-overview`,
+  `substrate_ingress`, `substrate_egress`) and `docs/ZODE_LINKS.md`.
 - VS admin HTTP API: `zl-zpr-visaservice/admin-http-api.txt`.
 - ZPL grammar: `zl-zpr-compiler/zpl.bnf`.
 

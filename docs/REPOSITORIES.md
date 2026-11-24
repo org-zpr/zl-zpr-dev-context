@@ -66,13 +66,23 @@ has only `main`):
 
 Keeping `main` pristine is what makes the fork maintainable: syncing upstream is
 always a fast-forward that can never conflict, `git diff main...zipline` is
-exactly the zipline delta, and contributing a change back upstream means
+exactly the zipline delta (for core, see the cherry-pick note below), and contributing a change back upstream means
 branching off `main` and cherry-picking rather than untangling merges.
 
 ### Taking upstream changes into zipline
 
 Two steps. A checkout made by `zpr-dev` has only one remote — `origin`, the fork
 — and no `upstream` remote, so step 1 is done on GitHub rather than locally.
+
+**`zl-zpr-core`: cherry-pick, do not merge.** zl-zipline#234 removed adapter
+mode from the fork, so upstream changes to adapter code would conflict on
+every merge of `origin/main`. Upstream fixes are taken into core one at a
+time by cherry-pick instead of step 2. This applies since
+[zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merged
+`feature/zodes` into core's `zipline`. The other forks are unchanged and merge as below. Cherry-picks do not
+move the merge base, so for core `git diff main...zipline` then also lists
+the upstream fixes already picked.
+(`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11 in org-zpr/zipline)
 
 **1. Fast-forward the fork's `main` from upstream.** No local checkout needed:
 
@@ -127,7 +137,7 @@ as `zl-v0.26.0`, not `v0.26.0`.
 
 | Repository | Language | What it is |
 |---|---|---|
-| [`zl-zpr-core`](#zl-zpr-core) | Rust | Core ZPR components — the node and its adapters |
+| [`zl-zpr-core`](#zl-zpr-core) | Rust | Core ZPR components — `ph` (the Zode) and `ph-cli` |
 | [`zl-zpr-common`](#zl-zpr-common) | Rust | Shared `zpr` crate: protocol types, constants, IDL |
 | [`zl-zpr-visaservice`](#zl-zpr-visaservice) | Rust | The Visa Service and its policy evaluator |
 | [`zl-zpr-vsapi`](#zl-zpr-vsapi) | Cap'n Proto | IDL for the Visa Service API |
@@ -177,16 +187,17 @@ zl-zpr-vsapi  ─┴─► zl-zpr-common      submodules inside zl-zpr-common)
 
 ### `zl-zpr-core`
 
-Core ZPR components: the node implementation, its adapters, and the
-integration tests that exercise a running ZPRnet.
+Core ZPR components: `ph`, which runs a Zode (`ph zode`, its only mode
+since zl-zipline#234), its admin CLI `ph-cli`, and the integration tests that
+exercise a running ZPRnet.
 
 ```text
-adapter/            node adapters
+adapter/            ph, ph-cli and the admin API schema (the directory
+                    name is historical: there is no separate adapter)
 libnode2/           the node library
-integration-test/   end-to-end tests
-examples/           worked examples
+integration-test/   end-to-end tests and the platform test guides
+docs/               SETUP.md, how to set up and run Zodes
 diagrams/           architecture diagrams
-packet_walk.md      a packet's path through the node
 ```
 
 A Cargo workspace driven by `make`. The build pulls tools and libraries from
@@ -303,6 +314,7 @@ Runnable demonstrations of ZPR. Each has its own `README.md`.
 containerized-demo/   a running ZPRnet in containers
 multinode-demo/       multiple nodes
 iot-demo/             ZPR integrated with the Oracle IoT platform
+dns-demo/             DNS over ZPR, on Zodes; zpr-dev's docker tier
 ```
 
 The fastest way to see a working ZPRnet without assembling one by hand.

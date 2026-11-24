@@ -348,8 +348,9 @@ would let an attribute service outage block a policy fix.
 STREAM is delivered by inverting the direction: the attribute service tells the
 visa service that something changed, and the visa service does what it already
 does when a store is flushed — re-query the affected actors, re-evaluate their
-live visas, revoke the ones that no longer hold (`VsEvent::TrustedServiceChange`
-in `vs/src/event_mgr.rs`). No standing connection, no replay protocol, no new
+live visas, revoke the ones that no longer hold (a durable revocation
+obligation and the reconciler pass, `reconcile_obligations` in
+`vs/src/event_mgr.rs`; zl-zipline#289). No standing connection, no replay protocol, no new
 worker.
 
 The service calls the visa service's admin API:
@@ -425,8 +426,9 @@ service refreshes one actor at a time today, so nothing would call it.
 
 **The store holds no attribute cache.** The actor's own attribute expiry is the
 cache: `refresh_expired_attributes` (`vs/src/actor_attributes.rs`) re-queries a
-source only when one of its attributes has expired or its revision moved, and
-the visa request path consults it only then. A snapshot cache in the store
+source only when one of its attributes has expired or is within 45 s of
+expiry (`ATTRIBUTE_REFRESH_AHEAD`, [#275](https://github.com/org-zpr/zl-zipline/issues/275)),
+or its revision moved, and the visa request path consults it only then. A snapshot cache in the store
 would be a second TTL to reason about with nothing to buy.
 
 One `reqwest::Client` per store, built the way `KeySource` in
@@ -618,7 +620,7 @@ Already in place and relied on, unchanged:
   outcome (`vs/src/actor_attributes.rs`).
 - Flush-triggered reconcile and visa revocation
   (`DELETE /admin/services/{id}/cache` in `vs/src/admin_service.rs`,
-  `handle_trusted_service_change` in `vs/src/event_mgr.rs`).
+  `reconcile_obligations` in `vs/src/event_mgr.rs`).
 - The `OidcConfig` pattern for threading a per-kind configuration through
   `policy.capnp`, `zl-zpr-common`, the compiler and the factory.
 

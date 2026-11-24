@@ -122,6 +122,75 @@ the containerized jobs pull the private `ghcr.io/org-zpr/dev-env` image; see
 `skills/zpr/SKILL.md` ("Git / PR conventions") for what each needs
 (`org-zpr/zl-zipline#208`).
 
+**Core CI runs the full visa service release `v0.22.0`.** Before the Zodes
+base merge, core CI on `feature/zodes` took the visa service from a feature
+pre-release, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
+(`make release`, then `gh release create v0.22.0-zodes.N --prerelease --target
+<full sha> release-linux-x86_64.tar.gz`: core's integration jobs download that
+asset, so a release without it fails every job at **Download Asset**). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
+org-zpr/zl-zipline#250, because `v0.21.2` sends no `Link.peerCn`. **Re-cut
+rule** (org-zpr/zl-zipline#254): when the visa service changes in a way core CI
+needs, cut the next `-zodes.N` and move `VISA_SERVICE_RELEASE` in
+`zl-zpr-core/.github/workflows/adapter.yml` to it. `v0.22.0-zodes.2` is
+`c94d2fc`, after #250. For #252, core's join and rejoin scenario needs
+`requestBootstrapVisas` before the visa service's PR merges, so the next ones
+were cut from the head of org-zpr/zl-zpr-visaservice#67 **before it merged**
+(gate g89 q9): `v0.22.0-zodes.3` (`7c373b8`), `v0.22.0-zodes.4` (`06fe9ba`,
+adding the g100 fix: no session keys on a node's core visas) and
+`v0.22.0-zodes.5` (`0fc740e`, adding the g101 fix: a policy pass never
+waits on a node's VSS). Core's #252 PR points `VISA_SERVICE_RELEASE` at the
+latest of them. Once #252's merge set C has merged, the next pre-release is
+cut from the merged commit and core moves to it: `v0.22.0-zodes.6` is
+`e1dd1c7`, the merge of visaservice#67. For #255/#256 (pd plan p37),
+`v0.22.0-zodes.7` is `8429505`, the head of org-zpr/zl-zpr-visaservice#68,
+cut **before it merged** so that core's PR in the same merge set could run CI.
+It enforces `transitNodes` and loads only zplc 0.21.x policies, so core's PR
+moves to it together with its `.bin2` files rebuilt by zplc 0.21.0. Once the
+set has merged, `v0.22.0-zodes.8` is cut from the merged commit and a one-line
+core PR moves `VISA_SERVICE_RELEASE` to it. It is `3a9596e`, which also
+carries the #262 by-ID fetch fix (org-zpr/zl-zpr-visaservice#69).
+`v0.22.0-zodes.9` is `65fe475`, the merge of org-zpr/zl-zpr-visaservice#71
+(#268: a direct link reported `down` is proposed again once), cut after it
+merged; core moves to it (org-zpr/zl-zpr-core#126) with the `zode-reroute-test.sh` change that asserts
+the re-proposal. zipline pins it too (`ZPR_VISASERVICE_REF`, build set
+`zodes-zipline255`, org-zpr/zipline#255): one commit after `3a9596e`, on the same
+zl-zpr-common tag, so no other pin moves with it.
+org-zpr/zipline#256 (package 2.0.6) moves only zipline's core pin, to
+`13d27db` (the zl-zipline#234 merge, `ph zode` only). The visa service stays at
+`65fe475`, the compiler at `3e16a94` and CoreDNS at `39d49be`. Core, the visa
+service and the compiler are all on zl-zpr-common `zl-v0.32.0-zodes.5`, and the
+Zode-Zode wire is unchanged, so no flag day goes with it.
+`v0.22.0-zodes.10` is `64df4c3`, the head of org-zpr/zl-zpr-visaservice#72
+(#284, pd plan p55: a Zode whose every link stays down for
+`ZODE_DEPARTURE_GRACE` is removed), cut **before it merged**, as for p37, so
+that org-zpr/zl-zpr-core#138 in the same merge set can run CI. That core PR
+moves `VISA_SERVICE_RELEASE` to it, and its `zode-rejoin-test.sh` asserts the
+removal. It carries `v0.22.0-zodes.9`'s #268 re-proposal. If the merge of
+visaservice#72 differs in content from `64df4c3` (because its base moved), a
+`-zodes.11` is cut from the merge and a one-line core PR moves the pin;
+otherwise no re-cut is needed. zipline's pins do not move with it.
+`v0.22.0-zodes.11` is `6b85e4e`, the head of
+org-zpr/zl-zpr-visaservice#73 (#264, pd plan p56: a Zode's substrate address
+is the relay's observation, and `requestBootstrapVisas` carries
+`observedAddr`), cut **before it merged** so that org-zpr/zl-zpr-core#139 in
+the same merge set can run CI; that PR moves `VISA_SERVICE_RELEASE` to it. It
+is a flag day: it refuses a `connect` that carries `substrate_addr`, and an
+older relay's `requestBootstrapVisas` without `observedAddr`. Start it with an
+empty visa-service state store (Valkey): a stored `zpr.substrate_addr` claim
+does not record its source, so one a pre-#264 Zode reported could otherwise
+outlive the upgrade (SECURITY_MODEL.md, *Implementation status*). zipline moves
+with the set (org-zpr/zipline#289, package 2.0.9): core `d0f6121` (core#139
+without its CI-pin commit), the visa service at `6b85e4e` and the compiler at
+`1ff3140`. zipline#289's head `38a9a2e` is the run's `5f29650` plus the
+real-host run records only.
+For the base merge (org-zpr/zl-zipline#237, pd plan p62, gate g223 q5) the
+pre-release line ended: the full release `v0.22.0` is `fe653fa`, the head of
+org-zpr/zl-zpr-visaservice#82, cut **before it merged** and published as a
+full release, not `--prerelease`. org-zpr/zl-zpr-core#146 moves
+`VISA_SERVICE_RELEASE` to it in the same merge set (S1), which merges into
+`feature/zodes` with merge commits and from there into `zipline`, so the
+released commit is part of both branches' history.
+
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
 every caller of the shared `rust-build-test.yml` / `rust-test.yml` /
@@ -216,8 +285,9 @@ netns scripts only (no repo builds), 4-wide, against the same binaries
 The host route is a little faster, with no image to build or containers to
 start, and it is the one `zpr-dev` picks whenever user namespaces work. The
 difference is small because most of each script's time is fixed `sleep`s:
-the tier takes about as long as its slowest script,
-`one-node-policy-reauth-test.sh`. Width matters far more than the route.
+the tier takes about as long as its slowest script (then
+`one-node-policy-reauth-test.sh`, which zl-zipline#234 replaced with
+`zode-policy-reauth-test.sh`). Width matters far more than the route.
 
 Earlier measurements on the same host (8 cores, Docker fallback route in
 both cases, 2026-09-29, before the host route could run in parallel):
@@ -283,8 +353,9 @@ make diagrams # PlantUML diagrams, needs the plantuml command
 ```
 
 Binaries land in `./target/debug`. The packet handler `ph` is the one thing you
-need to run a node or an adapter. `adapter/cli` (`ph-cli`) needs
-`libpcap-dev`.
+need to run a Zode (`ph zode`, its only mode). `adapter/cli` (`ph-cli`) needs
+`libpcap-dev`. The `adapter/` directory name is historical: since
+zl-zipline#234 there is no separate adapter.
 
 Each member also has its own `Makefile`, so a single component can be built in
 isolation — CI does exactly this, one job per member.
@@ -449,6 +520,32 @@ Two consequences worth knowing:
    consumers pinning different tags of the same crate as an error, so a set
    cannot be cut while a bump is half-applied.
 
+   **During the Zodes epic** (org-zpr/zl-zipline#216), the consumers on
+   `feature/zodes` pinned `zl-zpr-common` at a pre-release tag cut from that branch,
+   `zl-v0.32.0-zodes.N`. The first is `zl-v0.32.0-zodes.1`
+   (org-zpr/zl-zipline#218). The second is `zl-v0.32.0-zodes.2`
+   (org-zpr/zl-zipline#244, the visa `prevHop` field); the consumers moved to
+   it together in org-zpr/zl-zipline#245. The third is `zl-v0.32.0-zodes.3`
+   (org-zpr/zl-zipline#250, `Link.peerCn` required); core, visaservice and
+   compiler move to it together in #250. The fourth is `zl-v0.32.0-zodes.4`
+   (org-zpr/zl-zipline#252, `BootstrapVisas`, `Link` without `visas`,
+   `updateSubstrateAddr` gone); core, visaservice and compiler move to it
+   together in #252. It is on common `bdbcc18`. The fifth is
+   `zl-v0.32.0-zodes.5` (org-zpr/zl-zipline#255, `Link.peer` optional), on
+   common `f75533a`; core, visaservice and compiler move to it together in
+   #255's merge set. The sixth is `zl-v0.32.0-zodes.6`
+   (org-zpr/zl-zipline#264, `requestBootstrapVisas` gains `observedAddr`,
+   `pname::SUBSTRATE_ADDR` gone), on common `9bf6fba`, cut from the head of
+   zl-zpr-common#17 before it merged (re-cut from the merge if the content
+   differs); core, visaservice and compiler move to it together in #264's
+   merge set, the compiler with no other change. All three consumers (`zl-zpr-core`,
+   `zl-zpr-visaservice`, `zl-zpr-compiler`) move their pin together in
+   org-zpr/zl-zipline#238, never one by one inside feature issues. The general
+   rule for tags cut from a feature branch is
+   [org-zpr/zl-zpr-dev-context#82](https://github.com/org-zpr/zl-zpr-dev-context/pull/82).
+   The line ended with the plain `zl-v0.32.0` (common `bf335f7`) for the base
+   merge (org-zpr/zl-zipline#237); see rule 6 under "Versions and tags".
+
 Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
 across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
 `zl-zpr-visaservice`, `zl-zpr-core`), because `zl-zpr-common` publicly
@@ -483,7 +580,8 @@ requirements moved in the same round.
 `zl-zpr-core` no longer patches them to the `mkolehmainen/capnproto-rust`
 FD-passing fork (zl-zpr-core#93), so packet capture to a file is compiled out
 of normal builds: `ph` answers `setCaptureFile` with Unsupported on every
-platform, and `integration-test/capture-test.sh` skips. The fork is 0.26 only
+platform. (`integration-test/capture-test.sh`, which only skipped, was
+deleted with the adapter-docked scripts in zl-zipline#234.) The fork is 0.26 only
 and cannot be combined with 0.27: a `[patch]` does not apply to the
 `capnp = "0.27.3"` requirement, and `zpr` `zl-v0.31.0` re-exports 0.27
 generated code. So a capture-enabled debug build needs the pre-0.27 dependency
@@ -518,13 +616,21 @@ PR moves it. The per-repository rules:
    match, not a floor: the container's **major must equal** the minimum's, the
    **minor must equal** it too, and the **patch must be greater than or
    equal**. The minimum is `POLICY_MIN_COMPILER_{MAJOR,MINOR,PATCH}`
-   (`zl-zpr-visaservice/vs/src/config.rs:29-31`).
+   (`zl-zpr-visaservice/vs/src/config.rs:34-36`).
 
    So: bump the compiler's **minor** when the container's meaning or format
    changes, and move `POLICY_MIN_COMPILER_*` with it **in the same build set**.
    **Never move the minor for a non-policy reason** — doing so makes the visa
    service reject policy at runtime for a reason unrelated to policy. Patch
    bumps are free: an old minimum accepts a newer patch.
+
+   **Since the Zodes epic the set is zplc 0.21.0 and a minimum of 0.21.0**
+   (org-zpr/zl-zipline#256, merged with #255). zl-zpr-compiler#27 re-lands
+   0.21.0 as a revert of compiler#24, and zl-zpr-visaservice#68 moves the
+   minimum, so the visa service refuses a 0.20.x policy. Every committed
+   `.bin2` that a visa service loads was rebuilt with zplc 0.21.0 in the same
+   set: core's `integration-test/pregen/*.bin2` and `libnode2/test-data/test.bin2`,
+   and the visa service's `integration-test/pregen/zpt-test*.bin2`.
 
 3. **`zl-zpr-common`, and the `zl-zpr-vsapi` / `zl-zpr-policy` submodules it
    carries: unchanged from consequence 2 above** — tag the crate, then bump
@@ -548,10 +654,19 @@ PR moves it. The per-repository rules:
    commit with the *next* version plus `-<feature>.<n>`: `zl-v0.32.0-zodes.1`,
    then `-zodes.2` for the next schema change on the same branch. The
    `Cargo.toml` version matches, per rule 5 (`0.32.0-zodes.1`). A bare
-   `zl-v0.32.0` stays free for `zipline`, so the two lines never claim the same
+   `zl-v0.32.0` stays free for the code that reaches `zipline`, so the two lines never claim the same
    number for different code. When the feature branch merges into `zipline`,
-   cut the plain release tag from `zipline` and move every consumer to it in
-   one round. Consumers on the feature branch move their pin **together**, in
+   cut the plain release tag and move every consumer to it in one round, so
+   that `zipline` never pins a pre-release. For the Zodes base merge
+   (org-zpr/zl-zipline#237, gate g223 q5) that round came first: the plain
+   tags `zl-v0.32.0` (common `bf335f7`) and visa service `v0.22.0` (`fe653fa`)
+   were cut on the reviewed heads of the release PRs into `feature/zodes`,
+   every consumer moved to them in the same merge set, and that set merged
+   into `feature/zodes` with merge commits and then into `zipline` with merge
+   commits. The tagged commits are therefore in both branches' history. One
+   integration run on those PR heads (`build-sets/2026-11-24.yaml`) gated the
+   set; it covers those heads, not a later merge whose resolution changes
+   them. Consumers on the feature branch move their pin **together**, in
    one issue, never one by one inside unrelated feature issues: gate 1 of
    `zpr-dev build` rejects a set whose consumers pin two tags of one crate, so
    staggered pin moves break every cross-repository build of the branch in
@@ -642,8 +757,40 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the ten `zl-zpr-core/integration-test/` scripts, against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen in a core with `ph zode`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; with a Zodes core also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
+
+The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
+fallback of the `netns` tier. `dns-demo` runs Zodes
+([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
+zl-zipline#235): a relay Zode that hosts the visa service on its own TUN,
+plus web, client and dns endpoint Zodes linked to it. It needs a `ph zode`
+core (zl-zipline#234). The ported demo also needs a visa service with zl-zipline#284's Zode departure
+(zl-zpr-visaservice#72, `cf4b4e7`): without it a stopped web Zode stays
+registered and `test-dns.sh` section 3 times out waiting for NXDOMAIN
+(`DNS.md`, "Query semantics"). `build-sets/2026-11-24.yaml` pins a
+known-good set. Since zl-zipline#264 the demo's relay publishes no port: its
+Zodes dial it on the demo network, which is not NATed, so the relay observes
+each at its real container address (zl-zpr-demo#11).
+
+Last recorded full run: `build-sets/2026-11-24.yaml` (zl-zipline#237's
+release merge set S1, 2026-11-24, `--test unit,netns,docker`). It pins the
+set's PR heads: core `01d0cfe` (which also merges core's `zipline`, for
+core#147), the visa service `fe653fa` (= `v0.22.0`), the compiler `d4f0905`, the demo `eab0f29` and CoreDNS `39d49be`, all on
+zl-zpr-common `zl-v0.32.0` (`bf335f7`). Every tier passed: `unit` in the four
+built repositories; `netns` on the host route (`privilege: userns`), all
+fourteen scripts the core carries, with the seven adapter-era scripts skipped
+as absent from the checkout; and `docker` (stage, deploy, test, teardown) on
+the ported `dns-demo`. Its notes record the revisions that are not manifest
+entries: zl-zpr-common, zl-zpr-vsapi, zl-zpr-policy, and the zipline commit
+that pins the same set. It is the newest file in `build-sets/`, so a bare
+`zpr-dev build` builds it when the context checkout
+(`<workspace>/zl-zpr-dev-context` unless `--context` says otherwise; not the
+current directory) contains it; otherwise pass `--context <worktree>` or
+`--manifest <worktree>/build-sets/2026-11-24.yaml`. Either way, run a
+Zode-aware `zpr-dev`, such as the one the run used (dev-context `6db4e34`):
+an older one's netns drift guard rejects the Zode scripts it does not list. The run before it, `build-sets/2026-11-19T2133.yaml`
+(zl-zipline#264's merge set), was green the same way.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
@@ -685,6 +832,17 @@ instead.
    build-sets/<date>.yaml` must resolve to the same shas and recompute the
    same `pins:` block.
 
+**Cutting a set from a feature branch or open PRs.** `--tip` resolves
+each repository's default branch. To build anything else (a long-lived
+feature branch, or a merge set's PR heads, as for the Zodes sets) write a
+manifest whose `zl-zpr-compiler`, `zl-zpr-visaservice`, `zl-zpr-core` and
+`zl-zpr-demo` entries pin those revisions (or the set's tags) and whose
+`zl-zpr-coredns` entry pins a commit on its `main` (shared libraries such as `zl-zpr-common` are not entries, see spec-003), and run
+`zpr-dev build --manifest <file> --test all`; in step 5, reproduce with the
+same `--test all`, so a tier that cannot run fails instead of skipping.
+`build-sets/2026-11-19T2133.yaml` and `build-sets/2026-11-24.yaml` are such
+sets.
+
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
 gates against the live checkouts (read-only, seconds), and `--dry-run` prints
 the resolved shas, build order, tier probes and target `dist/` without
@@ -720,40 +878,66 @@ make pregen     # integration-test/pregen: recompile the .zpl fixtures
 
 ### `zl-zpr-core`
 
-`integration-test/` stands up a real ZPRnet — node, visa service, and adapters
-— on network namespaces. It is not run by `make test`; it needs binaries from
+`integration-test/` stands up a real ZPRnet — a relay Zode that hosts the
+visa service, and Zodes that dial it — on network namespaces (`ph zode`
+only since
+[zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234)). It is not run by `make test`; it needs binaries from
 *other* repositories placed next to the scripts:
 
 ```text
 integration-test/vs                 from zl-zpr-visaservice
 integration-test/vs-admin           from zl-zpr-visaservice
 integration-test/valkey-server      or set VALKEY_SERVER_BIN
+integration-test/zpr-attr-server    from zl-zpr-visaservice, or set ZPR_ATTR_SERVER_BIN
+                                    (attr-query-test.sh only; it exits before
+                                    its assertions without it)
 target/debug/ph, target/debug/ph-cli   built here by make
 ```
 
 The simplest source for the visa-service binaries is a `zl-zpr-visaservice`
 release tarball (`make release` there, or download a published release) unpacked
-into `integration-test/`. Then:
+into `integration-test/`. The Zode scripts need a Zodes visa service: use the
+release core CI pins (`VISA_SERVICE_RELEASE` in core's
+`.github/workflows/adapter.yml`, `v0.22.0-zodes.11` at the time of writing),
+not the latest stable release, which cannot drive Zode links. Then:
 
 ```bash
 ZPR_TEST_VERBOSE=1 VALKEY_SERVER_BIN=/usr/bin/valkey-server \
-    integration-test/one-node-v6-test.sh
+    integration-test/zode-ping-test.sh
 ```
+
+`zode-ping-test.sh` starts one Zode with `--io-engine io_uring` and checks
+that it uses it, so it also needs a kernel and sandbox that allow `io_uring`.
 
 Other entry points, each a standalone script:
 
 | Script | Covers |
 |---|---|
-| `one-node-test.sh`, `one-node-v6-test.sh` | device-only authentication, IPv4 / IPv6 |
-| `capture-test.sh` | packet capture |
-| `one-node-oidc-test.sh` | OIDC login through the fake IdP, plus JWKS key rotation |
-| `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy |
-| `one-node-oidc-renewal-test.sh` | silent OIDC renewal and disconnect-on-revocation. Takes several minutes: the renewal cadence is a real wall clock. It was the acceptance criterion for the node-to-adapter credential request, which landed as zipline#66; its CI job is no longer gated off, but the test has not yet been observed passing (see `docs/OIDC.md`, *Not yet*) |
-| `one-node-policy-reauth-test.sh` | policy-install re-authentication end to end (zipline#124): every policy install obliges every connected actor — the node and each docked adapter, OIDC and bootstrap-key arms both — to re-authenticate under the new policy generation within `reauth_deadline`, and whoever cannot is revoked. Takes several minutes: real installs under a continuous ping |
+| `zode-ping-test.sh` | a ping mesh between three Zodes and the visa service across the relay (zl-zipline#234, the port of `one-node-test.sh`): device-only authentication with the bootstrap key, a different `--io-engine` setting on each Zode (`auto`, `io_uring`, `posix_unbatched`; `auto` picks `io_uring` where the host supports it), and `ph-cli tun` output (zipline#202) |
+| `zode-oidc-test.sh` | OIDC on a logged-in Zode (zl-zipline#234, the port of `one-node-oidc-test.sh` and `one-node-oidc-renewal-test.sh`): JWKS key rotation at the IdP, and the IdP withdrawing a login's refresh grant, after which a user flow bound before the login expires gets no reply, a later ping asks for a new visa, and a ping after that gets no reply (zl-zipline#274, `docs/ZODE_LINKS.md` "Visa expiry on every use (#274)") |
+| `zode-policy-reauth-test.sh` | policy-install re-authentication on Zodes (zipline#124; the port of `one-node-policy-reauth-test.sh`): every policy install obliges every connected Zode to re-authenticate under the new policy generation within `reauth_deadline`, a device-only Zode with its bootstrap key and a logged-in Zode by a silent renewal, and whoever cannot is revoked (a logged-in Zode whose bootstrap key was removed, so that both its renewal and the bootstrap-key fallback fail). A logged-in Zode whose renewal fails but whose bootstrap key still passes stays connected without the login, and a resident `auth-agent` is asked for a new interactive login (OIDC.md); no script covers that case end to end. Takes several minutes: real installs under a continuous ping |
+| `oidc-file-interplay-test.sh` | an `oidc` and a `file` trusted service in one policy, with a user logged in on a Zode |
+| `attr-query-test.sh` | an `oidc` and a `zpr-attr/1` trusted service in one policy: the reference `zpr-attr-server` decorates the logged-in user's identity over pinned TLS (zipline#81) |
+| `a2a-pubkey-test.sh` | security testing: a malicious relay forges the A2A MICV of the pings it forwards between two Zodes, and the receiver must reject them. Needs `ph` built with `enable-security-testing` |
+| `zode-link-test.sh` | the Zode link lifecycle (zl-zipline#250, `docs/ZODE_LINKS.md`): a relay Zode that hosts the visa service in its own namespace, on its own TUN (zl-zipline#229), a Zode with an initial link to it, and a Zode outside the relay's topology. Covers join, restart (rule 5), refusal of an unknown CN (rule 3), substrate loss and redial (rules 9-11), a policy that removes the link (rule 12), link-state reports, J7 with the visa service stopped, and that the relay's sessions with the visa service stay in the host (ZODE_LINKS.md, "The relay hosts the visa service (#229)"). All five Zode scripts use the co-located relay |
+| `zode-join-test.sh` | two Zodes joining through the relay at once (zl-zipline#254, `docs/ZODE_LINKS.md` J1-J5, J11): each gets its own hand-off of two visa-service IDs, none of them the other's, starts with only those in its table, authenticates, reports its link, registers its VSS, receives topology, has its bootstrap visa superseded, and pings the visa service. No Zode refuses a Stream ID Request |
+| `zode-line-test.sh` | zb - relay - zc in a line (zl-zipline#254), in two legs from a clean start. Relay forwarding on: zb and zc ping each other under their own identities, the relay carries the flow on forward-only visas, and no Zode refuses a Stream ID Request. Forwarding off: both still reach the visa service, zb cannot reach zc, and the relay logs that it refuses the forward-only visas |
+| `zode-reroute-test.sh` | #251's re-route and the netns Zodes demo (zl-zipline#254, #231, #268, `docs/ZODE_LINKS.md` rules 9, 10, 13, 13a, 14, 15 and F3, F4, F6). zb and zc bring up a direct link and ping over it with no forward-only visa on the relay. A bulk transfer zb -> zc (2000 x 1000-byte echoes) leaves the relay's received bytes flat: the RX counter of `br0` in its namespace, which does not count frames bridged between zb and zc. Then the zb-zc substrate is blocked: both ends report the link down, the visa service proposes the link again once (`LINK_REPROPOSE_DELAY`, 5 s), zb's attempt ends `failed` and the pair is left out of topology (rule 13a). The ping comes back through the relay on forward-only visas, and the same transfer raises the relay's received bytes by at least its size; by then there has still been exactly one re-proposal. Then the block is lifted and zc restarts, the pair change that clears the failed mark (a policy install keeps it). The link comes back up, and the restarted zc's new flow to zb goes direct with the relay's bytes flat again. Last, a blip: the link is blocked until both ends report it down, then unblocked at once, and it comes back by itself, with no policy install or restart. Needs visa service `v0.22.0-zodes.9` or later |
+| `zode-wrong-ca-test.sh` | a Zode in the policy whose certificate comes from another CA (zl-zipline#254): the relay refuses it in the handshake, no link exists at either end, it never gets a hand-off or registers, and a control Zode signed by the right CA joins normally |
+| `zode-login-test.sh` | a person logging in on a Zode (zl-zipline#233, `docs/OIDC.md` "A Zode's own login"), against a fake IdP: logged out, a flow that needs the user's attribute is denied and a device flow works; `ph-cli connect` admits it; `ph-cli logout` revokes its visa and the machine stays connected; with a resident `auth-agent`, a policy install is answered by a renewal, silent renewals carry the login past its 60 s lifetime, and a visa-service restart drops the login and the agent prompts again. Takes about three minutes |
+| `zode-rejoin-test.sh` | a Zode never matches a new flow to an expired visa (zl-zipline#271, `docs/ZODE_LINKS.md` "Visa expiry at match time (#271)"). zb - relay - zc, with a UDP/53 service on zc that zb may reach only while it holds a `device.hostname` attribute from a file trusted service with a 90 s lifetime (fixture `pregen/zodes-rejoin`), so every visa for it expires during the run, as a ZIPLINE network's DNS visas do. After the visas expire, zb is killed and rejoins (A), then zc is stopped and rejoins (B); each time zb gets every reply, and the other Zode logs that it ejected its expired visa (since zl-zipline#274 the expiry sweep may eject it first, so the ejection baselines are taken before the expiry wait). It failed on core 6e7baba with "visa N not found". Takes about four minutes, most of it waiting for visas to expire |
 | `fake-idp-smoke-test.sh` | the fake IdP's own endpoints. **Needs no root and no netns** — run it first when an OIDC test misbehaves |
 
 Useful overrides: `DEBUG_TARGETS` (default `all=INFO`), `PH_BIN`, `VS_BIN`,
-`NETEM_PARAMS` for link impairment.
+and `PH_DEBUG_BUILD=1`, which says `ph` is a debug build. Core CI sets it
+(`.github/workflows/adapter.yml`), and `integration-test/Makefile` forwards it
+(`FORWARD_ENV`). With it set, or when `$PH_BIN` contains the counter's name,
+`zode-ping-test.sh` requires the debug-only `Actor Packets Out-Of-Order`
+counter to be present and 0 on each Zode; otherwise it reports the check as
+"not measured". zpr-dev stages a release `ph`, so its runs say "not
+measured".
+The Zode scripts refuse a non-empty `NETEM_PARAMS` (`zode_preflight` in
+`lib/zode_funcs.sh`); link impairment was for the old `one-node-*` scripts.
 
 The OIDC tests need a `vs` built from a `zl-zpr-visaservice` that carries the
 feature under test; a stale binary left in `integration-test/` from an earlier
@@ -774,9 +958,8 @@ sudo sysctl --system
 ```
 
 Do not start the scripts under `sudo`: they gain nothing from it.
-(`remote-node-host-env.sh`, the host side of the manual Windows/macOS node
-documents, is the exception: it stays root-based, because its namespaces
-must be reachable from a real remote machine — see its header.)
+(The manual Windows and macOS guides, `integration-test/windows-zode-test.md`
+and `macos-zode-test.md`, run the relay on a real Linux host instead.)
 
 **Where user namespaces are blocked: run them in Docker.** `zpr-dev build`
 does this automatically: when the host route's prerequisites are missing but
@@ -794,7 +977,7 @@ as new as a current host's) only supplies the tooling and `valkey-server`:
 
 ```bash
 make -C integration-test docker-test                        # every *-test.sh, PASS/FAIL summary
-make -C integration-test docker-test TEST=one-node-test.sh  # one script, args allowed
+make -C integration-test docker-test TEST=zode-ping-test.sh # one script, args allowed
 make -C integration-test docker-shell                       # root shell for debugging
 ```
 
@@ -811,18 +994,18 @@ host's glibc is newer than the image's, the binaries will not load; pass
 
 ## What to build to run a ZPRnet
 
-A minimal ZPRnet is a node and a visa service, so three binaries:
+A minimal ZPRnet is a relay Zode and a visa service, so three binaries:
 
 | Binary | Repository | Role |
 |---|---|---|
-| `ph` | `zl-zpr-core` (`adapter/ph`) | packet handler — runs as node *or* adapter |
+| `ph` | `zl-zpr-core` (`adapter/ph`) | packet handler — runs a Zode (`ph zode`) |
 | `vs` | `zl-zpr-visaservice` (`vs`) | the visa service |
 | `zplc` | `zl-zpr-compiler` | compiles the policy `vs` evaluates |
 
 Plus a running Valkey/Redis for `vs`.
 
-`zl-zpr-core/README.md` has the full walkthrough: generating the bootstrap RSA
-keys, the CA and signed noise certificates, the node and adapter TOML configs,
+`zl-zpr-core/docs/SETUP.md` has the full walkthrough: generating the bootstrap RSA
+keys, the CA and signed noise certificates, the Zode TOML config,
 the visa service TLS credentials, and starting everything in order. That
 procedure is runtime setup rather than build, so it is not duplicated here.
 

@@ -447,9 +447,19 @@ mod tests {
         worktree_remove(&repo, &dest).unwrap();
 
         assert!(!dest.exists());
-        let listing = git(&repo, &["worktree", "list"]).unwrap();
-        assert!(
-            !listing.contains("wt"),
+        // Count registrations rather than searching the text: the random
+        // tempdir name can itself contain "wt" (zipline#280 —
+        // `/tmp/.tmpYtuywt/repo` failed a substring check). Porcelain output
+        // has one `worktree <path>` line per registration. (`-z` would also
+        // survive a newline in the path, but needs Git 2.36.) Only the main
+        // worktree may remain.
+        let listing = git(&repo, &["worktree", "list", "--porcelain"]).unwrap();
+        let registered = listing
+            .lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count();
+        assert_eq!(
+            registered, 1,
             "stale worktree entry after removal: {listing}"
         );
     }
