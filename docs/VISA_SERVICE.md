@@ -738,7 +738,9 @@ not expire, see *Authenticating actors*), a 300-second default
 `reauth_deadline` for re-authentication after a policy install, 180-second
 maximum clock skew during node authentication, 20 visas per request, 1024
 request workers and queue depth, a 7-second VSS ping with 3 failures before the
-VSS worker exits, and a 30-second database lock refresh against a 90-second
+VSS worker exits (each ping times out after 1 s plus 1 s per earlier failure,
+tighter than the Zode's VS-API ping, which is sized to the link keep-alive:
+ZODE_LINKS.md, "VS-API liveness (#292)"), and a 30-second database lock refresh against a 90-second
 timeout. A VSS worker that exits removes nothing: link state decides when a
 departed Zode is removed, 10 seconds (`ZODE_DEPARTURE_GRACE`) after it is left
 with no link up (*A departed Zode is removed after a grace (#284)* below).

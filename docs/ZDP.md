@@ -352,7 +352,9 @@ upstream ASA TLV (4) is not used: zipline removed it with the BAS client
 
 Keep-alive is `Echo` every `DEFAULT_KEEP_ALIVE_PERIOD = 3 s` with a matching
 3-second timeout; a link is torn down after `KEEP_ALIVE_MAX_MISSES = 3`
-consecutive misses (zipline#113). A link never restarts itself: only its owner
+consecutive misses (zipline#113). The constants are in
+`zl-zpr-core/libnode2/src/keepalive.rs`, because the VS-API session's liveness
+probe is sized from them too (ZODE_LINKS.md, rule 16). A link never restarts itself: only its owner
 redials. Keying and Hello are bounded on both ends, so an attempt ends inside
 the owner's 10-second link-up window: `ZODE_KEYING_TIMEOUT = 2 s` and
 `ZODE_HELLO_TIMEOUT = 2 s`.
