@@ -517,6 +517,14 @@ a proven seam. Rejected: per-source reader threads plus channels (extra copy
 and hop per packet, second datapath shape); a tokio async datapath on Windows
 only (forks the datapath, loses `batch_io`).
 ([zipline#128](https://github.com/org-zpr/zl-zipline/issues/128))
+Wintun's read-wait event is the one source that is not level-signaled: it
+is an auto-reset Event that the driver sets once per ring append, and the
+wait that reports it consumes it. The fastpath reads one TUN batch per wake,
+so a batch that ends without seeing the ring empty re-arms the event
+(`SetEvent`, in `windows_unbatched`'s TUN read). Without that, the rest of the
+ring waited for the next append: a Windows bulk send stalled for seconds, and
+the host's VS-API and VSS pings in the same ring timed out.
+([zl-zipline#292](https://github.com/org-zpr/zl-zipline/issues/292))
 
 **Wintun via the `wintun` crate; addresses and routes via `netsh`.** The
 signed `wintun.dll` ships next to `ph.exe` and is loaded at runtime;
