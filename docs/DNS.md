@@ -321,7 +321,7 @@ another provider's live `service:<name>` entry.
 ## Implementation status
 
 Service names and machine names are fully implemented and merged. The end-to-end proof is
-`zl-zpr-demo/dns-demo`, on zl-zpr-demo's `feature/zodes`
+`zl-zpr-demo/dns-demo`
 ([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
 [zl-zipline#235](https://github.com/org-zpr/zl-zipline/issues/235)). Its
 `local-compute/deploy-docker.sh` stands up a relay Zode that hosts the visa
@@ -329,14 +329,13 @@ service on its own TUN, plus web, client and resolver endpoint Zodes linked to
 it, and `local-compute/test-dns.sh` exercises resolution, liveness, both policy
 hops, machine names and aliases, and the collision / precedence / invalid-name
 controls. It is `zpr-dev build`'s `docker` tier: all eight `test-dns.sh`
-sections passed in build set `build-sets/2026-11-19.yaml`. Reproduce it through
-that set, with a `zpr-dev` built from zl-zpr-dev-context's `feature/zodes`:
-`zpr-dev build --manifest <zl-zpr-dev-context>/build-sets/2026-11-19.yaml
---test docker` (add `--force` to replace an earlier build of the set). The
-demo's own `make` builds whatever the source checkouts hold, and the
-workspace's default is `zipline`, whose core has no `ph zode`; zl-zpr-demo's
-`zipline` branch still docks adapters on one node, so it runs only against a
-core from before zl-zipline#234.
+sections passed in build set `build-sets/2026-11-24.yaml`. Reproduce it through
+that set: `zpr-dev build --manifest <zl-zpr-dev-context>/build-sets/2026-11-24.yaml
+--test docker` (add `--force` to replace an earlier build of the set), with a
+Zode-aware `zpr-dev` such as dev-context `6db4e34` (`BUILD.md`, "Last recorded
+full run"). The
+demo's own `make` builds whatever the source checkouts hold, and needs a
+`ph zode` core (zl-zipline#234).
 
 On ZIPLINE the resolver runs behind a Zode named `dns.zpr` ([org-zpr/zipline#252](https://github.com/org-zpr/zipline/issues/252)):
 a Zode with an initial link to the relay, a server-generated link

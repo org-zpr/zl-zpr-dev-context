@@ -391,14 +391,17 @@ risk. Everything is a release build. The table is in claim order:
   `$(wildcard *-test.sh)`. A listed script that only one core branch
   carries (`NETNS_SCRIPTS_IF_PRESENT`) runs only when the worktree has it;
   otherwise the tier records it as `skipped: not in this zl-zpr-core
-  revision`. Every other listed script must exist. Until zl-zipline#237
-  merges `feature/zodes` into `zipline`, the optional scripts are:
-  - on `zipline` only, the adapter-docked scripts that zl-zipline#234
-    deletes on `feature/zodes`: `one-node-test.sh`, `one-node-v6-test.sh`,
+  revision`. Every other listed script must exist. The optional scripts
+  are the two sides of the Zodes epic (zl-zipline#216); since zl-zipline#237
+  merged `feature/zodes` into `zipline`, the fork's `zipline` and
+  `feature/zodes` tips carry only the second (the upstream mirror `main`
+  still has the first), and removing the first is a follow-up (gate g223 q12):
+  - only in a core from before zl-zipline#234, the adapter-docked scripts
+    that #234 deleted: `one-node-test.sh`, `one-node-v6-test.sh`,
     `one-node-oidc-test.sh`, `one-node-oidc-renewal-test.sh`,
     `one-node-policy-reauth-test.sh`, `node-restart-test.sh` and
     `capture-test.sh`;
-  - on `feature/zodes` only, the Zode scripts: `zode-link-test.sh`
+  - only in a core from the Zodes epic on, the Zode scripts: `zode-link-test.sh`
     (zl-zipline#250); `zode-join-test.sh`, `zode-line-test.sh`,
     `zode-reroute-test.sh` and `zode-wrong-ca-test.sh` (zl-zipline#254);
     `zode-login-test.sh` (zl-zipline#233); `zode-rejoin-test.sh`
@@ -407,7 +410,7 @@ risk. Everything is a release build. The table is in claim order:
     `zode-policy-reauth-test.sh`.
 
   `a2a-pubkey-test.sh`, `attr-query-test.sh`, `oidc-file-interplay-test.sh`
-  and `fake-idp-smoke-test.sh` are on both branches (#234 rewrites the first
+  and `fake-idp-smoke-test.sh` are in every core (#234 rewrites the first
   three onto Zodes under the same names).
 - The netns tier selects its route **host → container → skip**
   (zipline#92/#93/#192). The host route wins whenever its own prerequisites
@@ -443,7 +446,7 @@ risk. Everything is a release build. The table is in claim order:
 - `a2a-pubkey-test.sh` needs a `ph` built with `enable-security-testing`;
   that binary must never be staged into `dist/`. After the tiers, the build
   checks the staged `ph`: it reads the run subcommand from `ph --help`
-  (`zode`, or `node` on a `zipline` core), and fails when `ph <sub> --help`
+  (`zode`, or `node` on a core from before zl-zipline#234), and fails when `ph <sub> --help`
   advertises `--security-testing-mangle-forwarded-pings`. It fails closed: a
   `ph` that lists neither subcommand, or a `--help` that exits non-zero, is
   not clean (§10.4).
@@ -702,10 +705,10 @@ decision on the umbrella, 2026-10-13.
 **zipline keeps `/24` substrate addressing; upstream uses peer addressing.**
 A `peer` address on a veth is a `/32`, the kernel does not answer ARP for
 it on an ARP-capable device, so neighbour entries stay INCOMPLETE and no
-link comes up (on `zipline`, no adapter docks). TUN devices are NOARP, so
-`tun0` keeps peer addressing. This is the one deliberate divergence of
-`create_network` from `main`; `feature/zodes`'s `lib/zode_funcs.sh` gives
-its veths `/24` addresses for the same reason.
+link came up (no adapter docked). TUN devices are NOARP, so
+`tun0` kept peer addressing. This was the one deliberate divergence of the
+adapter-era `create_network` from `main`; since zl-zipline#234,
+`lib/zode_funcs.sh` gives its veths `/24` addresses for the same reason.
 ([zipline#190](https://github.com/org-zpr/zl-zipline/issues/190))
 
 **`pkill`/`pgrep` are scoped to the run's own user namespace.** Concurrent
@@ -742,14 +745,16 @@ back to the container, and the skip reason names the AppArmor sysctl.
 
 ### 10.4 `ph zode` only (zl-zipline#234)
 
-**One script list serves both core branches until zl-zipline#237.** The
-default build set pins core `zipline`, which keeps `ph node`, `ph adapter`
-and the adapter-docked scripts, while `feature/zodes` deletes them and adds
+**One script list served both core branches until zl-zipline#237.** The
+default build set pinned core `zipline`, which kept `ph node`, `ph adapter`
+and the adapter-docked scripts, while `feature/zodes` deleted them and added
 their Zode ports. So both sets sit in `NETNS_SCRIPTS_IF_PRESENT` and each
 core runs what it carries; a unit test pins the optional list to exactly
 the scripts one branch has and the other lacks, so a script deleted on one
-branch cannot fail that branch's tier as missing. The split goes when #237
-merges `feature/zodes` into `zipline`.
+branch cannot fail that branch's tier as missing. Since #237 merged
+`feature/zodes` into `zipline`, neither the `zipline` nor the
+`feature/zodes` tip has the adapter-docked scripts; removing them and the split is a follow-up (gate g223 q12), kept
+out of #237 because #237 changes no code.
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
 
 **The dist/ `ph` check fails closed.** It ran `ph node --help`, ignored the
@@ -761,7 +766,8 @@ else `node` — and treats a `ph` that lists neither, or any `--help` that
 exits non-zero, as not clean, saying why: a check that cannot run must not
 report a pass. Supporting `node` as well is a dev-tool concession to the
 `zipline` pin, not backwards compatibility in `ph` itself (operator, gate
-g167 q12); it goes with the split above.
+g167 q12). Since #237 no `zipline` core has `node`; the `node` case goes in
+the same follow-up as the split above.
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
 
 **dns-demo runs Zodes (zl-zipline#235).** Once `ph node` and `ph adapter`
@@ -771,8 +777,8 @@ zl-zpr-demo's `dns-demo` launched both. It was ported on zl-zpr-demo's
 plus web, client and dns endpoint Zodes, with `test-dns.sh`'s eight sections
 kept. The tier needed no `zpr-dev` change: it stages `dist/` into
 `dns-demo/bin/` and runs the demo's own deploy and test scripts, whatever they
-launch. So a Zodes set pins `zl-zpr-demo` at `feature/zodes` and runs every
-tier; `build-sets/2026-11-19.yaml` is the first, green on `unit`, `netns`
+launch. Until #237, a Zodes set pinned `zl-zpr-demo` at `feature/zodes` and
+ran every tier; `build-sets/2026-11-19.yaml` is the first, green on `unit`, `netns`
 (fourteen scripts) and `docker`.
 ([zl-zipline#235](https://github.com/org-zpr/zl-zipline/issues/235))
 

@@ -77,10 +77,9 @@ Two steps. A checkout made by `zpr-dev` has only one remote — `origin`, the fo
 **`zl-zpr-core`: cherry-pick, do not merge.** zl-zipline#234 removed adapter
 mode from the fork, so upstream changes to adapter code would conflict on
 every merge of `origin/main`. Upstream fixes are taken into core one at a
-time by cherry-pick instead of step 2. This applies once
-[zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merges
-`feature/zodes` into core's `zipline`; until then `zipline` still has adapter
-mode. The other forks are unchanged and merge as below. Cherry-picks do not
+time by cherry-pick instead of step 2. This applies since
+[zl-zipline#237](https://github.com/org-zpr/zl-zipline/issues/237) merged
+`feature/zodes` into core's `zipline`. The other forks are unchanged and merge as below. Cherry-picks do not
 move the merge base, so for core `git diff main...zipline` then also lists
 the upstream fixes already picked.
 (`git show 0686fd8:docs/plans/2026-11-11-zodes.md` §5.11 in org-zpr/zipline)
@@ -315,7 +314,7 @@ Runnable demonstrations of ZPR. Each has its own `README.md`.
 containerized-demo/   a running ZPRnet in containers
 multinode-demo/       multiple nodes
 iot-demo/             ZPR integrated with the Oracle IoT platform
-dns-demo/             DNS over ZPR; zpr-dev's docker tier (Zodes on feature/zodes)
+dns-demo/             DNS over ZPR, on Zodes; zpr-dev's docker tier
 ```
 
 The fastest way to see a working ZPRnet without assembling one by hand.

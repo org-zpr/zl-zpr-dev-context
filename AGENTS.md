@@ -14,6 +14,7 @@ Additional coding guidelines:
 - Use the DRY principle, favor code reuse and refactor aggressively to achieve this.
 - Unit test everything. When a bug is found, before fixing it write a test that fails.
 - Unless a function is exceedingly trivial, every function should have a comment explaining what it does.
+- Do not leave obsoleted or unused code paths in the code.
 
 
 ## INDEX
