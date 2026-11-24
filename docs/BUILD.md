@@ -122,8 +122,9 @@ the containerized jobs pull the private `ghcr.io/org-zpr/dev-env` image; see
 `skills/zpr/SKILL.md` ("Git / PR conventions") for what each needs
 (`org-zpr/zl-zipline#208`).
 
-**On `feature/zodes`, core CI takes the visa service from a feature
-pre-release**, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
+**Core CI runs the full visa service release `v0.22.0`.** Before the Zodes
+base merge, core CI on `feature/zodes` took the visa service from a feature
+pre-release, `v0.22.0-zodes.N`, cut from the visa service's `feature/zodes`
 (`make release`, then `gh release create v0.22.0-zodes.N --prerelease --target
 <full sha> release-linux-x86_64.tar.gz`: core's integration jobs download that
 asset, so a release without it fails every job at **Download Asset**). The first, `v0.22.0-zodes.1`, is `ef03e95`; core moved to it in
@@ -182,6 +183,13 @@ with the set (org-zpr/zipline#289, package 2.0.9): core `d0f6121` (core#139
 without its CI-pin commit), the visa service at `6b85e4e` and the compiler at
 `1ff3140`. zipline#289's head `38a9a2e` is the run's `5f29650` plus the
 real-host run records only.
+For the base merge (org-zpr/zl-zipline#237, pd plan p62, gate g223 q5) the
+pre-release line ended: the full release `v0.22.0` is `fe653fa`, the head of
+org-zpr/zl-zpr-visaservice#82, cut **before it merged** and published as a
+full release, not `--prerelease`. org-zpr/zl-zpr-core#146 moves
+`VISA_SERVICE_RELEASE` to it in the same merge set (S1), which merges into
+`feature/zodes` with merge commits and from there into `zipline`, so the
+released commit is part of both branches' history.
 
 From 2026-09 until the transfer, Actions was switched off, because none of that
 CI could run. `pr-notify.yml` needs `SLACK_ALERT_WEBHOOK_URL`, and
@@ -512,8 +520,8 @@ Two consequences worth knowing:
    consumers pinning different tags of the same crate as an error, so a set
    cannot be cut while a bump is half-applied.
 
-   **On `feature/zodes`** (the Zodes epic, org-zpr/zl-zipline#216), the
-   consumers pin `zl-zpr-common` at a pre-release tag cut from that branch,
+   **During the Zodes epic** (org-zpr/zl-zipline#216), the consumers on
+   `feature/zodes` pinned `zl-zpr-common` at a pre-release tag cut from that branch,
    `zl-v0.32.0-zodes.N`. The first is `zl-v0.32.0-zodes.1`
    (org-zpr/zl-zipline#218). The second is `zl-v0.32.0-zodes.2`
    (org-zpr/zl-zipline#244, the visa `prevHop` field); the consumers moved to
@@ -535,6 +543,8 @@ Two consequences worth knowing:
    org-zpr/zl-zipline#238, never one by one inside feature issues. The general
    rule for tags cut from a feature branch is
    [org-zpr/zl-zpr-dev-context#82](https://github.com/org-zpr/zl-zpr-dev-context/pull/82).
+   The line ended with the plain `zl-v0.32.0` (common `bf335f7`) for the base
+   merge (org-zpr/zl-zipline#237); see rule 6 under "Versions and tags".
 
 Cap'n Proto crates (`capnp`, `capnp-rpc`, `capnpc`) are **lockstep on one minor
 across all four Rust repositories** (`zl-zpr-common`, `zl-zpr-compiler`,
@@ -614,7 +624,7 @@ PR moves it. The per-repository rules:
    service reject policy at runtime for a reason unrelated to policy. Patch
    bumps are free: an old minimum accepts a newer patch.
 
-   **On `feature/zodes` the set is zplc 0.21.0 and a minimum of 0.21.0**
+   **Since the Zodes epic the set is zplc 0.21.0 and a minimum of 0.21.0**
    (org-zpr/zl-zipline#256, merged with #255). zl-zpr-compiler#27 re-lands
    0.21.0 as a revert of compiler#24, and zl-zpr-visaservice#68 moves the
    minimum, so the visa service refuses a 0.20.x policy. Every committed
@@ -644,10 +654,18 @@ PR moves it. The per-repository rules:
    commit with the *next* version plus `-<feature>.<n>`: `zl-v0.32.0-zodes.1`,
    then `-zodes.2` for the next schema change on the same branch. The
    `Cargo.toml` version matches, per rule 5 (`0.32.0-zodes.1`). A bare
-   `zl-v0.32.0` stays free for `zipline`, so the two lines never claim the same
+   `zl-v0.32.0` stays free for the code that reaches `zipline`, so the two lines never claim the same
    number for different code. When the feature branch merges into `zipline`,
-   cut the plain release tag from `zipline` and move every consumer to it in
-   one round. Consumers on the feature branch move their pin **together**, in
+   cut the plain release tag and move every consumer to it in one round, so
+   that `zipline` never pins a pre-release. For the Zodes base merge
+   (org-zpr/zl-zipline#237, gate g223 q5) that round came first: the plain
+   tags `zl-v0.32.0` (common `bf335f7`) and visa service `v0.22.0` (`fe653fa`)
+   were cut on the reviewed heads of the release PRs into `feature/zodes`,
+   every consumer moved to them in the same merge set, and that set merged
+   into `feature/zodes` with merge commits and then into `zipline` with merge
+   commits. The tagged commits are therefore in both branches' history, and a
+   single integration run (`build-sets/2026-11-24.yaml`) covers exactly what
+   lands in `zipline`. Consumers on the feature branch move their pin **together**, in
    one issue, never one by one inside unrelated feature issues: gate 1 of
    `zpr-dev build` rejects a set whose consumers pin two tags of one crate, so
    staggered pin moves break every cross-repository build of the branch in
@@ -738,45 +756,35 @@ workspace does not check out.
 | Tier | What runs | Prerequisites | Probe-gated |
 |---|---|---|---|
 | `unit` | `make test` per built repository, with `make pregen ZPLC=<dist>/zplc` first in `zl-zpr-visaservice` | none beyond the build | no |
-| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen on `feature/zodes`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; on `feature/zodes` also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
+| `netns` | the `zl-zpr-core/integration-test/` scripts listed in `zpr-dev/src/build/tiers.rs` (fourteen in a core with `ph zode`), against `dist/` binaries | Linux, and either (unprivileged user namespaces, `valkey-server`, `python3`) or a reachable Docker daemon; also `io_uring`, which `zode-ping-test.sh` requires and which the runner does not probe | yes |
 | `docker` | `dns-demo` deploy + `test-dns.sh` + `docker compose down -v` | `docker`, `docker compose` | yes |
 
 The `docker` tier is the `zl-zpr-demo` DNS demo; it is not the Docker
-fallback of the `netns` tier. `dns-demo` runs Zodes on zl-zpr-demo's
-`feature/zodes` ([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
+fallback of the `netns` tier. `dns-demo` runs Zodes
+([zl-zpr-demo#10](https://github.com/org-zpr/zl-zpr-demo/pull/10),
 zl-zipline#235): a relay Zode that hosts the visa service on its own TUN,
-plus web, client and dns endpoint Zodes linked to it. zl-zpr-demo's `zipline`
-branch still starts `ph node` and `ph adapter`, so it needs a core from before
-zl-zipline#234; pin the demo at `feature/zodes` with a `ph zode` core. The
-ported demo also needs a visa service with zl-zipline#284's Zode departure
+plus web, client and dns endpoint Zodes linked to it. It needs a `ph zode`
+core (zl-zipline#234). The ported demo also needs a visa service with zl-zipline#284's Zode departure
 (zl-zpr-visaservice#72, `cf4b4e7`): without it a stopped web Zode stays
 registered and `test-dns.sh` section 3 times out waiting for NXDOMAIN
-(`DNS.md`, "Query semantics"). `build-sets/2026-11-19T2133.yaml` pins a
+(`DNS.md`, "Query semantics"). `build-sets/2026-11-24.yaml` pins a
 known-good set. Since zl-zipline#264 the demo's relay publishes no port: its
 Zodes dial it on the demo network, which is not NATed, so the relay observes
 each at its real container address (zl-zpr-demo#11).
 
-Last recorded full run on `feature/zodes`: `build-sets/2026-11-19T2133.yaml`
-(zl-zipline#264's merge set, 2026-11-19, `--test unit,netns,docker`, about 16
-minutes on the 8-core workspace host). It pins the set's PR heads: core
-`740eab1`, the visa service `6b85e4e` (= `v0.22.0-zodes.11`), the compiler
-`1ff3140`, the demo `06b59d1` and CoreDNS `39d49be`. Every tier passed on
-its first run, with no re-runs: `unit` in the four built repositories;
-`netns` on the host route (`privilege: userns`), all fourteen scripts a
-`feature/zodes` core carries, with the seven `zipline`-only scripts skipped
+Last recorded full run: `build-sets/2026-11-24.yaml` (zl-zipline#237's
+release merge set S1, 2026-11-24, `--test unit,netns,docker`). It pins the
+set's PR heads: core `442203a`, the visa service `fe653fa` (= `v0.22.0`), the
+compiler `d4f0905`, the demo `eab0f29` and CoreDNS `39d49be`, all on
+zl-zpr-common `zl-v0.32.0` (`bf335f7`). Every tier passed: `unit` in the four
+built repositories; `netns` on the host route (`privilege: userns`), all
+fourteen scripts the core carries, with the seven adapter-era scripts skipped
 as absent from the checkout; and `docker` (stage, deploy, test, teardown) on
-the ported `dns-demo`. Its notes record the revisions that are not manifest entries: zl-zpr-common, zl-zpr-vsapi,
-zl-zpr-policy, the zipline commit that pins the same set, and the
-zl-zpr-dev-context commit that supplied `zpr-dev`. On this repository's
-`feature/zodes` it is the newest file in `build-sets/`, so a bare `zpr-dev
-build` builds it when the context checkout (`<workspace>/zl-zpr-dev-context`
-unless `--context` says otherwise; not the current directory) is on
-`feature/zodes`. From another worktree, pass `--context <worktree>` or
-`--manifest <worktree>/build-sets/2026-11-19T2133.yaml`. Either way, run a
-`zpr-dev` built from `feature/zodes`: the `zipline` one's netns drift guard
-rejects the Zode scripts it does not list. The run before it,
-`build-sets/2026-11-19.yaml` (zl-zipline#235), was green the same way at the
-`feature/zodes` tips before #264.
+the ported `dns-demo`. Its notes record the revisions that are not manifest
+entries: zl-zpr-common, zl-zpr-vsapi, zl-zpr-policy, and the zipline commit
+that pins the same set. It is the newest file in `build-sets/`, so a bare
+`zpr-dev build` builds it. The run before it, `build-sets/2026-11-19T2133.yaml`
+(zl-zipline#264's merge set), was green the same way.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
 or a comma-separated list. `default` selects every tier above with the
@@ -818,16 +826,15 @@ instead.
    build-sets/<date>.yaml` must resolve to the same shas and recompute the
    same `pins:` block.
 
-**Cutting a Zodes set** (a core with only `ph zode`, until `feature/zodes`
-merges into `zipline`). `--tip` resolves `zipline` and so selects the old
-core and the adapter-era demo. So in step 2, write a manifest whose
-`zl-zpr-compiler`, `zl-zpr-visaservice`, `zl-zpr-core` and `zl-zpr-demo`
-entries pin their `feature/zodes` revisions (or the set's pre-release tags)
-and whose `zl-zpr-coredns` entry pins a commit on its `main` (shared
-libraries such as `zl-zpr-common` are not entries, see spec-003), and run
+**Cutting a set from a feature branch or open PRs.** `--tip` resolves
+each repository's default branch. To build anything else (a long-lived
+feature branch, or a merge set's PR heads, as for the Zodes sets) write a
+manifest whose `zl-zpr-compiler`, `zl-zpr-visaservice`, `zl-zpr-core` and
+`zl-zpr-demo` entries pin those revisions (or the set's tags) and whose
+`zl-zpr-coredns` entry pins a commit on its `main` (shared libraries such as `zl-zpr-common` are not entries, see spec-003), and run
 `zpr-dev build --manifest <file> --test all`; in step 5, reproduce with the
 same `--test all`, so a tier that cannot run fails instead of skipping.
-`build-sets/2026-11-19.yaml` and `build-sets/2026-11-19T2133.yaml` are such
+`build-sets/2026-11-19T2133.yaml` and `build-sets/2026-11-24.yaml` are such
 sets.
 
 Quick checks along the way: `zpr-dev build --tip --gates-only` runs just the
@@ -866,11 +873,9 @@ make pregen     # integration-test/pregen: recompile the .zpl fixtures
 ### `zl-zpr-core`
 
 `integration-test/` stands up a real ZPRnet — a relay Zode that hosts the
-visa service, and Zodes that dial it — on network namespaces. The Zode
-scripts below need a core checkout of `feature/zodes` after
-[zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234); a
-`zipline` checkout (what a fresh `zpr-dev setup` gives) still has `ph node`
-and the older `one-node-*` scripts. It is not run by `make test`; it needs binaries from
+visa service, and Zodes that dial it — on network namespaces (`ph zode`
+only since
+[zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234)). It is not run by `make test`; it needs binaries from
 *other* repositories placed next to the scripts:
 
 ```text

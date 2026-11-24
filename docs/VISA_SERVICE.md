@@ -21,7 +21,7 @@ evaluation. Changes to issuance behavior should also be read against
 | Source | Status |
 |---|---|
 | *ZPR Visa Service Specification / Design Document* (2025-09-03) | The design intent. Explicitly work-in-progress, and parts are marked sketchy or TODO by its authors. |
-| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.22.0 on `feature/zodes`. |
+| `zl-zpr-visaservice/` | What actually runs. Workspace version 0.22.0, released as `v0.22.0`. |
 | `zl-zpr-visaservice/admin-http-api.txt` | The admin API, current as of 2026-09-15 and changing frequently. |
 | `zl-zpr-visaservice/libeval/README.md` | The evaluator's API and staging model. |
 
@@ -136,7 +136,7 @@ connected actor.
 
 ### VS-API calls added for Zodes
 
-`vs.capnp` on `feature/zodes` adds three `VSHandle` calls a node makes over its
+For Zodes, `vs.capnp` adds three `VSHandle` calls a node makes over its
 existing session, and the visa service implements all three:
 `reportLinkStates` ([#217](https://github.com/org-zpr/zl-zipline/issues/217),
 [#224](https://github.com/org-zpr/zl-zipline/issues/224)), `getLoginNonce`
@@ -291,7 +291,7 @@ renewal, which keeps the user, instead of K2.
 
 A policy is required at startup; later updates arrive over the admin API. The
 policy carries a compiler version and the visa service rejects versions it does
-not support. On `feature/zodes` it requires **compiler 0.21.x**: the major and
+not support. It requires **compiler 0.21.x**: the major and
 minor must equal `POLICY_MIN_COMPILER_*` (0.21.0) and the patch must be at least
 its patch (`vs/src/config.rs`; BUILD.md, "Versions and tags"). 0.21 is the
 compatibility boundary set together with routing's enforcement of
@@ -1842,8 +1842,8 @@ no adapter docks on a Zode.
 - **Which links a node should have now has a contract**, outside the design
   document: `setTopology` names each peer with its link-certificate CN
   (`Link.peerCn`), and the node answers with `reportLinkStates` (see
-  ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). On
-  `feature/zodes` the visa service fills `peerCn` from policy
+  ROUTING.md) ([#217](https://github.com/org-zpr/zl-zipline/issues/217)). The
+  visa service fills `peerCn` from policy
   ([#221](https://github.com/org-zpr/zl-zipline/issues/221)) and acts on
   `reportLinkStates` ([#224](https://github.com/org-zpr/zl-zipline/issues/224)),
   including the failed-pair rule 13a; Zodes accept links by `peerCn` and send

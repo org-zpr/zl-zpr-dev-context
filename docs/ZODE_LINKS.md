@@ -2,7 +2,7 @@
 
 **Status:** Implemented for zl-zipline#250 (rules 1–15 except 11a) and for
 #251, forwarding over Zode links (F1–F8; F2's `prev_hop` check is #253's,
-zl-zpr-core#115), on `feature/zodes`. Rules 11a and 16 and the relay join (J1–J11) are
+zl-zpr-core#115). Rules 11a and 16 and the relay join (J1–J11) are
 implemented for #252: the hand-off codec and checks (zl-zpr-core#111) and J11
 (zl-zpr-core#112) are merged; the relay and joiner (zl-zpr-core#113), the visa
 service's half (zl-zpr-visaservice#67) and the compiler's pin
@@ -1652,7 +1652,7 @@ The demo first ran on real machines (2026-11-17) against a ZIPLINE dev
 server: relay and DNS Zodes in containers, Ubuntu and Windows Zodes on
 adapter 2.0.4, and the visa service at `65fe475` (`v0.22.0-zodes.9`).
 - **The runner and the recordings.** The runner is zipline
-  `test/manual/zodes-demo/demo.sh`, and the recordings are in its `runs/`.
+  `e2etest/manual/zodes-demo/demo.sh`, and the recordings are in its `runs/`.
 - **Linux-Linux passed every step:** the direct link, a 256 MiB transfer that
   leaves the relay container's received bytes flat, a firewall block that
   sends the next one through the relay, and recovery.
@@ -1681,15 +1681,15 @@ adapter 2.0.4, and the visa service at `65fe475` (`v0.22.0-zodes.9`).
   Windows). On a fresh network, a Windows Zode reached `vs.zpr` and the DNS
   Zode with no /128 visa-service route, only the on-link `fd5a:5052::/32`;
   its address had PrefixLength 32, and it resolved names by DNS
-  ([checks](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-checks)). The demo results:
-  - Linux-Linux: 17/17 steps ([L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-L)).
+  ([checks](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-checks)). The demo results:
+  - Linux-Linux: 17/17 steps ([L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-L-L)).
   - Linux client, Windows server: 16/17 on the first run
-    ([L-W-1](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-1)). The step 3 direct download got a TCP reset with no
+    ([L-W-1](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-L-W-1)). The step 3 direct download got a TCP reset with no
     restart before it, so
     [#277](https://github.com/org-zpr/zl-zipline/issues/277) covers more than
     a restart: TCP to or from a Windows Zode can be reset mid-transfer. The
-    re-run passed 17/17 ([L-W-2](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-L-W-2)).
-  - Windows client, Linux server, by DNS name: 17/17 ([W-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-W-L)).
+    re-run passed 17/17 ([L-W-2](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-L-W-2)).
+  - Windows client, Linux server, by DNS name: 17/17 ([W-L](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-W-L)).
 
   #277 is open. It has reset 2 of the Windows runs: 2026-11-18 W-L-1
   (step 5, after a restart) and 2026-11-19 L-W-1 (step 3, no restart).
@@ -1715,7 +1715,7 @@ What the real machines showed beyond the netns test:
   (`172.33.0.1`). The VS proposed that address as `Link.peer`, the direct
   dial failed, rule 13a marked the pair, and traffic flowed through the relay
   (a 64 MiB download matched its SHA-256;
-  [2026-11-19-264-L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-L)). Before #264 each Zode reported
+  [2026-11-19-264-L-L](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-264-L-L)). Before #264 each Zode reported
   its own address, so the NAT did not matter. The testbed fix is a `RETURN`
   rule in libvirt's `LIBVIRT_PRT` chain that exempts VM-to-Docker-subnet
   traffic from the masquerade. With it (package 2.0.9, core `d0f6121`, visa
@@ -1723,8 +1723,8 @@ What the real machines showed beyond the netns test:
   (`192.168.122.212`, `.92` and `.39`, port 5000), the direct links formed, and
   L-L and L-W both passed 17/17: the 256 MiB direct download raised the
   relay's received bytes by 38 KB, against 291 MB when the direct link was
-  blocked ([L-L-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-L-natfix),
-  [L-W-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/test/manual/zodes-demo/runs/2026-11-19-264-L-W-natfix)). In a deployment that cannot
+  blocked ([L-L-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-264-L-L-natfix),
+  [L-W-natfix](https://github.com/org-zpr/zipline/tree/feature/zodes/e2etest/manual/zodes-demo/runs/2026-11-19-264-L-W-natfix)). In a deployment that cannot
   avoid such a NAT, give the Zodes policy addresses.
 - **Block inbound only.** A host firewall that drops a Zode's *outgoing*
   substrate UDP makes the kernel fail `ph`'s send with EPERM. ZIPLINE 2.0.9

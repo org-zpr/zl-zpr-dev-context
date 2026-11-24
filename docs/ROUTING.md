@@ -227,7 +227,7 @@ Two caveats, both documented in the code as TODOs:
 A node tells the visa service which of its links are up with
 `VSHandle.reportLinkStates` (schema
 [#217](https://github.com/org-zpr/zl-zipline/issues/217)). The visa service
-implements it on `feature/zodes`
+implements it
 ([#224](https://github.com/org-zpr/zl-zipline/issues/224)), and a Zode sends it
 ([#250](https://github.com/org-zpr/zl-zipline/issues/250)). How a Zode brings
 its links up, and what it reports when, is
@@ -1042,7 +1042,7 @@ review)
 
 ## Implementation status
 
-Implemented on `feature/zodes`:
+Implemented:
 
 - **Node-side topology** drives Zode links
   ([#250](https://github.com/org-zpr/zl-zipline/issues/250), see
@@ -1082,7 +1082,7 @@ Implemented on `feature/zodes`:
   the relay refuses them.
 - **ZIPLINE generates the topology**
   ([org-zpr/zipline#253](https://github.com/org-zpr/zipline/issues/253)). The
-  orchestrator's policy render (`packages/orchestrator/src/policy.ts`
+  orchestrator's policy render (`src/web/packages/orchestrator/src/policy.ts`
   `renderNetworkPolicy`) declares:
   - every registered Zode as a node, with its CN as provider, its ZPR address
     as `zpr_address`, and no `substrate_addrs` (the relay observes it, #264);

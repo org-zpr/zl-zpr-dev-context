@@ -1040,7 +1040,8 @@ not read the RFCs as a description of current guarantees.
   deferred: availability only, not a check). The claim does not record its
   source, so a visa-service store kept across the upgrade may still hold a
   claim a pre-#264 Zode reported, until that Zode's next bootstrap request
-  replaces it. `feature/zodes` is a flag day: start it with an empty store. The address only goes
+  replaces it. Upgrading a visa service across #264 (on `zipline`, the
+  zl-zipline#237 base merge) is a flag day: start it with an empty store. The address only goes
   into peers' `Link.peer`, and the link still needs the node's CA-signed
   certificate with the CN policy gives it
   ([zipline#264](https://github.com/org-zpr/zl-zipline/issues/264); see
