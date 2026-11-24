@@ -663,9 +663,10 @@ PR moves it. The per-repository rules:
    were cut on the reviewed heads of the release PRs into `feature/zodes`,
    every consumer moved to them in the same merge set, and that set merged
    into `feature/zodes` with merge commits and then into `zipline` with merge
-   commits. The tagged commits are therefore in both branches' history, and a
-   single integration run (`build-sets/2026-11-24.yaml`) covers exactly what
-   lands in `zipline`. Consumers on the feature branch move their pin **together**, in
+   commits. The tagged commits are therefore in both branches' history. One
+   integration run on those PR heads (`build-sets/2026-11-24.yaml`) gated the
+   set; it covers those heads, not a later merge whose resolution changes
+   them. Consumers on the feature branch move their pin **together**, in
    one issue, never one by one inside unrelated feature issues: gate 1 of
    `zpr-dev build` rejects a set whose consumers pin two tags of one crate, so
    staggered pin moves break every cross-repository build of the branch in
@@ -783,7 +784,12 @@ as absent from the checkout; and `docker` (stage, deploy, test, teardown) on
 the ported `dns-demo`. Its notes record the revisions that are not manifest
 entries: zl-zpr-common, zl-zpr-vsapi, zl-zpr-policy, and the zipline commit
 that pins the same set. It is the newest file in `build-sets/`, so a bare
-`zpr-dev build` builds it. The run before it, `build-sets/2026-11-19T2133.yaml`
+`zpr-dev build` builds it when the context checkout
+(`<workspace>/zl-zpr-dev-context` unless `--context` says otherwise; not the
+current directory) contains it; otherwise pass `--context <worktree>` or
+`--manifest <worktree>/build-sets/2026-11-24.yaml`. Either way, run a
+`zpr-dev` built from a revision that has this file: an older one's netns
+drift guard rejects the Zode scripts it does not list. The run before it, `build-sets/2026-11-19T2133.yaml`
 (zl-zipline#264's merge set), was green the same way.
 
 `--test` selects: `none`, `default` (the flag absent means the same), `all`,
