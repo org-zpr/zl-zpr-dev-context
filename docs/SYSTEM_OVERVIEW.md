@@ -421,12 +421,14 @@ it was about the adapter or node role, the entry says what replaced it.
   `auth_renewal_lead_seconds` had configured both the node-side renewal of
   docked actors and this; no knob replaced it.
 - **The Windows visa-service /128 route is gone** (gate g165 q4 left the
-  decision to #234). Since zl-zipline#272 every Windows TUN address carries
-  its /32, which puts `vs.zpr` on-link as on Linux and macOS, so the extra
+  decision to #234). Since zl-zipline#272 every Windows TUN address carried
+  its /32, which put `vs.zpr` on-link as on Linux and macOS, so the extra
   route only covered a hand-configured address with a longer prefix. It went
-  with the route-owner check that guarded it. `ph` leaves an address already
-  on the TUN as it is, so before upgrading, give such a hand-configured
-  address a prefix that covers `vs.zpr` (or add an on-link route to it).
+  with the route-owner check that guarded it. Since zl-zipline#297 the
+  address is a /128 and `ph` routes `fd5a:5052::/32` through `fe80::1` at
+  adapter creation, so `vs.zpr` is reachable whatever prefix an address has
+  (see *Design decisions*, "Windows turns off DAD and router discovery, and
+  routes the ZPR prefix through a link-local next hop").
   On real machines, a Windows Zode on ZIPLINE package 2.0.6
   ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256))
   reached `vs.zpr` and resolved names with no /128 route: its address had
@@ -671,13 +673,16 @@ every platform unless `--control-path` is given — is deferred as
 **The node applies its own ZPR address through `TunCtl`, on every platform.**
 Before the `local_zpr_addrs_missing_from_tun` check, the node adds each
 missing local ZPR address, whose /32 makes the visa-service address
-reachable through the TUN. (Windows also installed an explicit /128 route
+reachable through the TUN; on Windows the address is a /128 and a route
+does it (zl-zipline#297, see below). (Windows also installed an explicit /128 route
 until zl-zipline#234, see the next entry.) Idempotent, so hand-configured setups and the
 integration scripts' out-of-band `ip addr add` are untouched; a Windows-only
 arm was rejected to keep macOS from redoing it.
 ([zipline#159](https://github.com/org-zpr/zl-zipline/issues/159))
 
-**Windows applies the prefix length of a TUN address.** Until
+**Windows applies the prefix length of a TUN address** (superseded for the
+prefix by zl-zipline#297, next entry: the address is now a /128 and the /32
+is a route; the one argv builder stays). Until
 [zl-zipline#272](https://github.com/org-zpr/zl-zipline/issues/272) the
 Windows `add_address` dropped `prefix_len` and ran `netsh interface ipv6 add
 address <if> <addr>`, and netsh applied its default /64. The /128
@@ -702,6 +707,56 @@ machines this meant a Windows Zode could not reach the DNS Zode
   wrong.
 - **The /128 visa-service route** was kept by #272 (gate g165 q4) and
   deleted by zl-zipline#234 (see "One mode: `ph zode`").
+
+**Windows turns off DAD and router discovery, and routes the ZPR prefix
+through a link-local next hop.** With `fd5a:5052::/32` on-link (#272),
+Windows ran neighbor unreachability detection (NUD) on every ZPR peer it
+talked to, and the first one is the visa service: `ph`'s own VS-API
+connection to `[fd5a:5052::1]:5002` starts right after self-addressing.
+Nothing on a layer-3 Wintun interface answers a neighbor solicitation, so
+the neighbor sat in Probe and Windows kept sending unicast NS to `vs.zpr`.
+`ph` turned each one into a visa request, and the visa service denied each
+with NoMatch (15 per 20 s on the VM; 86 in a 5-minute run).
+- **The fix, at adapter creation, through IP Helper** (`sys/windows/zprtun.rs`):
+  - the IPv6 interface gets the settings wireguard-windows uses on its
+    Wintun adapters (`tunnel/addressconfig.go`): router discovery off,
+    `DadTransmits` 0, the DHCPv6 M and O flags off, and `SitePrefixLength`
+    clamped to 128 (`GetIpInterfaceEntry`, `SetIpInterfaceEntry`);
+  - every address goes on as a /128 (`netsh_add_address_args`, so the
+    manual-fix hint matches);
+  - one route, `fd5a:5052::/32` via the next hop `fe80::1`
+    (`CreateIpForwardEntry2`, protocol NetMgmt). Windows sends routed packets
+    into the ring without resolving a link-layer address. The only neighbor
+    it probes is `fe80::1`, which stays in Probe or Unreachable. Those NS are
+    link-local, and `ph` already discards link-local traffic before it asks
+    for a visa (`do_request_tether_id` in `adapter_manager_worker.rs`).
+
+  A failure of any of the three calls fails adapter start, like the MTU
+  (zl-zipline#214): an adapter without them sends ND to the visa service.
+  `vs.zpr`, the DNS Zode and every other ZPR address stay reachable through
+  the route.
+- **NUD cannot be turned off on Wintun.** `SetIpInterfaceEntry` with
+  `UseNeighborUnreachabilityDetection = FALSE` returns 87
+  (ERROR_INVALID_PARAMETER), and so do `Set-NetIPInterface` and netsh. The
+  settings alone removed the DAD NS, the unsolicited NA and the DAD delay at
+  start-up, but the unicast NS to `vs.zpr` went on at the same rate.
+- **`ph` neither filters nor answers ND.** Dropping some ICMPv6 types in `ph`,
+  or synthesizing neighbor advertisements, was rejected by the operator: it
+  is not intuitive for `ph` to drop some packets but not others. Also
+  rejected: a permanent neighbor entry for the next hop (Windows rejects a
+  link-layer address on Wintun, error 87), and any next hop other than
+  `fe80::1`.
+- **The DAD wait stays** (gate g267 q3) as a bounded guard: with
+  `DadTransmits` 0 the address is `Preferred` on the first read, so it costs
+  one IP Helper call.
+- **Verified on the VM** (2026-11-25, Windows 11 build 26200, a real relay,
+  valkey and visa service; `integration-test/windows-zode-test.md`,
+  "Findings"). Before, 87 visa requests for ICMPv6 types 133-137 in 316 s
+  and 96 NoMatch denies at the visa service; after, none in 748 s. Over the
+  whole run the Zode stayed registered, and its VS-API and VSS TCP
+  connections stayed up, while `fe80::1` sat in Probe or Unreachable.
+
+(pd plan p72, [zl-zipline#297](https://github.com/org-zpr/zl-zipline/issues/297))
 
 **The Windows substrate socket tolerates connection reset.** At bind,
 `SIO_UDP_CONNRESET` is disabled via `WSAIoctl`; belt and braces,
@@ -729,7 +784,11 @@ Duplicate-address detection made the VSS listener bind fail with 10049
 bounded at 5 s, for the address to leave the tentative state, reading DAD
 state via IP Helper `GetUnicastIpAddressEntry` — not `netsh`, whose text
 output is localized; the wait loop is `sys/dad.rs`, unit-tested on Linux.
-([zipline#162](https://github.com/org-zpr/zl-zipline/issues/162))
+([zipline#162](https://github.com/org-zpr/zl-zipline/issues/162)) Since
+zl-zipline#297 `ph` turns DAD off on the adapter (`DadTransmits` 0), so the
+address is usable on the first read; the wait stays as a bounded guard
+against an address Windows has not shown yet, or a host policy that turns
+DAD back on (gate g267 q3).
 
 **Two inbound firewall rules.** UDP 5000 (link listener, LAN interface) is
 required on a Zode that accepts inbound links (a relay, or a Zode a direct
