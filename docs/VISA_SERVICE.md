@@ -770,17 +770,18 @@ when implemented, kicks the actor's live session; credential revocation is
 `/admin/authrevoke`.
 
 `GET /admin/visas/denies` lists recent visa denials from an in-memory window
-of 500 entries. Denies are collapsed on
-`(source_addr, dest_addr, protocol, dest_port, icmp_type, deny_code)`, and a
-repeat bumps `count`. The port fields mean different things per protocol. For
-TCP/UDP, `dest_port` is the destination port and `icmp_type` is `null`. For
-ICMP and ICMPv6, `dest_port` is the ICMP **code** and `icmp_type` the ICMP
-**type** (the request's five-tuple carries them in the port fields). The
-TCP/UDP source port is not kept: it is usually ephemeral, and keying on it
-would give each connection attempt its own entry and flood the window
-([#296](https://github.com/org-zpr/zl-zipline/issues/296)). Every deny the
-window counts is also logged at DEBUG on target `vreq`, with the requesting
-node, the deny code and the flow.
+of 500 entries. In visa service builds that include
+[#296](https://github.com/org-zpr/zl-zipline/issues/296) (older builds have no
+`icmp_type` and no DEBUG line), denies are collapsed on `(source_addr,
+dest_addr, protocol, dest_port, icmp_type, deny_code)`, and a repeat bumps
+`count`. The port fields mean different things per protocol. For TCP/UDP,
+`dest_port` is the destination port and `icmp_type` is `null`. For ICMP and
+ICMPv6, `dest_port` is the ICMP **code** and `icmp_type` the ICMP **type**
+(the request's five-tuple carries them in the port fields), or `null` for a
+malformed ICMP type above 255. The TCP/UDP source port is not kept: it is
+usually ephemeral, and keying on it would give each connection attempt its own
+entry and flood the window. Every deny the window counts is also logged at
+DEBUG on target `vreq`, with the requesting node, the deny code and the flow.
 
 Note that unless you are on the same host, reaching the admin API requires
 **policy permission** like any other service on the ZPRnet.
