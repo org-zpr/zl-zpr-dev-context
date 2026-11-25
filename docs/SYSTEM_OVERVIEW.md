@@ -424,7 +424,10 @@ it was about the adapter or node role, the entry says what replaced it.
   decision to #234). Since zl-zipline#272 every Windows TUN address carried
   its /32, which put `vs.zpr` on-link as on Linux and macOS, so the extra
   route only covered a hand-configured address with a longer prefix. It went
-  with the route-owner check that guarded it. Since zl-zipline#297 the
+  with the route-owner check that guarded it. On builds without
+  zl-zipline#297, `ph` leaves an address already on the TUN as it is, so
+  before upgrading, give such a hand-configured address a prefix that covers
+  `vs.zpr` (or add an on-link route to it). Since zl-zipline#297 the
   address is a /128 and `ph` routes `fd5a:5052::/32` through `fe80::1` at
   adapter creation, so `vs.zpr` is reachable whatever prefix an address has
   (see *Design decisions*, "Windows turns off DAD and router discovery, and
@@ -715,8 +718,9 @@ talked to, and the first one is the visa service: `ph`'s own VS-API
 connection to `[fd5a:5052::1]:5002` starts right after self-addressing.
 Nothing on a layer-3 Wintun interface answers a neighbor solicitation, so
 the neighbor sat in Probe and Windows kept sending unicast NS to `vs.zpr`.
-`ph` turned each one into a visa request, and the visa service denied each
-with NoMatch (15 per 20 s on the VM; 86 in a 5-minute run).
+`ph` turned each one into a visa request, which the visa service denied
+with NoMatch (on the VM, 15 such requests per 20 s; 86 neighbor
+solicitations in a 5-minute run).
 - **The fix, at adapter creation, through IP Helper** (`sys/windows/zprtun.rs`):
   - the IPv6 interface gets the settings wireguard-windows uses on its
     Wintun adapters (`tunnel/addressconfig.go`): router discovery off,
@@ -751,8 +755,11 @@ with NoMatch (15 per 20 s on the VM; 86 in a 5-minute run).
   one IP Helper call.
 - **Verified on the VM** (2026-11-25, Windows 11 build 26200, a real relay,
   valkey and visa service; `integration-test/windows-zode-test.md`,
-  "Findings"). Before, 87 visa requests for ICMPv6 types 133-137 in 316 s
-  and 96 NoMatch denies at the visa service; after, none in 748 s. Over the
+  "Findings"). Two separate measurements. In `ph`'s log: 87 visa requests
+  for ICMPv6 types 133-137 in 316 s before (86 type 135, 1 type 136), and
+  none in 748 s after. At the visa service: 96 NoMatch denies for ICMPv6
+  between the Zode and `vs.zpr` before (the deny log of that build has no
+  per-type breakdown), and no new ones after. Over the
   whole run the Zode stayed registered, and its VS-API and VSS TCP
   connections stayed up, while `fe80::1` sat in Probe or Unreachable.
 
