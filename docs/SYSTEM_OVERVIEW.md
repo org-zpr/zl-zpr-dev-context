@@ -427,11 +427,14 @@ it was about the adapter or node role, the entry says what replaced it.
   with the route-owner check that guarded it. On builds without
   zl-zipline#297, `ph` leaves an address already on the TUN as it is, so
   before upgrading, give such a hand-configured address a prefix that covers
-  `vs.zpr` (or add an on-link route to it). Since zl-zipline#297 the
-  address is a /128 and `ph` routes `fd5a:5052::/32` through `fe80::1` at
-  adapter creation, so `vs.zpr` is reachable whatever prefix an address has
-  (see *Design decisions*, "Windows turns off DAD and router discovery, and
-  routes the ZPR prefix through a link-local next hop").
+  `vs.zpr` (or add an on-link route to it). Since zl-zipline#297 every
+  address `ph` adds is a /128 (an address already on the TUN is still left
+  as it is) and `ph` routes `fd5a:5052::/32` through `fe80::1` at adapter
+  creation, so `vs.zpr` is reachable whatever prefix an address has. Stop
+  re-applying the on-link workaround on such builds: a more specific on-link
+  route to `vs.zpr` wins over the `fe80::1` route and brings the neighbor
+  probes back (see *Design decisions*, "Windows turns off DAD and router
+  discovery, and routes the ZPR prefix through a link-local next hop").
   On real machines, a Windows Zode on ZIPLINE package 2.0.6
   ([org-zpr/zipline#256](https://github.com/org-zpr/zipline/issues/256))
   reached `vs.zpr` and resolved names with no /128 route: its address had
