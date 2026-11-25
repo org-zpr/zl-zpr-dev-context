@@ -86,7 +86,7 @@ background work.
 | `vsapi_worker` / `vss_worker` | The node-facing APIs; one VSS worker per node. |
 | `db_worker` | Renews the shared database lock that keeps exactly one visa service instance active, and terminates the process if it is lost. |
 | `signal_worker` | Emits policy-triggered signals. |
-| `deny_log` | A bounded in-memory window of recent denials (500 entries), collapsed on the 5-tuple so a chatty source cannot flush it. Not persisted. |
+| `deny_log` | A bounded in-memory window of recent denials (500 entries), collapsed per flow and deny code (the exact key is under `GET /admin/visas/denies` below; it leaves out the TCP/UDP source port) so a chatty source cannot flush it. Not persisted. |
 | `trusted_services/` | Attribute sources and the mapping from their names onto ZPL attribute names. File-backed (`api = "file"`), OIDC (`api = "oidc"`), and networked `api = "zpr-attr/1"` stores — the latter query an external attribute service over HTTPS (see ATTRIBUTE_SERVICE.md). |
 | `db/` | State: actors, visas, nodes, links, policy. Valkey/Redis backed, with a fake for tests. |
 
@@ -768,6 +768,20 @@ placeholder data; `admin-http-api.txt` marks
 each one and is the endpoint reference. `DELETE /admin/actors/{zpr_addr}`,
 when implemented, kicks the actor's live session; credential revocation is
 `/admin/authrevoke`.
+
+`GET /admin/visas/denies` lists recent visa denials from an in-memory window
+of 500 entries. In visa service builds that include
+[#296](https://github.com/org-zpr/zl-zipline/issues/296) (older builds have no
+`icmp_type` and no DEBUG line), denies are collapsed on `(source_addr,
+dest_addr, protocol, dest_port, icmp_type, deny_code)`, and a repeat bumps
+`count`. The port fields mean different things per protocol. For TCP/UDP,
+`dest_port` is the destination port and `icmp_type` is `null`. For ICMP and
+ICMPv6, `dest_port` is the ICMP **code** and `icmp_type` the ICMP **type**
+(the request's five-tuple carries them in the port fields), or `null` for a
+malformed ICMP type above 255. The TCP/UDP source port is not kept: it is
+usually ephemeral, and keying on it would give each connection attempt its own
+entry and flood the window. Every deny the window counts is also logged at
+DEBUG on target `vreq`, with the requesting node, the deny code and the flow.
 
 Note that unless you are on the same host, reaching the admin API requires
 **policy permission** like any other service on the ZPRnet.
