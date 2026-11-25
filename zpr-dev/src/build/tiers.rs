@@ -752,19 +752,13 @@ pub fn run_unit(plans: &[RepoPlan], logs: &Path, quiet: bool) -> TierOutcome {
 /// The list is guarded against drift by [`netns_script_drift`] (zipline#103):
 /// a top-level `*-test.sh` in the worktree that is neither here nor in
 /// [`NETNS_EXCLUDED`] fails planning, so a new script can never be silently
-/// not-run.
+/// not-run. Every listed script is required: one the worktree lacks is
+/// still planned, so its run fails the tier rather than shrinking it.
 const NETNS_SCRIPTS: &[&str] = &[
-    "one-node-test.sh",
-    "one-node-v6-test.sh",
-    "one-node-oidc-test.sh",
-    "capture-test.sh",
     "oidc-file-interplay-test.sh",
     "fake-idp-smoke-test.sh",
     "a2a-pubkey-test.sh",
     "attr-query-test.sh",
-    "one-node-oidc-renewal-test.sh",
-    "one-node-policy-reauth-test.sh",
-    "node-restart-test.sh",
     // The Zode link lifecycle: a relay, a Zode with an initial link to it,
     // and a Zode outside the relay's topology (zl-zipline#250).
     "zode-link-test.sh",
@@ -791,43 +785,6 @@ const NETNS_SCRIPTS: &[&str] = &[
     // refresh revocation on a logged-in Zode (one-node-oidc-test.sh and
     // one-node-oidc-renewal-test.sh), and policy re-authentication
     // (one-node-policy-reauth-test.sh).
-    "zode-ping-test.sh",
-    "zode-oidc-test.sh",
-    "zode-policy-reauth-test.sh",
-];
-
-/// Scripts in [`NETNS_SCRIPTS`] that only some `zl-zpr-core` revisions carry:
-/// a feature branch added or deleted them, and a build set may pin a core
-/// on either side of that (the default build set pins `zipline`). Planned
-/// only when the worktree has them; otherwise recorded as skipped with a
-/// reason, never silently dropped. Every other listed script must exist.
-///
-/// The split between the two core branches goes when zl-zipline#237 merges
-/// `feature/zodes` into `zipline`: the adapter-docked scripts then leave
-/// [`NETNS_SCRIPTS`], and the Zode scripts stop being optional.
-const NETNS_SCRIPTS_IF_PRESENT: &[&str] = &[
-    // zipline only: the adapter-docked scripts, deleted on feature/zodes
-    // when `ph node` and `ph adapter` go (zl-zipline#234). Their Zode
-    // ports are listed below.
-    "one-node-test.sh",
-    "one-node-v6-test.sh",
-    "one-node-oidc-test.sh",
-    "capture-test.sh",
-    "one-node-oidc-renewal-test.sh",
-    "one-node-policy-reauth-test.sh",
-    "node-restart-test.sh",
-    // feature/zodes only, until it merges into zipline (zl-zipline#250).
-    "zode-link-test.sh",
-    // feature/zodes only, likewise (zl-zipline#254).
-    "zode-join-test.sh",
-    "zode-line-test.sh",
-    "zode-reroute-test.sh",
-    "zode-wrong-ca-test.sh",
-    // feature/zodes only, likewise (zl-zipline#233).
-    "zode-login-test.sh",
-    // feature/zodes only, likewise (zl-zipline#271).
-    "zode-rejoin-test.sh",
-    // feature/zodes only, likewise (zl-zipline#234).
     "zode-ping-test.sh",
     "zode-oidc-test.sh",
     "zode-policy-reauth-test.sh",
@@ -963,10 +920,6 @@ pub struct NetnsPlan {
     /// unless `--jobs` overrides it.
     pub jobs: usize,
     pub scripts: Vec<NetnsScript>,
-    /// Listed scripts this worktree does not carry
-    /// ([`NETNS_SCRIPTS_IF_PRESENT`]), with the reason; recorded in the
-    /// tier's outcome as skipped.
-    pub skipped: Vec<(&'static str, String)>,
 }
 
 /// Concurrent netns scripts, on either route. On the host route each script
@@ -1019,27 +972,8 @@ pub fn netns_plan(
     // planning anything — an unlisted top-level script is a plan error,
     // never a silently smaller tier.
     netns_script_drift(&integration, NETNS_SCRIPTS, NETNS_EXCLUDED)?;
-    // A feature-branch script the worktree lacks is skipped, not run. A
-    // missing integration-test/ judges nothing, as in the drift guard.
-    let lacks = |script: &str| {
-        NETNS_SCRIPTS_IF_PRESENT.contains(&script)
-            && integration.is_dir()
-            && !integration.join(script).exists()
-    };
-    let skipped: Vec<(&'static str, String)> = NETNS_SCRIPTS
-        .iter()
-        .copied()
-        .filter(|script| lacks(script))
-        .map(|script| {
-            (
-                script,
-                "not in this zl-zpr-core revision (a feature-branch script)".to_string(),
-            )
-        })
-        .collect();
     let scripts = NETNS_SCRIPTS
         .iter()
-        .filter(|script| !lacks(script))
         .map(|script| {
             let a2a = *script == "a2a-pubkey-test.sh";
             // The security-testing ph is a debug-profile build in the
@@ -1120,7 +1054,6 @@ pub fn netns_plan(
         },
         jobs: jobs.map(std::num::NonZeroUsize::get).unwrap_or(NETNS_JOBS),
         scripts,
-        skipped,
     })
 }
 
@@ -1139,15 +1072,6 @@ pub fn run_netns(plan: &NetnsPlan, logs: &Path, quiet: bool) -> TierOutcome {
         passed: true,
         repos: BTreeMap::new(),
     };
-    for (script, reason) in &plan.skipped {
-        if !quiet {
-            println!("{script}: skipped ({reason})");
-        }
-        outcome
-            .repos
-            .insert(script.to_string(), format!("skipped: {reason}"));
-    }
-
     // Phase 1, serial: the prep builds. Their failure fails that script
     // alone; the rest of the tier still runs. Running them before any
     // script keeps a cargo build from competing with timing-sensitive tests.
@@ -2442,17 +2366,14 @@ mod tests {
     /// The plan runs exactly the blessed scripts, in order — an
     /// explicit list, not a glob: `unused_or_outdated/` and any new script
     /// stay out until reviewed in (zipline#62, zipline#103). The order is
-    /// the documented one: `attr-query-test.sh` after `a2a-pubkey-test.sh`,
-    /// `one-node-oidc-renewal-test.sh` after that (approved Q1 on
-    /// zipline#103), `one-node-policy-reauth-test.sh` — the
-    /// policy-install re-authentication e2e (zipline#124) — after that
-    /// (zipline#125), and `node-restart-test.sh` — the node-restart
-    /// regression e2e (zipline#167/#170/#171) — after that (zipline#178),
-    /// then `zode-link-test.sh` — the Zode link lifecycle e2e
-    /// (zl-zipline#250) — the four Zode scripts of zl-zipline#254 (join,
-    /// line, reroute, wrong CA), `zode-login-test.sh` (zl-zipline#233),
-    /// `zode-rejoin-test.sh` (zl-zipline#271), and the three Zode ports of the adapter-docked scripts (zl-zipline#234:
-    /// ping, OIDC, policy re-auth) last, newest last.
+    /// the documented one: the four scripts every core has carried, with
+    /// `attr-query-test.sh` after `a2a-pubkey-test.sh` (approved Q1 on
+    /// zipline#103), then the Zode scripts newest last: `zode-link-test.sh`
+    /// (zl-zipline#250), the four of zl-zipline#254 (join, line, reroute,
+    /// wrong CA), `zode-login-test.sh` (zl-zipline#233),
+    /// `zode-rejoin-test.sh` (zl-zipline#271), and the three Zode ports of
+    /// the deleted adapter-docked scripts (zl-zipline#234: ping, OIDC,
+    /// policy re-auth).
     #[test]
     fn netns_plan_lists_the_scripts_in_order() {
         let plan = netns_plan(
@@ -2472,17 +2393,10 @@ mod tests {
         assert_eq!(
             names,
             [
-                "one-node-test.sh",
-                "one-node-v6-test.sh",
-                "one-node-oidc-test.sh",
-                "capture-test.sh",
                 "oidc-file-interplay-test.sh",
                 "fake-idp-smoke-test.sh",
                 "a2a-pubkey-test.sh",
                 "attr-query-test.sh",
-                "one-node-oidc-renewal-test.sh",
-                "one-node-policy-reauth-test.sh",
-                "node-restart-test.sh",
                 "zode-link-test.sh",
                 "zode-join-test.sh",
                 "zode-line-test.sh",
@@ -2519,104 +2433,21 @@ mod tests {
         tmp
     }
 
-    /// The scripts only a `zipline` core carries: the adapter-docked
-    /// scripts that zl-zipline#234 ports onto Zodes and deletes on
-    /// `feature/zodes`.
-    const ZIPLINE_CORE_ONLY: [&str; 7] = [
-        "one-node-test.sh",
-        "one-node-v6-test.sh",
-        "one-node-oidc-test.sh",
-        "capture-test.sh",
-        "one-node-oidc-renewal-test.sh",
-        "one-node-policy-reauth-test.sh",
-        "node-restart-test.sh",
-    ];
-
-    /// The scripts only a `feature/zodes` core carries (zl-zipline#250,
-    /// #254, #233, #271, and #234's ports), in list order.
-    const ZODES_CORE_ONLY: [&str; 10] = [
-        "zode-link-test.sh",
-        "zode-join-test.sh",
-        "zode-line-test.sh",
-        "zode-reroute-test.sh",
-        "zode-wrong-ca-test.sh",
-        "zode-login-test.sh",
-        "zode-rejoin-test.sh",
-        "zode-ping-test.sh",
-        "zode-oidc-test.sh",
-        "zode-policy-reauth-test.sh",
-    ];
-
-    /// The optional list is exactly the scripts one core branch carries
-    /// and the other lacks: every listed script is either on both branches
-    /// (and must exist) or in one of the two sets above. A script deleted
-    /// on one branch but left out of `NETNS_SCRIPTS_IF_PRESENT` would fail
-    /// that branch's tier as missing, rather than skip it.
+    /// Every listed script is required: a worktree that lacks one still has
+    /// it planned, so running it fails the tier instead of recording a
+    /// skip. A core that lost a Zode script must not pass with less
+    /// coverage than the list promises.
     #[test]
-    fn netns_optional_scripts_are_the_branch_specific_ones() {
-        let mut optional: Vec<&str> = NETNS_SCRIPTS_IF_PRESENT.to_vec();
-        optional.sort();
-        let mut branch_specific: Vec<&str> = ZIPLINE_CORE_ONLY
-            .iter()
-            .chain(ZODES_CORE_ONLY.iter())
-            .copied()
-            .collect();
-        branch_specific.sort();
-        assert_eq!(optional, branch_specific);
-        for script in NETNS_SCRIPTS_IF_PRESENT {
-            assert!(
-                NETNS_SCRIPTS.contains(script),
-                "{script} is optional but not in NETNS_SCRIPTS"
-            );
-        }
-    }
-
-    /// Each core branch plans cleanly and runs what it carries
-    /// (zl-zipline#234): a `zipline` core runs the adapter-docked scripts
-    /// and skips the Zode ones; a `feature/zodes` core runs the Zode
-    /// scripts and skips the deleted adapter-docked ones. Each skip is
-    /// recorded with a reason, so the tier neither fails on a missing file
-    /// nor overstates what ran. A worktree carrying every script runs all
-    /// of them.
-    #[test]
-    fn netns_plan_skips_the_feature_scripts_the_worktree_lacks() {
-        let both: Vec<&str> = NETNS_SCRIPTS
+    fn netns_plan_keeps_a_listed_script_the_worktree_lacks() {
+        let present: Vec<&str> = NETNS_SCRIPTS
             .iter()
             .copied()
-            .filter(|script| !NETNS_SCRIPTS_IF_PRESENT.contains(script))
+            .filter(|script| *script != "zode-ping-test.sh")
             .collect();
-        for (only, lacked) in [
-            (&ZIPLINE_CORE_ONLY[..], &ZODES_CORE_ONLY[..]),
-            (&ZODES_CORE_ONLY[..], &ZIPLINE_CORE_ONLY[..]),
-        ] {
-            let present: Vec<&str> = NETNS_SCRIPTS
-                .iter()
-                .copied()
-                .filter(|script| both.contains(script) || only.contains(script))
-                .collect();
-            let tmp = drift_fixture(&present);
-            let plan = plan_for(tmp.path());
-            let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
-            assert_eq!(names, present);
-            let skipped: Vec<&str> = plan.skipped.iter().map(|(script, _)| *script).collect();
-            let expected_skips: Vec<&str> = NETNS_SCRIPTS
-                .iter()
-                .copied()
-                .filter(|script| lacked.contains(script))
-                .collect();
-            assert_eq!(skipped, expected_skips);
-            for (script, reason) in &plan.skipped {
-                assert!(
-                    reason.contains("not in this zl-zpr-core revision"),
-                    "{script}: {reason}"
-                );
-            }
-        }
-        let tmp = drift_fixture(NETNS_SCRIPTS);
+        let tmp = drift_fixture(&present);
         let plan = plan_for(tmp.path());
         let names: Vec<&str> = plan.scripts.iter().map(|script| script.script).collect();
         assert_eq!(names, NETNS_SCRIPTS);
-        assert!(plan.skipped.is_empty());
     }
 
     /// The host-route netns plan for a fixture worktree, with the fixed
@@ -2742,20 +2573,6 @@ mod tests {
         assert!(
             error.contains("new-test.sh"),
             "must name the offending entry: {error}"
-        );
-    }
-
-    /// zipline#178: `node-restart-test.sh` (added to `zl-zpr-core` by
-    /// zl-zpr-core#65, reworked by zl-zpr-core#69) is the regression test
-    /// for zipline#167/#170/#171, so it must be gated, not excluded. The
-    /// drift guard locks the worktree side — any ungated script fails
-    /// planning — and this locks the list side: the gate cannot regress
-    /// without this test naming it.
-    #[test]
-    fn netns_scripts_gate_node_restart_test() {
-        assert!(
-            NETNS_SCRIPTS.contains(&"node-restart-test.sh"),
-            "node-restart-test.sh must be in NETNS_SCRIPTS (zipline#178)"
         );
     }
 
@@ -3188,47 +3005,6 @@ mod tests {
     /// The netns runner: continues after a failing script, records each
     /// script by name, and a prep-build failure fails that one script while
     /// the rest of the tier still runs.
-    /// A planned skip (a feature-branch script the worktree lacks) lands
-    /// in the outcome as `skipped: <reason>` and does not fail a tier whose
-    /// scripts passed (dev-context#99 review).
-    #[test]
-    fn run_netns_records_planned_skips_without_failing() {
-        let tmp = tempfile::tempdir().unwrap();
-        let dir = tmp.path().join("integration-test");
-        std::fs::create_dir_all(&dir).unwrap();
-        let logs = tmp.path().join("logs");
-        std::fs::create_dir_all(&logs).unwrap();
-        let (program, args) = sh_script(&dir.join("ok.sh"), "echo fine\n");
-
-        let plan = NetnsPlan {
-            skipped: vec![(
-                "feature-test.sh",
-                "not in this zl-zpr-core revision".to_string(),
-            )],
-            dir: dir.clone(),
-            jobs: 1,
-            scripts: vec![NetnsScript {
-                script: "ok.sh",
-                program,
-                args,
-                env: vec![],
-                env_remove: vec![],
-                prep: None,
-            }],
-        };
-        let outcome = run_netns(&plan, &logs, true);
-        assert!(
-            outcome.passed,
-            "a skip must not fail the tier: {:?}",
-            outcome.repos
-        );
-        assert_eq!(outcome.repos["ok.sh"], "passed");
-        assert_eq!(
-            outcome.repos["feature-test.sh"],
-            "skipped: not in this zl-zpr-core revision"
-        );
-    }
-
     #[test]
     fn run_netns_continues_after_failure_and_prep_failure_hits_one_script() {
         let tmp = tempfile::tempdir().unwrap();
@@ -3244,7 +3020,6 @@ mod tests {
             sh_script(&dir.join("prepped.sh"), "echo never runs\n");
 
         let plan = NetnsPlan {
-            skipped: Vec::new(),
             dir: dir.clone(),
             jobs: 1,
             scripts: vec![
@@ -3334,7 +3109,6 @@ mod tests {
             dir: tmp.path().to_path_buf(),
         });
         let plan = NetnsPlan {
-            skipped: Vec::new(),
             dir: dir.clone(),
             jobs: 3,
             scripts: vec![script("a.sh"), never_runs, script("b.sh"), script("c.sh")],

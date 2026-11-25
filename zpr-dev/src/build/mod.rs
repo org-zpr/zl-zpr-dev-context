@@ -4124,13 +4124,12 @@ allow_pin_drift:
         // The prep-less scripts every core carries went through make and
         // passed; a2a failed at its host-side prep build (no cargo project
         // in the fixture) — recorded per script, exactly as on the host
-        // route. The fixture carries no script file, so the optional,
-        // branch-specific ones are recorded as skipped (zl-zipline#234).
+        // route.
         assert!(
             text.contains("oidc-file-interplay-test.sh: passed"),
             "{text}"
         );
-        assert!(text.contains("one-node-test.sh: 'skipped: "), "{text}");
+        assert!(text.contains("zode-ping-test.sh: passed"), "{text}");
         assert!(text.contains("fake-idp-smoke-test.sh: passed"), "{text}");
         assert!(text.contains("a2a-pubkey-test.sh"), "{text}");
         assert!(text.contains("security-ph"), "{text}");
