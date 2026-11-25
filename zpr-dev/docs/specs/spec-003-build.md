@@ -388,30 +388,20 @@ risk. Everything is a release build. The table is in claim order:
   in the run list (`NETNS_SCRIPTS`) nor deliberately excluded with a reason
   (`NETNS_EXCLUDED`). Only the top level is judged — `lib/` and
   `unused_or_outdated/` are invisible, matching the Makefile's own
-  `$(wildcard *-test.sh)`. A listed script that only one core branch
-  carries (`NETNS_SCRIPTS_IF_PRESENT`) runs only when the worktree has it;
-  otherwise the tier records it as `skipped: not in this zl-zpr-core
-  revision`. Every other listed script must exist. The optional scripts
-  are the two sides of the Zodes epic (zl-zipline#216); since zl-zipline#237
-  merged `feature/zodes` into `zipline`, the fork's `zipline` and
-  `feature/zodes` tips carry only the second (the upstream mirror `main`
-  still has the first), and removing the first is a follow-up (gate g223 q12):
-  - only in a core from before zl-zipline#234, the adapter-docked scripts
-    that #234 deleted: `one-node-test.sh`, `one-node-v6-test.sh`,
-    `one-node-oidc-test.sh`, `one-node-oidc-renewal-test.sh`,
-    `one-node-policy-reauth-test.sh`, `node-restart-test.sh` and
-    `capture-test.sh`;
-  - only in a core from the Zodes epic on, the Zode scripts: `zode-link-test.sh`
-    (zl-zipline#250); `zode-join-test.sh`, `zode-line-test.sh`,
-    `zode-reroute-test.sh` and `zode-wrong-ca-test.sh` (zl-zipline#254);
-    `zode-login-test.sh` (zl-zipline#233); `zode-rejoin-test.sh`
-    (zl-zipline#271); and #234's ports of the adapter-docked scripts,
-    `zode-ping-test.sh`, `zode-oidc-test.sh` and
-    `zode-policy-reauth-test.sh`.
-
-  `a2a-pubkey-test.sh`, `attr-query-test.sh`, `oidc-file-interplay-test.sh`
-  and `fake-idp-smoke-test.sh` are in every core (#234 rewrites the first
-  three onto Zodes under the same names).
+  `$(wildcard *-test.sh)`. Every listed script is required: one the
+  worktree lacks is still planned, so its run fails the tier rather than
+  the tier quietly shrinking. The list is the four scripts every core has
+  carried — `oidc-file-interplay-test.sh`, `fake-idp-smoke-test.sh`,
+  `a2a-pubkey-test.sh` and `attr-query-test.sh` (#234 rewrote the first
+  three onto Zodes under the same names) — and the Zode scripts:
+  `zode-link-test.sh` (zl-zipline#250); `zode-join-test.sh`,
+  `zode-line-test.sh`, `zode-reroute-test.sh` and `zode-wrong-ca-test.sh`
+  (zl-zipline#254); `zode-login-test.sh` (zl-zipline#233);
+  `zode-rejoin-test.sh` (zl-zipline#271); and #234's ports of the deleted
+  adapter-docked scripts, `zode-ping-test.sh`, `zode-oidc-test.sh` and
+  `zode-policy-reauth-test.sh`. A core from before the Zodes epic (such as
+  the upstream mirror `main`) lacks the Zode scripts and fails the tier: a
+  build set pins a Zodes core.
 - The netns tier selects its route **host → container → skip**
   (zipline#92/#93/#192). The host route wins whenever its own prerequisites
   — unprivileged user namespaces (the probe is `unshare -nr true`; on Ubuntu
@@ -752,9 +742,11 @@ their Zode ports. So both sets sit in `NETNS_SCRIPTS_IF_PRESENT` and each
 core runs what it carries; a unit test pins the optional list to exactly
 the scripts one branch has and the other lacks, so a script deleted on one
 branch cannot fail that branch's tier as missing. Since #237 merged
-`feature/zodes` into `zipline`, neither the `zipline` nor the
-`feature/zodes` tip has the adapter-docked scripts; removing them and the split is a follow-up (gate g223 q12), kept
-out of #237 because #237 changes no code.
+`feature/zodes` into `zipline`, neither tip has the adapter-docked
+scripts, so every build recorded seven permanent skips. Gate g223 q12's
+follow-up removed them and the optional list: every listed script is now
+required, and a core missing one fails the tier instead of recording a skip
+that hides lost coverage.
 ([zl-zipline#234](https://github.com/org-zpr/zl-zipline/issues/234))
 
 **The dist/ `ph` check fails closed.** It ran `ph node --help`, ignored the
