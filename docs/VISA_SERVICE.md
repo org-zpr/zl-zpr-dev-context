@@ -86,7 +86,7 @@ background work.
 | `vsapi_worker` / `vss_worker` | The node-facing APIs; one VSS worker per node. |
 | `db_worker` | Renews the shared database lock that keeps exactly one visa service instance active, and terminates the process if it is lost. |
 | `signal_worker` | Emits policy-triggered signals. |
-| `deny_log` | A bounded in-memory window of recent denials (500 entries), collapsed on the 5-tuple so a chatty source cannot flush it. Not persisted. |
+| `deny_log` | A bounded in-memory window of recent denials (500 entries), collapsed per flow and deny code (the exact key is under `GET /admin/visas/denies` below; it leaves out the TCP/UDP source port) so a chatty source cannot flush it. Not persisted. |
 | `trusted_services/` | Attribute sources and the mapping from their names onto ZPL attribute names. File-backed (`api = "file"`), OIDC (`api = "oidc"`), and networked `api = "zpr-attr/1"` stores — the latter query an external attribute service over HTTPS (see ATTRIBUTE_SERVICE.md). |
 | `db/` | State: actors, visas, nodes, links, policy. Valkey/Redis backed, with a fake for tests. |
 
